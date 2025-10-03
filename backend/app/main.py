@@ -1,0 +1,97 @@
+"""
+FastAPI main application.
+
+Portfolio Tracker backend API.
+"""
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import logging
+
+from app.config import settings
+from app.api import (
+    transactions_router,
+    portfolio_router,
+    assets_router,
+    prices_router,
+    benchmark_router
+)
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.log_level),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+# Create FastAPI app
+app = FastAPI(
+    title=settings.app_name,
+    description="Self-hosted portfolio tracking with performance analytics",
+    version="1.0.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(transactions_router)
+app.include_router(portfolio_router)
+app.include_router(assets_router)
+app.include_router(prices_router)
+app.include_router(benchmark_router)
+
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "app": settings.app_name,
+        "environment": settings.environment
+    }
+
+
+@app.get("/")
+async def root():
+    """Root endpoint with API information."""
+    return {
+        "message": "Portfolio Tracker API",
+        "docs": "/api/docs",
+        "health": "/api/health"
+    }
+
+
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    """Run on application startup."""
+    logger.info(f"Starting {settings.app_name} in {settings.environment} mode")
+    logger.info(f"Allowed origins: {settings.allowed_origins}")
+
+
+# Shutdown event
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Run on application shutdown."""
+    logger.info("Shutting down Portfolio Tracker API")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level=settings.log_level.lower()
+    )
