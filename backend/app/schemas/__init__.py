@@ -9,7 +9,7 @@ from app.schemas.transaction import (
 )
 from app.schemas.position import PositionResponse
 from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance
-from app.schemas.price import PriceResponse
+from app.schemas.price import PriceResponse, RealtimePriceResponse, RealtimePricesResponse
 from app.schemas.benchmark import BenchmarkCreate, BenchmarkResponse
 
 __all__ = [
@@ -21,6 +21,8 @@ __all__ = [
     "PortfolioOverview",
     "PortfolioPerformance",
     "PriceResponse",
+    "RealtimePriceResponse",
+    "RealtimePricesResponse",
     "BenchmarkCreate",
     "BenchmarkResponse",
 ]
