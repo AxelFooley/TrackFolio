@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -12,8 +13,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useHoldings } from '@/hooks/usePortfolio';
+import { useRealtimePrices } from '@/hooks/useRealtimePrices';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
-import { ArrowUpDown } from 'lucide-react';
+import { ArrowUpDown, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import type { Position } from '@/lib/types';
 
 type SortField = keyof Position;
@@ -22,8 +24,40 @@ type SortDirection = 'asc' | 'desc';
 export function HoldingsTable() {
   const router = useRouter();
   const { data: holdings, isLoading } = useHoldings();
+  const { realtimePrices, isLoading: pricesLoading, lastUpdate } = useRealtimePrices();
   const [sortField, setSortField] = useState<SortField>('current_value');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Merge holdings with real-time prices
+  const holdingsWithRealtimePrices = useMemo(() => {
+    if (!holdings) return [];
+
+    return holdings.map((holding) => {
+      const realtimePrice = realtimePrices.get(holding.ticker);
+
+      if (realtimePrice) {
+        // Calculate updated values with real-time price
+        const currentValue = holding.quantity * realtimePrice.current_price;
+        const unrealizedGain = currentValue - holding.cost_basis;
+        const returnPercentage = holding.cost_basis > 0
+          ? unrealizedGain / holding.cost_basis
+          : 0;
+
+        return {
+          ...holding,
+          current_price: realtimePrice.current_price,
+          current_value: currentValue,
+          unrealized_gain: unrealizedGain,
+          return_percentage: returnPercentage,
+          // Total position change (not per-share)
+          today_change: realtimePrice.change_amount * holding.quantity,
+          today_change_percent: realtimePrice.change_percent,
+        };
+      }
+
+      return holding;
+    });
+  }, [holdings, realtimePrices]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -64,7 +98,7 @@ export function HoldingsTable() {
     );
   }
 
-  const sortedHoldings = [...holdings].sort((a, b) => {
+  const sortedHoldings = [...holdingsWithRealtimePrices].sort((a, b) => {
     const aValue = a[sortField];
     const bValue = b[sortField];
 
@@ -83,8 +117,16 @@ export function HoldingsTable() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Holdings</CardTitle>
+        {!pricesLoading && lastUpdate && (
+          <Badge variant="outline" className="gap-1.5">
+            <Activity className="h-3 w-3 animate-pulse text-green-500" />
+            <span className="text-xs text-gray-500">
+              Live - Updated {lastUpdate.toLocaleTimeString()}
+            </span>
+          </Badge>
+        )}
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
@@ -138,6 +180,15 @@ export function HoldingsTable() {
                 </TableHead>
                 <TableHead
                   className="cursor-pointer text-right"
+                  onClick={() => handleSort('today_change')}
+                >
+                  <div className="flex items-center justify-end gap-2">
+                    Today&apos;s Change
+                    <ArrowUpDown className="h-4 w-4" />
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="cursor-pointer text-right"
                   onClick={() => handleSort('current_value')}
                 >
                   <div className="flex items-center justify-end gap-2">
@@ -175,55 +226,87 @@ export function HoldingsTable() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedHoldings.map((holding) => (
-                <TableRow
-                  key={holding.ticker}
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => router.push(`/asset/${holding.ticker}`)}
-                >
-                  <TableCell className="font-medium">{holding.ticker}</TableCell>
-                  <TableCell className="max-w-xs truncate" title={holding.description}>
-                    {holding.description || '—'}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {formatNumber(holding.quantity, 4)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.average_cost, holding.currency)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.current_price, holding.currency)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.current_value, holding.currency)}
-                  </TableCell>
-                  <TableCell
-                    className={`text-right font-mono ${
-                      (holding.unrealized_gain ?? 0) >= 0 ? 'text-success' : 'text-danger'
-                    }`}
+              {sortedHoldings.map((holding) => {
+                const hasRealtimeData = realtimePrices.has(holding.ticker);
+                const todayChange = holding.today_change ?? 0;
+                const todayChangePercent = holding.today_change_percent ?? 0;
+
+                return (
+                  <TableRow
+                    key={holding.ticker}
+                    className="cursor-pointer hover:bg-gray-50"
+                    onClick={() => router.push(`/asset/${holding.ticker}`)}
                   >
-                    {formatCurrency(holding.unrealized_gain, holding.currency)}
-                  </TableCell>
-                  <TableCell
-                    className={`text-right font-mono ${
-                      (holding.return_percentage ?? 0) >= 0 ? 'text-success' : 'text-danger'
-                    }`}
-                  >
-                    {holding.return_percentage !== null && holding.return_percentage !== undefined
-                      ? formatPercentage(holding.return_percentage * 100)
-                      : '—'}
-                  </TableCell>
-                  <TableCell
-                    className={`text-right font-mono ${
-                      (holding.irr ?? 0) >= 0 ? 'text-success' : 'text-danger'
-                    }`}
-                  >
-                    {holding.irr !== null && holding.irr !== undefined
-                      ? formatPercentage(holding.irr * 100)
-                      : '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
+                    <TableCell className="font-medium">{holding.ticker}</TableCell>
+                    <TableCell className="max-w-xs truncate" title={holding.description}>
+                      {holding.description || '—'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatNumber(holding.quantity, 4)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatCurrency(holding.average_cost, holding.currency)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {formatCurrency(holding.current_price, holding.currency)}
+                        {hasRealtimeData && (
+                          <span className="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell
+                      className={`text-right font-mono ${
+                        todayChange >= 0 ? 'text-success' : 'text-danger'
+                      }`}
+                    >
+                      {hasRealtimeData ? (
+                        <div className="flex items-center justify-end gap-1">
+                          {todayChange >= 0 ? (
+                            <TrendingUp className="h-3 w-3" />
+                          ) : (
+                            <TrendingDown className="h-3 w-3" />
+                          )}
+                          <span>
+                            {formatCurrency(Math.abs(todayChange), holding.currency)} (
+                            {formatPercentage(todayChangePercent)})
+                          </span>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatCurrency(holding.current_value, holding.currency)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right font-mono ${
+                        (holding.unrealized_gain ?? 0) >= 0 ? 'text-success' : 'text-danger'
+                      }`}
+                    >
+                      {formatCurrency(holding.unrealized_gain, holding.currency)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right font-mono ${
+                        (holding.return_percentage ?? 0) >= 0 ? 'text-success' : 'text-danger'
+                      }`}
+                    >
+                      {holding.return_percentage !== null && holding.return_percentage !== undefined
+                        ? formatPercentage(holding.return_percentage * 100)
+                        : '—'}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right font-mono ${
+                        (holding.irr ?? 0) >= 0 ? 'text-success' : 'text-danger'
+                      }`}
+                    >
+                      {holding.irr !== null && holding.irr !== undefined
+                        ? formatPercentage(holding.irr * 100)
+                        : '—'}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
