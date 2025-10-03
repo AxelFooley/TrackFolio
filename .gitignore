@@ -61,3 +61,16 @@ portfolio_tracker_prd.md
 
 # Claude Stuff
 .claude
+
+# Docker
+docker-compose.override.yml
+*.dockerignore
+
+# Docker volumes and data
+postgres_data/
+redis_data/
+
+# Backup files
+backups/
+*.backup
+*.sql.gz
