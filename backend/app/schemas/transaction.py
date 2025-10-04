@@ -5,8 +5,19 @@ from decimal import Decimal
 from typing import Optional
 
 
+class ManualTransactionCreate(BaseModel):
+    """Schema for creating a transaction manually via the frontend."""
+    operation_date: date
+    ticker: str
+    type: str = Field(..., pattern="^(buy|sell)$")  # Frontend sends "type" not "transaction_type"
+    quantity: Decimal = Field(..., gt=0)
+    amount: Decimal = Field(..., gt=0)  # This is price_per_share in frontend
+    currency: str = "EUR"
+    fees: Decimal = Field(default=Decimal("0"), ge=0)
+
+
 class TransactionCreate(BaseModel):
-    """Schema for creating a transaction (not used in CSV import)."""
+    """Schema for creating a transaction manually."""
     operation_date: date
     value_date: date
     transaction_type: str = Field(..., pattern="^(buy|sell)$")
@@ -19,7 +30,7 @@ class TransactionCreate(BaseModel):
     amount_currency: Decimal = Decimal("0")
     currency: str = "EUR"
     fees: Decimal = Decimal("0")
-    order_reference: str
+    order_reference: Optional[str] = None  # Auto-generated if not provided
 
 
 class TransactionUpdate(BaseModel):

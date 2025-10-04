@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getTransactions, importTransactions, updateTransaction } from '@/lib/api';
-import type { TransactionUpdate } from '@/lib/types';
+import { getTransactions, importTransactions, createTransaction, updateTransaction } from '@/lib/api';
+import type { TransactionUpdate, TransactionCreate } from '@/lib/types';
 
 export function useTransactions(skip: number = 0, limit: number = 100) {
   return useQuery({
@@ -15,6 +15,19 @@ export function useImportTransactions() {
 
   return useMutation({
     mutationFn: importTransactions,
+    onSuccess: () => {
+      // Invalidate all relevant queries
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+    },
+  });
+}
+
+export function useCreateTransaction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: TransactionCreate) => createTransaction(data),
     onSuccess: () => {
       // Invalidate all relevant queries
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
