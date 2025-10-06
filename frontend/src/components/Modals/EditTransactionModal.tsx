@@ -85,7 +85,7 @@ export function EditTransactionModal({
                 <div className="font-mono">{transaction.quantity || '-'}</div>
                 <div className="text-gray-600">Amount:</div>
                 <div className="font-mono">
-                  {transaction.amount || '-'} {transaction.currency || ''}
+                  {(transaction.price_per_share * transaction.quantity).toFixed(2) || '-'} {transaction.currency || ''}
                 </div>
               </div>
             </div>

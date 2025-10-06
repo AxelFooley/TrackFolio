@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.exc import IntegrityError
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import logging
 
@@ -15,15 +15,49 @@ from app.database import get_db
 from app.models import Transaction, TransactionType
 from app.schemas.transaction import (
     TransactionResponse,
+    TransactionCreate,
+    ManualTransactionCreate,
     TransactionUpdate,
     TransactionImportSummary
 )
 from app.services.csv_parser import DirectaCSVParser
 from app.services.deduplication import DeduplicationService
 from app.services.position_manager import PositionManager
+from app.services.price_fetcher import PriceFetcher
+from app.services.calculations import FinancialCalculations
+import yfinance as yf
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+
+
+def fetch_ticker_metadata(ticker: str) -> tuple[Optional[str], str]:
+    """
+    Fetch ISIN and description from Yahoo Finance for a given ticker.
+
+    Args:
+        ticker: Stock ticker symbol
+
+    Returns:
+        Tuple of (isin, description). ISIN may be None if not found.
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # Get ISIN from Yahoo Finance info
+        isin = info.get('isin')
+
+        # Get description (prefer longName, fallback to shortName, then ticker)
+        description = info.get('longName') or info.get('shortName') or ticker
+
+        logger.info(f"Fetched metadata for {ticker}: ISIN={isin}, Description={description}")
+        return isin, description
+
+    except Exception as e:
+        logger.warning(f"Could not fetch metadata for {ticker}: {str(e)}. Using ticker as description.")
+        return None, ticker
 
 
 @router.post("/import", response_model=TransactionImportSummary)
@@ -133,6 +167,130 @@ async def import_transactions(
     except Exception as e:
         logger.error(f"Error importing transactions: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to import transactions")
+
+
+@router.post("/", response_model=TransactionResponse)
+async def create_transaction(
+    transaction_data: ManualTransactionCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a new transaction manually.
+
+    Accepts simplified frontend schema and auto-populates all required backend fields:
+    - Fetches ISIN and description from Yahoo Finance
+    - Calculates amounts in EUR and native currency
+    - Generates order_reference
+    - Creates transaction_hash and checks for duplicates
+    """
+    try:
+        # 1. Map frontend 'type' to backend 'transaction_type'
+        transaction_type = transaction_data.type  # 'buy' or 'sell'
+
+        # 2. Fetch ticker metadata (ISIN and description) from Yahoo Finance
+        isin, description = fetch_ticker_metadata(transaction_data.ticker)
+
+        # 3. Set price_per_share from frontend 'amount' field
+        price_per_share = transaction_data.amount
+
+        # 4. Calculate amounts
+        amount_currency = transaction_data.quantity * price_per_share
+
+        # 5. Convert to EUR if needed
+        if transaction_data.currency == "EUR":
+            amount_eur = amount_currency
+        elif transaction_data.currency in ["USD", "GBP"]:
+            # TODO: Implement real-time currency conversion using PriceFetcher.fetch_fx_rate
+            # For now, use amount_currency as-is and log a warning
+            logger.warning(
+                f"Currency conversion not fully implemented for {transaction_data.currency}. "
+                f"Using {amount_currency} as amount_eur. TODO: Add FX conversion."
+            )
+            amount_eur = amount_currency
+        else:
+            # For other currencies, default to using amount_currency
+            logger.warning(f"Unknown currency {transaction_data.currency}. Using amount_currency as amount_eur.")
+            amount_eur = amount_currency
+
+        # 6. Set value_date to operation_date (manual entries happen on same day)
+        value_date = transaction_data.operation_date
+
+        # 7. Generate order_reference with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        order_reference = f"MANUAL-{timestamp}"
+
+        # 8. Generate transaction hash
+        transaction_hash = DeduplicationService.calculate_hash(
+            operation_date=transaction_data.operation_date,
+            ticker=transaction_data.ticker,
+            quantity=transaction_data.quantity,
+            price_per_share=price_per_share,
+            order_reference=order_reference
+        )
+
+        # 9. Check for duplicates
+        is_dup = await DeduplicationService.is_duplicate(db, transaction_hash)
+        if is_dup:
+            raise HTTPException(
+                status_code=409,
+                detail="Duplicate transaction detected. A transaction with the same date, ticker, quantity, price, and order reference already exists."
+            )
+
+        # 10. Create Transaction model
+        transaction = Transaction(
+            operation_date=transaction_data.operation_date,
+            value_date=value_date,
+            transaction_type=TransactionType(transaction_type),
+            ticker=transaction_data.ticker,
+            isin=isin,
+            description=description,
+            quantity=transaction_data.quantity,
+            price_per_share=price_per_share,
+            amount_eur=amount_eur,
+            amount_currency=amount_currency,
+            currency=transaction_data.currency,
+            fees=transaction_data.fees,
+            order_reference=order_reference,
+            transaction_hash=transaction_hash,
+            imported_at=datetime.utcnow()
+        )
+
+        db.add(transaction)
+        await db.commit()
+        await db.refresh(transaction)
+
+        # 11. Recalculate position for this ISIN
+        if transaction.isin:
+            await PositionManager.recalculate_position(db, transaction.isin)
+
+        # 12. Detect and record any new splits
+        await PositionManager.detect_and_record_splits(db)
+
+        # 13. Trigger automatic backfill for historical data
+        from app.tasks.auto_backfill import trigger_automatic_backfill
+        trigger_automatic_backfill.delay()  # Async background task
+        logger.info("Triggered automatic historical data backfill after manual transaction creation")
+
+        logger.info(f"Created manual transaction: {transaction.ticker} on {transaction.operation_date}")
+        return transaction
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except IntegrityError as e:
+        await db.rollback()
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        if "duplicate key" in error_msg.lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Duplicate transaction detected: {error_msg}"
+            )
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {error_msg}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error creating transaction: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create transaction")
 
 
 @router.get("/", response_model=List[TransactionResponse])

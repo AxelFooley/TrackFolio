@@ -98,7 +98,7 @@ export function TransactionList() {
                       {transaction.quantity || '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(transaction.amount, transaction.currency)}
+                      {formatCurrency(transaction.price_per_share * transaction.quantity, transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       <div className="flex items-center justify-end gap-2">
