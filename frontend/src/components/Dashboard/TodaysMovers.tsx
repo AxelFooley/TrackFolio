@@ -55,15 +55,6 @@ export function TodaysMovers() {
     return [...filteredLosers].sort((a, b) => (a.today_change_percent || 0) - (b.today_change_percent || 0)).slice(0, 3);
   }, [holdingsWithChange]);
 
-  // Debug logging (remove in production)
-  console.log('Today\'s Movers Debug:', {
-    totalHoldings: holdingsWithRealtimeData.length,
-    holdingsWithChange: holdingsWithChange.length,
-    gainers: gainers.length,
-    losers: losers.length,
-    sampleData: holdingsWithChange.slice(0, 5)
-  });
-
   // Handle loading and empty states
   if (isLoading) {
     return (
