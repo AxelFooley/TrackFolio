@@ -15,6 +15,42 @@ from app.services.price_fetcher import PriceFetcher
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 
+def calculate_today_change(
+    position_quantity: Decimal,
+    price_history: list[PriceHistory]
+) -> tuple[Optional[Decimal], Optional[float]]:
+    """
+    Calculate today's change and percentage change for a position.
+
+    Args:
+        position_quantity: The quantity of shares held
+        price_history: List of price history entries, ordered by date descending
+
+    Returns:
+        Tuple of (today_change, today_change_percent)
+        - today_change: Total value change in currency units, or None if insufficient data
+        - today_change_percent: Percentage change, or None if calculation not possible
+    """
+    if not price_history or len(price_history) < 2:
+        return None, None
+
+    latest_price = price_history[0]
+    previous_price = price_history[1]
+
+    # Calculate price change per share
+    price_change = latest_price.close - previous_price.close
+    today_change = position_quantity * price_change
+
+    # Calculate percentage change based on previous day's value
+    previous_day_value = position_quantity * previous_price.close
+    if previous_day_value > 0:
+        today_change_percent = float((today_change / previous_day_value) * 100)
+    else:
+        today_change_percent = None
+
+    return today_change, today_change_percent
+
+
 def parse_time_range(range_str: str) -> tuple[Optional[date], Optional[date]]:
     """
     Convert time range string to start_date and end_date.
@@ -161,21 +197,11 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
             else None
         )
 
-        # Calculate today's change
-        today_change = None
-        today_change_percent = None
-
-        if latest_price and len(price_history) > 1:
-            previous_price = price_history[1]
-            price_change = latest_price.close - previous_price.close
-            today_change = position.quantity * price_change
-
-            # Calculate percentage change based on previous day's value
-            previous_day_value = position.quantity * previous_price.close
-            if previous_day_value > 0:
-                today_change_percent = float((today_change / previous_day_value) * 100)
-            else:
-                today_change_percent = None
+        # Calculate today's change using helper function
+        today_change, today_change_percent = calculate_today_change(
+            position.quantity,
+            price_history
+        )
 
         # Get IRR from cached metrics
         irr = None
@@ -397,21 +423,11 @@ async def get_position(
         else None
     )
 
-    # Calculate today's change
-    today_change = None
-    today_change_percent = None
-
-    if latest_price and len(price_history) > 1:
-        previous_price = price_history[1]
-        price_change = latest_price.close - previous_price.close
-        today_change = position.quantity * price_change
-
-        # Calculate percentage change based on previous day's value
-        previous_day_value = position.quantity * previous_price.close
-        if previous_day_value > 0:
-            today_change_percent = float((today_change / previous_day_value) * 100)
-        else:
-            today_change_percent = None
+    # Calculate today's change using helper function
+    today_change, today_change_percent = calculate_today_change(
+        position.quantity,
+        price_history
+    )
 
     # Get IRR from cached metrics
     irr = None

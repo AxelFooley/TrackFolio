@@ -50,7 +50,10 @@ export function TodaysMovers() {
   }, [holdingsWithRealtimeData]);
 
   const gainers = useMemo(() => holdingsWithChange.filter(h => (h.today_change_percent || 0) > 0).slice(0, 3), [holdingsWithChange]);
-  const losers = useMemo(() => holdingsWithChange.filter(h => (h.today_change_percent || 0) < 0).slice(0, 3), [holdingsWithChange]);
+  const losers = useMemo(() => {
+    const filteredLosers = holdingsWithChange.filter(h => (h.today_change_percent || 0) < 0);
+    return [...filteredLosers].sort((a, b) => (a.today_change_percent || 0) - (b.today_change_percent || 0)).slice(0, 3);
+  }, [holdingsWithChange]);
 
   // Debug logging (remove in production)
   console.log('Today\'s Movers Debug:', {
