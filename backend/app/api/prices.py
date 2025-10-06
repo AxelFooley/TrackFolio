@@ -176,8 +176,29 @@ async def get_historical_price(
         # Use the price fetcher service
         price_data = _price_fetcher.fetch_historical_price(ticker, target_date)
 
-        # Convert to response model
-        return HistoricalPriceResponse(**price_data)
+        # Validate and convert to response model
+        # Handle None values properly to avoid Pydantic validation errors
+        if price_data.get("price") is None:
+            # If price is None, ensure we have a proper error response
+            return HistoricalPriceResponse(
+                ticker=ticker,
+                date=target_date,
+                price=None,
+                currency=None,
+                is_historical=False,
+                error=price_data.get("error", "No historical data found in previous 15 days")
+            )
+        else:
+            # If we have price data, ensure currency is properly set
+            currency = price_data.get("currency") or "USD"  # Default to USD if not detected
+            return HistoricalPriceResponse(
+                ticker=ticker,
+                date=target_date,
+                price=price_data["price"],
+                currency=currency,
+                is_historical=price_data.get("is_historical", True),
+                error=price_data.get("error")
+            )
 
     except HTTPException:
         # Re-raise HTTP exceptions as-is
