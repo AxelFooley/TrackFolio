@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -22,8 +22,9 @@ import {
 import { TickerAutocomplete } from '@/components/TickerAutocomplete';
 import { useCreateTransaction } from '@/hooks/useTransactions';
 import { useToast } from '@/hooks/use-toast';
+import { getHistoricalPrice } from '@/lib/api';
 import type { TransactionCreate } from '@/lib/types';
-import { Loader2 } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, Info } from 'lucide-react';
 
 interface AddTransactionModalProps {
   open: boolean;
@@ -44,8 +45,71 @@ export function AddTransactionModal({
     fees: 0,
   });
 
+  // Price fetching state
+  const [isFetchingPrice, setIsFetchingPrice] = useState(false);
+  const [priceFetchError, setPriceFetchError] = useState<string | null>(null);
+  const [priceAutoFetched, setPriceAutoFetched] = useState(false);
+  const [manuallyModifiedPrice, setManuallyModifiedPrice] = useState(false);
+  const lastAutoFetchedPrice = useRef<number | null>(null);
+
   const createMutation = useCreateTransaction();
   const { toast } = useToast();
+
+  // Effect to fetch historical price when ticker and date are selected
+  useEffect(() => {
+    const fetchHistoricalPrice = async () => {
+      // Only fetch if both ticker and date are available, and price hasn't been manually modified
+      if (
+        formData.ticker &&
+        formData.operation_date &&
+        !manuallyModifiedPrice &&
+        !isFetchingPrice
+      ) {
+        setIsFetchingPrice(true);
+        setPriceFetchError(null);
+        setPriceAutoFetched(false);
+
+        try {
+          const priceData = await getHistoricalPrice(formData.ticker, formData.operation_date);
+
+          if (priceData && priceData.close > 0) {
+            setFormData(prev => ({
+              ...prev,
+              amount: priceData.close
+            }));
+            lastAutoFetchedPrice.current = priceData.close;
+            setPriceAutoFetched(true);
+          }
+        } catch (error: any) {
+          console.error('Failed to fetch historical price:', error);
+          const errorMessage = error.response?.data?.detail || 'Failed to fetch price';
+          setPriceFetchError(errorMessage);
+
+          // Show a subtle toast notification for price fetching errors
+          toast({
+            title: 'Price fetch failed',
+            description: `Could not fetch historical price for ${formData.ticker}. You can enter the price manually.`,
+            variant: 'destructive',
+            duration: 3000, // Short duration to not be too disruptive
+          });
+        } finally {
+          setIsFetchingPrice(false);
+        }
+      }
+    };
+
+    fetchHistoricalPrice();
+  }, [formData.ticker, formData.operation_date, manuallyModifiedPrice, isFetchingPrice]);
+
+  // Reset price modification state when form is reset or modal opens
+  useEffect(() => {
+    if (open) {
+      setManuallyModifiedPrice(false);
+      setPriceAutoFetched(false);
+      setPriceFetchError(null);
+      lastAutoFetchedPrice.current = null;
+    }
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,6 +168,11 @@ export function AddTransactionModal({
         currency: 'EUR',
         fees: 0,
       });
+      // Reset price fetching state
+      setManuallyModifiedPrice(false);
+      setPriceAutoFetched(false);
+      setPriceFetchError(null);
+      lastAutoFetchedPrice.current = null;
     } catch (error: any) {
       toast({
         title: 'Creation failed',
@@ -118,6 +187,21 @@ export function AddTransactionModal({
       ...prev,
       [field]: value,
     }));
+
+    // Detect manual price modification
+    if (field === 'amount') {
+      const newPrice = parseFloat(value) || 0;
+
+      // If user entered a price different from the last auto-fetched price, mark as manually modified
+      if (
+        lastAutoFetchedPrice.current !== null &&
+        newPrice !== lastAutoFetchedPrice.current &&
+        newPrice > 0
+      ) {
+        setManuallyModifiedPrice(true);
+        setPriceAutoFetched(false);
+      }
+    }
   };
 
   return (
@@ -155,8 +239,11 @@ export function AddTransactionModal({
               <TickerAutocomplete
                 value={formData.ticker}
                 onSelect={(ticker) => handleFieldChange('ticker', ticker)}
-                placeholder="Select or search ticker..."
+                placeholder="Search by company name or ticker..."
               />
+              <p className="text-sm text-gray-500">
+                Search by company name (e.g., Apple, Vanguard) or ticker symbol (e.g., AAPL, VOO)
+              </p>
             </div>
 
             {/* Date */}
@@ -188,17 +275,50 @@ export function AddTransactionModal({
 
             {/* Price per Share */}
             <div className="space-y-2">
-              <Label htmlFor="amount">Price per Share</Label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={formData.amount || ''}
-                onChange={(e) => handleFieldChange('amount', parseFloat(e.target.value) || 0)}
-                placeholder="0.00"
-                required
-              />
+              <div className="flex items-center gap-2">
+                <Label htmlFor="amount">Price per Share</Label>
+                {isFetchingPrice && (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                )}
+                {priceAutoFetched && (
+                  <div className="flex items-center gap-1 text-green-600" title="Price automatically fetched">
+                    <CheckCircle className="h-4 w-4" />
+                    <span className="text-xs">Auto-fetched</span>
+                  </div>
+                )}
+                {priceFetchError && (
+                  <div className="flex items-center gap-1 text-amber-600" title={priceFetchError}>
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="text-xs">Manual entry</span>
+                  </div>
+                )}
+              </div>
+              <div className="relative">
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={formData.amount || ''}
+                  onChange={(e) => handleFieldChange('amount', parseFloat(e.target.value) || 0)}
+                  placeholder="0.00"
+                  required
+                  className={priceAutoFetched ? "pr-20" : "pr-8"}
+                />
+                {priceAutoFetched && (
+                  <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <span className="text-xs text-green-600">Auto</span>
+                  </div>
+                )}
+              </div>
+              {formData.ticker && formData.operation_date && !isFetchingPrice && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Info className="h-3 w-3" />
+                  Price fetched automatically for {formData.ticker} on {formData.operation_date}
+                  {manuallyModifiedPrice && " (manually modified)"}
+                </p>
+              )}
             </div>
 
             {/* Currency */}

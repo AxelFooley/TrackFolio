@@ -1,6 +1,6 @@
 """Price schemas."""
 from pydantic import BaseModel, Field, field_serializer
-from datetime import date, datetime
+from datetime import date as date_type, datetime
 from decimal import Decimal
 from typing import Optional, List
 
@@ -8,7 +8,7 @@ from typing import Optional, List
 class PriceResponse(BaseModel):
     """Schema for price data response."""
     ticker: str
-    date: date
+    date: date_type
     open: Decimal
     high: Decimal
     low: Decimal
@@ -74,5 +74,32 @@ class RealtimePricesResponse(BaseModel):
                 "fetched_count": 1,
                 "total_count": 1,
                 "timestamp": "2025-10-03T14:30:00Z"
+            }
+        }
+
+
+class HistoricalPriceResponse(BaseModel):
+    """Schema for historical price data response for manual transaction workflow."""
+    ticker: str = Field(..., description="Asset ticker symbol")
+    date: date_type = Field(..., description="Date of the price data", alias="date")
+    price: Optional[Decimal] = Field(None, description="Close price for the specified date")
+    currency: Optional[str] = Field(None, description="Currency of the price")
+    is_historical: bool = Field(..., description="Whether this is historical data or current price")
+    error: Optional[str] = Field(None, description="Error message if price fetching failed")
+
+    @field_serializer('price')
+    def serialize_decimal(self, value: Optional[Decimal]) -> Optional[float]:
+        """Convert Decimal to float for JSON serialization."""
+        return float(value) if value is not None else None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "ticker": "AAPL",
+                "date": "2024-01-15",
+                "price": 185.50,
+                "currency": "USD",
+                "is_historical": True,
+                "error": None
             }
         }

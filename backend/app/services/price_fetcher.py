@@ -537,3 +537,272 @@ class PriceFetcher:
         }
 
         return ticker_map.get(ticker.upper(), ticker.lower())
+
+    def fetch_historical_price(
+        self,
+        ticker: str,
+        target_date: date,
+        isin: Optional[str] = None
+    ) -> Dict:
+        """
+        Fetch historical price for a specific ticker and date.
+
+        This method is optimized for the manual transaction workflow and includes:
+        - Weekend and holiday handling (returns Friday price for Saturday, previous trading day for non-trading days)
+        - Current price fallback for today/future dates
+        - Currency detection and validation
+        - Robust error handling with graceful fallbacks
+
+        Args:
+            ticker: Asset ticker symbol (broker format)
+            target_date: Target date for price data
+            isin: Optional ISIN code for ticker resolution
+
+        Returns:
+            Dict with keys: ticker, date, price, currency, is_historical, error
+            If successful: error=None, is_historical=True/False based on date
+            If failed: error=str, other fields set to None/defaults
+        """
+        try:
+            # Resolve ticker using ISIN if provided
+            resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
+            logger.info(f"Fetching historical price for {ticker} (resolved: {resolved_ticker}) on {target_date}")
+
+            today = date.today()
+            target_datetime = datetime.combine(target_date, datetime.min.time())
+
+            # Handle future dates and today
+            if target_date >= today:
+                logger.info(f"Target date {target_date} is today or in future, fetching current price")
+                return self._fetch_current_price_for_historical(ticker, resolved_ticker, target_date)
+
+            # Handle weekends
+            if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
+                # Find previous Friday
+                days_back = target_date.weekday() - 4  # Friday is 4
+                friday_date = target_date - timedelta(days=days_back)
+                logger.info(f"Target date {target_date} is weekend, using Friday {friday_date}")
+                return self._fetch_specific_historical_price(ticker, resolved_ticker, friday_date, is_historical=True)
+
+            # Try to fetch the specific date first
+            result = self._fetch_specific_historical_price(ticker, resolved_ticker, target_date, is_historical=True)
+
+            # If specific date fails, try to find the previous available trading day
+            if result["error"] is not None:
+                logger.warning(f"No data for {ticker} on {target_date}, searching for previous trading day")
+                return self._find_previous_trading_day_price(ticker, resolved_ticker, target_date)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Unexpected error fetching historical price for {ticker} on {target_date}: {str(e)}")
+            return {
+                "ticker": ticker,
+                "date": target_date,
+                "price": None,
+                "currency": None,
+                "is_historical": False,
+                "error": f"Failed to fetch price: {str(e)}"
+            }
+
+    def _fetch_current_price_for_historical(self, ticker: str, resolved_ticker: str, target_date: date) -> Dict:
+        """
+        Fetch current price and return it in historical format for today/future dates.
+        """
+        try:
+            # Use existing real-time price fetch method
+            current_price_data = self.fetch_realtime_price(ticker, None)  # Don't pass ISIN to avoid cache key issues
+
+            if current_price_data is None:
+                return {
+                    "ticker": ticker,
+                    "date": target_date,
+                    "price": None,
+                    "currency": None,
+                    "is_historical": False,
+                    "error": "Unable to fetch current price"
+                }
+
+            # Detect currency from ticker (simple heuristic)
+            currency = self._detect_currency_from_ticker(resolved_ticker)
+
+            return {
+                "ticker": ticker,
+                "date": target_date,
+                "price": current_price_data["current_price"],
+                "currency": currency,
+                "is_historical": False,
+                "error": None
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching current price for {ticker}: {str(e)}")
+            return {
+                "ticker": ticker,
+                "date": target_date,
+                "price": None,
+                "currency": None,
+                "is_historical": False,
+                "error": f"Failed to fetch current price: {str(e)}"
+            }
+
+    def _fetch_specific_historical_price(
+        self,
+        ticker: str,
+        resolved_ticker: str,
+        target_date: date,
+        is_historical: bool
+    ) -> Dict:
+        """
+        Fetch price for a specific historical date.
+        """
+        try:
+            # Use yfinance to fetch historical data for the specific date
+            stock = yf.Ticker(resolved_ticker)
+
+            # Fetch a wider range to ensure we capture the target date (3 days before and after)
+            start_date = target_date - timedelta(days=3)
+            end_date = target_date + timedelta(days=3)
+
+            hist = stock.history(start=start_date, end=end_date)
+
+            if hist.empty:
+                return {
+                    "ticker": ticker,
+                    "date": target_date,
+                    "price": None,
+                    "currency": None,
+                    "is_historical": is_historical,
+                    "error": "No historical data available"
+                }
+
+            # Try to find the exact date
+            if target_date in hist.index:
+                price_data = hist.loc[target_date]
+                logger.info(f"Found exact price for {ticker} on {target_date}")
+            else:
+                # If exact date not found, find the closest available date before or after
+                available_dates = hist.index.date
+                closest_date = min(
+                    available_dates,
+                    key=lambda d: abs((d - target_date).days)
+                )
+                price_data = hist.loc[closest_date]
+                logger.info(f"Using closest available date {closest_date} for {ticker} (target: {target_date})")
+
+            # Detect currency
+            currency = self._detect_currency_from_ticker(resolved_ticker)
+
+            return {
+                "ticker": ticker,
+                "date": target_date,
+                "price": Decimal(str(price_data["Close"])),
+                "currency": currency,
+                "is_historical": is_historical,
+                "error": None
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching specific historical price for {ticker} on {target_date}: {str(e)}")
+            return {
+                "ticker": ticker,
+                "date": target_date,
+                "price": None,
+                "currency": None,
+                "is_historical": is_historical,
+                "error": f"Failed to fetch historical price: {str(e)}"
+            }
+
+    def _find_previous_trading_day_price(self, ticker: str, resolved_ticker: str, target_date: date) -> Dict:
+        """
+        Find the price from the previous available trading day.
+        """
+        try:
+            # Search back up to 10 trading days
+            search_end_date = target_date - timedelta(days=1)
+            search_start_date = target_date - timedelta(days=15)  # Extra buffer for weekends/holidays
+
+            stock = yf.Ticker(resolved_ticker)
+            hist = stock.history(start=search_start_date, end=search_end_date)
+
+            if hist.empty:
+                return {
+                    "ticker": ticker,
+                    "date": target_date,
+                    "price": None,
+                    "currency": None,
+                    "is_historical": True,
+                    "error": "No historical data found in previous 15 days"
+                }
+
+            # Get the most recent available price
+            most_recent_date = hist.index[-1].date()
+            price_data = hist.iloc[-1]
+
+            # Detect currency
+            currency = self._detect_currency_from_ticker(resolved_ticker)
+
+            logger.info(f"Found previous trading day price for {ticker} on {most_recent_date} (target: {target_date})")
+
+            return {
+                "ticker": ticker,
+                "date": target_date,  # Keep original target date for consistency
+                "price": Decimal(str(price_data["Close"])),
+                "currency": currency,
+                "is_historical": True,
+                "error": None,
+                "actual_date": most_recent_date  # Add info about actual date used
+            }
+
+        except Exception as e:
+            logger.error(f"Error finding previous trading day price for {ticker}: {str(e)}")
+            return {
+                "ticker": ticker,
+                "date": target_date,
+                "price": None,
+                "currency": None,
+                "is_historical": True,
+                "error": f"Failed to find previous trading day price: {str(e)}"
+            }
+
+    @staticmethod
+    def _detect_currency_from_ticker(ticker: str) -> str:
+        """
+        Detect currency from ticker symbol using common patterns.
+
+        Args:
+            ticker: Resolved ticker symbol
+
+        Returns:
+            Currency code (USD, EUR, etc.)
+        """
+        ticker_upper = ticker.upper()
+
+        # Common currency indicators in tickers
+        if any(suffix in ticker_upper for suffix in ['.L', '.LN']):  # London
+            return 'GBP'
+        elif any(suffix in ticker_upper for suffix in ['.DE', '.F', '.B']):  # Germany/Frankfurt
+            return 'EUR'
+        elif any(suffix in ticker_upper for suffix in ['.PA', '.FP']):  # Paris
+            return 'EUR'
+        elif any(suffix in ticker_upper for suffix in ['.MI', '.MI']):  # Milan
+            return 'EUR'
+        elif any(suffix in ticker_upper for suffix in ['.AS', '.A']):  # Amsterdam
+            return 'EUR'
+        elif any(suffix in ticker_upper for suffix in ['.SI', '.SI']):  # Singapore
+            return 'SGD'
+        elif any(suffix in ticker_upper for suffix in ['.HK', '.HK']):  # Hong Kong
+            return 'HKD'
+        elif any(suffix in ticker_upper for suffix in ['.T', '.T']):  # Tokyo
+            return 'JPY'
+        elif any(suffix in ticker_upper for suffix in ['.TO', '.TO']):  # Toronto
+            return 'CAD'
+        elif any(suffix in ticker_upper for suffix in ['.AX', '.AX']):  # Australia
+            return 'AUD'
+        elif ticker_upper.endswith('.SS'):  # Shanghai
+            return 'CNY'
+        elif ticker_upper.endswith('.SZ'):  # Shenzhen
+            return 'CNY'
+        else:
+            # Default to USD for US stocks and crypto
+            return 'USD'

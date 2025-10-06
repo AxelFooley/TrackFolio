@@ -246,8 +246,7 @@ async def create_transaction(
             operation_date=transaction_data.operation_date,
             ticker=transaction_data.ticker,
             quantity=transaction_data.quantity,
-            price_per_share=price_per_share,
-            order_reference=order_reference
+            price_per_share=price_per_share
         )
 
         # 9. Check for duplicates
@@ -467,8 +466,7 @@ async def update_transaction(
             operation_date=transaction.operation_date,
             ticker=transaction.ticker,
             quantity=transaction.quantity,
-            price_per_share=transaction.price_per_share,
-            order_reference=transaction.order_reference
+            price_per_share=transaction.price_per_share
         )
 
         # Check if the new hash would create a duplicate

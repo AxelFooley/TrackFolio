@@ -1,14 +1,14 @@
 """Price update API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
-from typing import List
+from datetime import datetime, date
+from typing import List, Optional
 import logging
 
 from app.database import get_db
 from app.models.position import Position
-from app.schemas.price import RealtimePriceResponse, RealtimePricesResponse
+from app.schemas.price import RealtimePriceResponse, RealtimePricesResponse, HistoricalPriceResponse
 from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
@@ -117,4 +117,74 @@ async def get_realtime_prices(db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch real-time prices: {str(e)}"
+        )
+
+
+@router.get("/historical", response_model=HistoricalPriceResponse)
+async def get_historical_price(
+    ticker: str = Query(..., description="Asset ticker symbol (e.g., AAPL, MSFT)"),
+    date_str: str = Query(..., alias="date", description="Target date in YYYY-MM-DD format"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Fetch historical close price for a specific ticker and date.
+
+    This endpoint is optimized for the manual transaction workflow and includes:
+    - Weekend handling: Returns Friday price for Saturday/Sunday requests
+    - Holiday handling: Returns previous available trading day price
+    - Current price fallback: Returns current/latest price for today or future dates
+    - Currency detection: Automatically detects price currency from ticker
+    - International support: Works with global stocks and ETFs
+
+    Args:
+        ticker: Asset ticker symbol (broker format, e.g., "AAPL", "MSFT", "VWCE.DE")
+        date_str: Target date for price data in YYYY-MM-DD format
+        db: Database session (unused but required for dependency injection)
+
+    Returns:
+        HistoricalPriceResponse with price data or error information
+
+    Examples:
+        - /api/prices/historical?ticker=AAPL&date=2024-01-15
+        - /api/prices/historical?ticker=VWCE.DE&date=2024-03-20
+        - /api/prices/historical?ticker=MSFT&date=2024-12-25 (Christmas - returns previous trading day)
+        - /api/prices/historical?ticker=TSLA&date=2024-03-09 (Saturday - returns Friday price)
+        - /api/prices/historical?ticker=NFLX&date=2025-01-01 (Future date - returns current price)
+    """
+    try:
+        # Validate date format
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid date format. Please use YYYY-MM-DD format."
+            )
+
+        # Validate ticker
+        if not ticker or not ticker.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Ticker symbol is required."
+            )
+
+        # Clean ticker
+        ticker = ticker.strip().upper()
+
+        logger.info(f"Fetching historical price for {ticker} on {target_date}")
+
+        # Use the price fetcher service
+        price_data = _price_fetcher.fetch_historical_price(ticker, target_date)
+
+        # Convert to response model
+        return HistoricalPriceResponse(**price_data)
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in get_historical_price for {ticker} on {date_str}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error while fetching historical price: {str(e)}"
         )

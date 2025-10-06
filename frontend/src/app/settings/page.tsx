@@ -107,11 +107,11 @@ export default function SettingsPage() {
                     <TickerAutocomplete
                       value={benchmarkTicker}
                       onSelect={setBenchmarkTicker}
-                      placeholder="Search for a benchmark (e.g., S&P 500, CSSPX.MI)..."
+                      placeholder="Search by company name or ticker symbol..."
                       disabled={setBenchmarkMutation.isPending}
                     />
                     <p className="text-sm text-gray-500 mt-1">
-                      Search and select a ticker symbol. Popular benchmarks: ^GSPC (S&P 500), CSSPX.MI (iShares S&P 500)
+                      Search for benchmarks by company name (e.g., S&P, Vanguard, iShares) or ticker symbol (e.g., ^GSPC, CSSPX.MI, VOO)
                     </p>
                   </div>
                   <Button
