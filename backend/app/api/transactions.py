@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime
 import logging
+import asyncio
+import requests.exceptions
 
 from app.database import get_db
 from app.models import Transaction, TransactionType
@@ -32,7 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
 
-def fetch_ticker_metadata(ticker: str) -> tuple[Optional[str], str]:
+async def fetch_ticker_metadata(ticker: str) -> tuple[Optional[str], str]:
     """
     Fetch ISIN and description from Yahoo Finance for a given ticker.
 
@@ -43,8 +45,15 @@ def fetch_ticker_metadata(ticker: str) -> tuple[Optional[str], str]:
         Tuple of (isin, description). ISIN may be None if not found.
     """
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        # Run blocking yfinance call in executor with timeout
+        loop = asyncio.get_event_loop()
+
+        async def get_info():
+            stock = yf.Ticker(ticker)
+            return stock.info
+
+        # Add timeout to prevent hanging
+        info = await asyncio.wait_for(loop.run_in_executor(None, get_info), timeout=5.0)
 
         # Get ISIN from Yahoo Finance info
         isin = info.get('isin')
@@ -55,8 +64,11 @@ def fetch_ticker_metadata(ticker: str) -> tuple[Optional[str], str]:
         logger.info(f"Fetched metadata for {ticker}: ISIN={isin}, Description={description}")
         return isin, description
 
-    except Exception as e:
-        logger.warning(f"Could not fetch metadata for {ticker}: {str(e)}. Using ticker as description.")
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout fetching metadata for {ticker}. Using ticker as description.")
+        return None, ticker
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Network error fetching metadata for {ticker}: {str(e)}. Using ticker as description.")
         return None, ticker
 
 
@@ -188,7 +200,7 @@ async def create_transaction(
         transaction_type = transaction_data.type  # 'buy' or 'sell'
 
         # 2. Fetch ticker metadata (ISIN and description) from Yahoo Finance
-        isin, description = fetch_ticker_metadata(transaction_data.ticker)
+        isin, description = await fetch_ticker_metadata(transaction_data.ticker)
 
         # 3. Set price_per_share from frontend 'amount' field
         price_per_share = transaction_data.amount
@@ -199,18 +211,28 @@ async def create_transaction(
         # 5. Convert to EUR if needed
         if transaction_data.currency == "EUR":
             amount_eur = amount_currency
-        elif transaction_data.currency in ["USD", "GBP"]:
-            # TODO: Implement real-time currency conversion using PriceFetcher.fetch_fx_rate
-            # For now, use amount_currency as-is and log a warning
-            logger.warning(
-                f"Currency conversion not fully implemented for {transaction_data.currency}. "
-                f"Using {amount_currency} as amount_eur. TODO: Add FX conversion."
-            )
-            amount_eur = amount_currency
         else:
-            # For other currencies, default to using amount_currency
-            logger.warning(f"Unknown currency {transaction_data.currency}. Using amount_currency as amount_eur.")
-            amount_eur = amount_currency
+            # For non-EUR currencies, fetch FX rate and convert
+            try:
+                fx_rate = await PriceFetcher.fetch_fx_rate(transaction_data.currency, "EUR")
+                if fx_rate is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Could not fetch exchange rate for {transaction_data.currency} to EUR. Please try again later."
+                    )
+
+                amount_eur = amount_currency * fx_rate
+                logger.info(f"Converted {amount_currency} {transaction_data.currency} to {amount_eur} EUR using rate {fx_rate}")
+
+            except HTTPException:
+                # Re-raise HTTP exceptions as-is
+                raise
+            except Exception as e:
+                logger.exception(f"Error converting {transaction_data.currency} to EUR: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to convert {transaction_data.currency} to EUR. Please try again later."
+                )
 
         # 6. Set value_date to operation_date (manual entries happen on same day)
         value_date = transaction_data.operation_date
@@ -284,13 +306,13 @@ async def create_transaction(
             raise HTTPException(
                 status_code=409,
                 detail=f"Duplicate transaction detected: {error_msg}"
-            )
-        raise HTTPException(status_code=400, detail=f"Database integrity error: {error_msg}")
+            ) from e
+        raise HTTPException(status_code=400, detail=f"Database integrity error: {error_msg}") from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}") from e
     except Exception as e:
-        logger.error(f"Error creating transaction: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to create transaction")
+        logger.exception(f"Error creating transaction: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create transaction") from e
 
 
 @router.get("/", response_model=List[TransactionResponse])
