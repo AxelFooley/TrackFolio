@@ -197,7 +197,7 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
             else None
         )
 
-      # Calculate today's change using helper function
+        # Calculate today's change using helper function
         today_change, today_change_percent = calculate_today_change(
             position.quantity,
             price_history
