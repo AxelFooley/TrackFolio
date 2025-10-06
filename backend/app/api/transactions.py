@@ -48,7 +48,7 @@ async def fetch_ticker_metadata(ticker: str) -> tuple[Optional[str], str]:
         # Run blocking yfinance call in executor with timeout
         loop = asyncio.get_event_loop()
 
-        async def get_info():
+        def get_info():
             stock = yf.Ticker(ticker)
             return stock.info
 
