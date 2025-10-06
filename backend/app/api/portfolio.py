@@ -15,6 +15,42 @@ from app.services.price_fetcher import PriceFetcher
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 
+def calculate_today_change(
+    position_quantity: Decimal,
+    price_history: list[PriceHistory]
+) -> tuple[Optional[Decimal], Optional[float]]:
+    """
+    Calculate today's change and percentage change for a position.
+
+    Args:
+        position_quantity: The quantity of shares held
+        price_history: List of price history entries, ordered by date descending
+
+    Returns:
+        Tuple of (today_change, today_change_percent)
+        - today_change: Total value change in currency units, or None if insufficient data
+        - today_change_percent: Percentage change, or None if calculation not possible
+    """
+    if not price_history or len(price_history) < 2:
+        return None, None
+
+    latest_price = price_history[0]
+    previous_price = price_history[1]
+
+    # Calculate price change per share
+    price_change = latest_price.close - previous_price.close
+    today_change = position_quantity * price_change
+
+    # Calculate percentage change based on previous day's value
+    previous_day_value = position_quantity * previous_price.close
+    if previous_day_value > 0:
+        today_change_percent = float((today_change / previous_day_value) * 100)
+    else:
+        today_change_percent = None
+
+    return today_change, today_change_percent
+
+
 def parse_time_range(range_str: str) -> tuple[Optional[date], Optional[date]]:
     """
     Convert time range string to start_date and end_date.
@@ -136,11 +172,9 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
             select(PriceHistory)
             .where(PriceHistory.ticker == position.current_ticker)
             .order_by(PriceHistory.date.desc())
-            .limit(2)
+            .limit(2)  # Get latest and previous day's price
         )
-        prices = price_result.scalars().all()
-        latest_price = prices[0] if prices else None
-        previous_price = prices[1] if len(prices) > 1 else None
+        price_history = price_result.scalars().all()
 
         # Get cached metrics (IRR, etc.) - use current_ticker for backwards compatibility
         metrics_result = await db.execute(
@@ -153,6 +187,7 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
         cached_metrics = metrics_result.scalar_one_or_none()
 
         # Calculate current values
+        latest_price = price_history[0] if price_history else None
         current_price = latest_price.close if latest_price else None
         current_value = position.quantity * current_price if current_price else None
         unrealized_gain = current_value - position.cost_basis if current_value else None
@@ -162,12 +197,11 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
             else None
         )
 
-        # Calculate today's change
-        today_change = None
-        today_change_percent = None
-        if current_price and previous_price:
-            today_change = current_price - previous_price.close
-            today_change_percent = float((today_change / previous_price.close) * 100) if previous_price.close != 0 else None
+      # Calculate today's change using helper function
+        today_change, today_change_percent = calculate_today_change(
+            position.quantity,
+            price_history
+        )
 
         # Get IRR from cached metrics
         irr = None
@@ -359,14 +393,14 @@ async def get_position(
     if not position:
         raise HTTPException(status_code=404, detail="Position not found")
 
-    # Get latest price
+    # Get latest price and previous day's price
     price_result = await db.execute(
         select(PriceHistory)
         .where(PriceHistory.ticker == position.current_ticker)
         .order_by(PriceHistory.date.desc())
-        .limit(1)
+        .limit(2)  # Get latest and previous day's price
     )
-    latest_price = price_result.scalar_one_or_none()
+    price_history = price_result.scalars().all()
 
     # Get cached metrics
     metrics_result = await db.execute(
@@ -379,6 +413,7 @@ async def get_position(
     cached_metrics = metrics_result.scalar_one_or_none()
 
     # Calculate current values
+    latest_price = price_history[0] if price_history else None
     current_price = latest_price.close if latest_price else None
     current_value = position.quantity * current_price if current_price else None
     unrealized_gain = current_value - position.cost_basis if current_value else None
@@ -386,6 +421,12 @@ async def get_position(
         float((current_value - position.cost_basis) / position.cost_basis)
         if current_value and position.cost_basis > 0
         else None
+    )
+
+    # Calculate today's change using helper function
+    today_change, today_change_percent = calculate_today_change(
+        position.quantity,
+        price_history
     )
 
     # Get IRR from cached metrics
@@ -415,6 +456,8 @@ async def get_position(
         "unrealized_gain": unrealized_gain,
         "return_percentage": return_percentage,
         "irr": irr,
+        "today_change": today_change,
+        "today_change_percent": today_change_percent,
         "last_calculated_at": position.last_calculated_at,
         "splits": [
             {

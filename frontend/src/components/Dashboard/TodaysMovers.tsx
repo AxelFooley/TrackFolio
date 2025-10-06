@@ -2,12 +2,60 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useHoldings } from '@/hooks/usePortfolio';
+import { useRealtimePrices } from '@/hooks/useRealtimePrices';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { TrendingUp, TrendingDown } from 'lucide-react';
+import { useMemo } from 'react';
 
 export function TodaysMovers() {
   const { data: holdings, isLoading } = useHoldings();
+  const { realtimePrices } = useRealtimePrices();
 
+  // Merge holdings with real-time data for consistency
+  const holdingsWithRealtimeData = useMemo(() => {
+    if (!holdings) return [];
+
+    return holdings.map((holding) => {
+      const realtimePrice = realtimePrices.get(holding.ticker);
+
+      if (realtimePrice) {
+        // Calculate updated values with real-time price
+        const currentValue = holding.quantity * realtimePrice.current_price;
+        const unrealizedGain = currentValue - holding.cost_basis;
+        const returnPercentage = holding.cost_basis > 0
+          ? unrealizedGain / holding.cost_basis
+          : 0;
+
+        return {
+          ...holding,
+          current_price: realtimePrice.current_price,
+          current_value: currentValue,
+          unrealized_gain: unrealizedGain,
+          return_percentage: returnPercentage,
+          // Total position change (not per-share)
+          today_change: realtimePrice.change_amount * holding.quantity,
+          today_change_percent: realtimePrice.change_percent,
+        };
+      }
+
+      return holding;
+    });
+  }, [holdings, realtimePrices]);
+
+  // Filter holdings with today_change_percent and sort
+  const holdingsWithChange = useMemo(() => {
+    return holdingsWithRealtimeData
+      .filter((h) => h.today_change_percent !== null && h.today_change_percent !== undefined && h.today_change_percent !== 0)
+      .sort((a, b) => (b.today_change_percent || 0) - (a.today_change_percent || 0));
+  }, [holdingsWithRealtimeData]);
+
+  const gainers = useMemo(() => holdingsWithChange.filter(h => (h.today_change_percent || 0) > 0).slice(0, 3), [holdingsWithChange]);
+  const losers = useMemo(() => {
+    const filteredLosers = holdingsWithChange.filter(h => (h.today_change_percent || 0) < 0);
+    return [...filteredLosers].sort((a, b) => (a.today_change_percent || 0) - (b.today_change_percent || 0)).slice(0, 3);
+  }, [holdingsWithChange]);
+
+  // Handle loading and empty states
   if (isLoading) {
     return (
       <Card>
@@ -43,11 +91,6 @@ export function TodaysMovers() {
     );
   }
 
-  // Filter holdings with today_change_percent and sort
-  const holdingsWithChange = holdings
-    .filter((h) => h.today_change_percent !== undefined && h.today_change_percent !== null)
-    .sort((a, b) => (b.today_change_percent || 0) - (a.today_change_percent || 0));
-
   // If no holdings have today's change data
   if (holdingsWithChange.length === 0) {
     return (
@@ -66,9 +109,6 @@ export function TodaysMovers() {
       </Card>
     );
   }
-
-  const gainers = holdingsWithChange.filter(h => (h.today_change_percent || 0) > 0).slice(0, 3);
-  const losers = holdingsWithChange.filter(h => (h.today_change_percent || 0) < 0).slice(0, 3);
 
   return (
     <Card>

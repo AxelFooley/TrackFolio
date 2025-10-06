@@ -24,7 +24,7 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
 
   const fetchPrices = useCallback(async () => {
     try {
-      const prices = await getRealtimePrices();
+      const response = await getRealtimePrices();
 
       // Debounce the state update to prevent UI flickering
       if (debounceTimerRef.current) {
@@ -33,7 +33,7 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
 
       debounceTimerRef.current = setTimeout(() => {
         const priceMap = new Map<string, RealtimePrice>();
-        prices.prices.forEach((price) => {
+response.prices.forEach((price) => {
           priceMap.set(price.ticker, price);
         });
 
