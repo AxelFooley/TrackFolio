@@ -99,9 +99,9 @@ export default function HoldingsPage() {
     return 0;
   });
 
-  const totalValue = holdings.reduce((sum, h) => sum + (h.current_value || 0), 0);
-  const totalProfit = holdings.reduce((sum, h) => sum + (h.unrealized_gain || 0), 0);
-  const totalCostBasis = holdings.reduce((sum, h) => sum + (h.cost_basis || 0), 0);
+const totalValue = holdings.reduce((sum, h) => sum + (Number(h.current_value) || 0), 0);
+  const totalProfit = holdings.reduce((sum, h) => sum + (Number(h.unrealized_gain) || 0), 0);
+  const totalCostBasis = holdings.reduce((sum, h) => sum + (Number(h.cost_basis) || 0), 0);
   const totalReturnPercent = totalCostBasis > 0 ? (totalProfit / totalCostBasis) * 100 : 0;
 
   return (

@@ -33,7 +33,7 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
 
       debounceTimerRef.current = setTimeout(() => {
         const priceMap = new Map<string, RealtimePrice>();
-        response.prices.forEach((price) => {
+response.prices.forEach((price) => {
           priceMap.set(price.ticker, price);
         });
 
