@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.exc import IntegrityError
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime
 import logging
 import asyncio
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
 
-async def fetch_ticker_metadata(ticker: str) -> tuple[Optional[str], str]:
+async def fetch_ticker_metadata(ticker: str) -> Tuple[Optional[str], str]:
     """
     Fetch ISIN and description from Yahoo Finance for a given ticker.
 
@@ -367,9 +367,11 @@ async def update_transaction(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Update transaction (fees only).
+    Update transaction fields.
 
-    As per PRD, only fees can be edited after import.
+    Supports updating operation_date, ticker, type, quantity, amount (price_per_share),
+    currency, and fees. Handles currency conversion, ticker metadata refresh,
+    and transaction hash recalculation.
     """
     result = await db.execute(
         select(Transaction).where(Transaction.id == transaction_id)
@@ -379,15 +381,121 @@ async def update_transaction(
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    # Update fees
-    transaction.fees = transaction_update.fees
+    # Check if any fields are actually being updated
+    updates = {}
+
+    # Update operation_date if provided
+    if transaction_update.operation_date is not None:
+        updates['operation_date'] = transaction_update.operation_date
+        updates['value_date'] = transaction_update.operation_date  # Keep value_date same as operation_date for manual edits
+
+    # Update ticker if provided
+    if transaction_update.ticker is not None:
+        updates['ticker'] = transaction_update.ticker
+        # Fetch new ISIN and description for the new ticker
+        isin, description = await fetch_ticker_metadata(transaction_update.ticker)
+        updates['isin'] = isin
+        updates['description'] = description
+
+    # Update transaction_type if provided
+    if transaction_update.type is not None:
+        updates['transaction_type'] = TransactionType(transaction_update.type)
+
+    # Update quantity if provided
+    if transaction_update.quantity is not None:
+        updates['quantity'] = transaction_update.quantity
+
+    # Update price_per_share if provided (frontend sends 'amount')
+    if transaction_update.amount is not None:
+        updates['price_per_share'] = transaction_update.amount
+
+    # Update currency if provided
+    if transaction_update.currency is not None:
+        updates['currency'] = transaction_update.currency
+
+    # Update fees if provided
+    if transaction_update.fees is not None:
+        updates['fees'] = transaction_update.fees
+
+    # If no updates provided, return the transaction as-is
+    if not updates:
+        return transaction
+
+    # Apply updates to the transaction object
+    for field, value in updates.items():
+        setattr(transaction, field, value)
+
+    # Recalculate amounts if quantity, price_per_share, or currency changed
+    if 'quantity' in updates or 'price_per_share' in updates or 'currency' in updates:
+        # Calculate amount_currency
+        amount_currency = transaction.quantity * transaction.price_per_share
+        transaction.amount_currency = amount_currency
+
+        # Convert to EUR if needed
+        if transaction.currency == "EUR":
+            transaction.amount_eur = amount_currency
+        else:
+            # For non-EUR currencies, fetch FX rate and convert
+            try:
+                fx_rate = await PriceFetcher.fetch_fx_rate(transaction.currency, "EUR")
+                if fx_rate is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Could not fetch exchange rate for {transaction.currency} to EUR. Please try again later."
+                    )
+
+                transaction.amount_eur = amount_currency * fx_rate
+                logger.info(f"Converted {amount_currency} {transaction.currency} to {transaction.amount_eur} EUR using rate {fx_rate}")
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.exception(f"Error converting {transaction.currency} to EUR: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to convert {transaction.currency} to EUR. Please try again later."
+                )
+
+    # Recalculate transaction hash if any of these fields changed
+    hash_fields_changed = any(field in updates for field in ['operation_date', 'ticker', 'quantity', 'price_per_share'])
+    if hash_fields_changed:
+        # Generate new transaction hash
+        new_transaction_hash = DeduplicationService.calculate_hash(
+            operation_date=transaction.operation_date,
+            ticker=transaction.ticker,
+            quantity=transaction.quantity,
+            price_per_share=transaction.price_per_share,
+            order_reference=transaction.order_reference
+        )
+
+        # Check if the new hash would create a duplicate
+        is_dup = await DeduplicationService.is_duplicate(db, new_transaction_hash, exclude_id=transaction.id)
+        if is_dup:
+            raise HTTPException(
+                status_code=409,
+                detail="Updating this transaction would create a duplicate. A transaction with the same date, ticker, quantity, and price already exists."
+            )
+
+        transaction.transaction_hash = new_transaction_hash
+
+    # Update timestamp
     transaction.updated_at = datetime.utcnow()
 
+    # Save changes
     await db.commit()
     await db.refresh(transaction)
 
-    # Recalculate position for this ISIN
-    await PositionManager.recalculate_position(db, transaction.isin)
+    # Recalculate position for this ISIN (might be different if ticker changed)
+    if transaction.isin:
+        await PositionManager.recalculate_position(db, transaction.isin)
+
+    # Detect and record any new splits
+    await PositionManager.detect_and_record_splits(db)
+
+    # Trigger background tasks for historical data updates
+    from app.tasks.auto_backfill import trigger_automatic_backfill
+    trigger_automatic_backfill.delay()
+    logger.info(f"Updated transaction {transaction_id}: {transaction.ticker} on {transaction.operation_date}")
 
     return transaction
 

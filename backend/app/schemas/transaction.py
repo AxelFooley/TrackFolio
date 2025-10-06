@@ -34,8 +34,14 @@ class TransactionCreate(BaseModel):
 
 
 class TransactionUpdate(BaseModel):
-    """Schema for updating transaction (fees only)."""
-    fees: Decimal = Field(..., ge=0)
+    """Schema for updating transaction fields."""
+    operation_date: Optional[date] = None
+    ticker: Optional[str] = None
+    type: Optional[str] = Field(None, pattern="^(buy|sell)$")
+    quantity: Optional[Decimal] = Field(None, gt=0)
+    amount: Optional[Decimal] = Field(None, gt=0)  # This is price_per_share
+    currency: Optional[str] = None
+    fees: Optional[Decimal] = Field(None, ge=0)
 
 
 class TransactionResponse(BaseModel):
