@@ -77,12 +77,12 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
                     <TableCell>
                       <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          transaction.type === 'buy'
+                          transaction.transaction_type === 'buy'
                             ? 'bg-success/10 text-success'
                             : 'bg-danger/10 text-danger'
                         }`}
                       >
-                        {transaction.type?.toUpperCase() || 'N/A'}
+                        {transaction.transaction_type?.toUpperCase() || 'N/A'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right font-mono">

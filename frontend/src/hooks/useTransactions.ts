@@ -5,7 +5,7 @@ import type { TransactionUpdate, TransactionCreate } from '@/lib/types';
 export function useTransactions(skip: number = 0, limit: number = 100) {
   return useQuery({
     queryKey: ['transactions', skip, limit],
-    queryFn: () => getTransactions(skip, limit),
+    queryFn: () => getTransactions({ skip, limit }),
     staleTime: 30000, // 30 seconds
   });
 }

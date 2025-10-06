@@ -30,7 +30,10 @@ export default function SettingsPage() {
     }
 
     try {
-      await setBenchmarkMutation.mutateAsync(benchmarkTicker.toUpperCase());
+      await setBenchmarkMutation.mutateAsync({
+        ticker: benchmarkTicker.toUpperCase(),
+        description: `Benchmark: ${benchmarkTicker.toUpperCase()}`,
+      });
       toast({
         title: 'Benchmark updated',
         description: `Benchmark set to ${benchmarkTicker.toUpperCase()}`,
