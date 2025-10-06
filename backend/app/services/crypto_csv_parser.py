@@ -12,7 +12,7 @@ Detects crypto transactions and generates appropriate ISIN-like identifiers.
 from io import StringIO
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, ClassVar
 import pandas as pd
 import hashlib
 import logging
@@ -55,7 +55,7 @@ class CryptoCSVParser:
     """
 
     # Coinbase column mappings
-    COINBASE_COLUMNS = {
+    COINBASE_COLUMNS: ClassVar[Dict[str, str]] = {
         "Timestamp": "timestamp",
         "Transaction Type": "transaction_type",
         "Asset": "asset",
@@ -71,7 +71,7 @@ class CryptoCSVParser:
     }
 
     # Binance column mappings
-    BINANCE_COLUMNS = {
+    BINANCE_COLUMNS: ClassVar[Dict[str, str]] = {
         "Date": "date",
         "Pair": "pair",
         "Type": "type",
@@ -84,7 +84,7 @@ class CryptoCSVParser:
     }
 
     # Kraken column mappings
-    KRAKEN_COLUMNS = {
+    KRAKEN_COLUMNS: ClassVar[Dict[str, str]] = {
         "txid": "txid",
         "time": "time",
         "type": "type",
