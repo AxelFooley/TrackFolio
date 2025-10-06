@@ -189,48 +189,78 @@ async def search_tickers(
 
 async def _enhanced_yfinance_search(query_lower: str, search_results: List[dict]):
     """
-    Enhanced yfinance search with multiple strategies for finding tickers.
+    Enhanced yfinance search using Yahoo Finance's built-in search capabilities.
 
-    This function implements several search strategies:
-    1. Direct ticker lookup
-    2. Company name search
-    3. Partial matching
-    4. Common variations and expansions
+    This function uses Yahoo Finance's own search to find tickers by company name
+    or symbol, providing comprehensive and up-to-date results.
     """
 
-    search_strategies = [
-        # Strategy 1: Exact ticker match (try uppercase)
-        lambda: _try_ticker_lookup(query_lower.upper()),
+    if len(search_results) >= 8:  # Stop if we already have good results
+        return
 
-        # Strategy 2: Common company name variations
-        lambda: _try_company_name_variations(query_lower),
+    try:
+        # Use yfinance's search functionality
+        import requests
 
-        # Strategy 3: Partial ticker matches for common patterns
-        lambda: _try_partial_matches(query_lower),
+        # Yahoo Finance search URL
+        search_url = f"https://query2.finance.yahoo.com/v1/finance/search"
+        params = {
+            'q': query_lower,
+            'quotesCount': 10,
+            'newsCount': 0,
+            'listsCount': 0,
+            'enableFuzzyQuery': True,
+            'quotesQueryId': 'tss_match_phrase_query'
+        }
 
-        # Strategy 4: Try removing common suffixes/prefixes
-        lambda: _try_cleaned_query(query_lower),
-    ]
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
 
-    for strategy_func in search_strategies:
-        if len(search_results) >= 8:  # Stop if we already have good results
-            break
+        response = requests.get(search_url, params=params, headers=headers, timeout=5)
 
-        try:
-            new_results = strategy_func()
-            for result in new_results:
-                if result not in search_results and len(search_results) < 10:
-                    search_results.append(result)
-        except Exception as e:
-            logger.debug(f"Search strategy failed: {str(e)}")
-            continue
+        if response.status_code == 200:
+            data = response.json()
+
+            if 'quotes' in data and data['quotes']:
+                for quote in data['quotes'][:10]:
+                    if len(search_results) >= 10:
+                        break
+
+                    ticker = quote.get('symbol', '')
+                    name = quote.get('longname') or quote.get('shortname') or ticker
+                    quote_type = quote.get('quoteType', 'EQUITY')
+                    exchange = quote.get('exchangeDisp', '')
+
+                    if ticker and name:
+                        result = {
+                            "ticker": ticker,
+                            "name": name,
+                            "type": quote_type,
+                            "exchange": exchange
+                        }
+
+                        # Avoid duplicates
+                        if result not in search_results:
+                            search_results.append(result)
+
+    except Exception as e:
+        logger.debug(f"Yahoo Finance search failed for '{query_lower}': {str(e)}")
+
+        # Fallback to direct ticker lookup
+        fallback_results = _try_direct_ticker_lookup(query_lower)
+        for result in fallback_results:
+            if result not in search_results and len(search_results) < 10:
+                search_results.append(result)
 
 
-def _try_ticker_lookup(ticker_symbol: str) -> List[dict]:
-    """Try direct ticker lookup using yfinance."""
+def _try_direct_ticker_lookup(query: str) -> List[dict]:
+    """Fallback: Try direct ticker lookup using yfinance."""
     results = []
 
     try:
+        # Try the query as a ticker symbol
+        ticker_symbol = query.upper()
         ticker_obj = yf.Ticker(ticker_symbol)
         info = ticker_obj.info
 
@@ -238,129 +268,10 @@ def _try_ticker_lookup(ticker_symbol: str) -> List[dict]:
             results.append({
                 "ticker": info['symbol'],
                 "name": info.get('longName') or info.get('shortName') or info['symbol'],
-                "type": info.get('quoteType', 'EQUITY')
+                "type": info.get('quoteType', 'EQUITY'),
+                "exchange": info.get('exchange', '')
             })
     except Exception as e:
-        logger.debug(f"Direct ticker lookup failed for {ticker_symbol}: {str(e)}")
-
-    return results
-
-
-def _try_company_name_variations(query: str) -> List[dict]:
-    """Try various company name variations and common mappings."""
-    results = []
-
-    # Common company name mappings
-    company_mappings = {
-        "apple": "AAPL",
-        "microsoft": "MSFT",
-        "google": "GOOGL",
-        "alphabet": "GOOGL",
-        "amazon": "AMZN",
-        "tesla": "TSLA",
-        "facebook": "META",
-        "meta": "META",
-        "netflix": "NFLX",
-        "nvidia": "NVDA",
-        "berkshire": "BRK-B",
-        "warren": "BRK-B",
-        "jpmorgan": "JPM",
-        "jp morgan": "JPM",
-        "bank of america": "BAC",
-        "wells fargo": "WFC",
-        "goldman": "GS",
-        "morgan stanley": "MS",
-        "johnson": "JNJ",
-        "jnj": "JNJ",
-        "procter": "PG",
-        "pg": "PG",
-        "verizon": "VZ",
-        "at&t": "T",
-        "coca": "KO",
-        "pepsi": "PEP",
-        "mcdonald": "MCD",
-        "starbucks": "SBUX",
-        "nike": "NKE",
-        "disney": "DIS",
-        "boeing": "BA",
-        "caterpillar": "CAT",
-        "chevron": "CVX",
-        "exxon": "XOM",
-        "pfizer": "PFE",
-        "merck": "MRK",
-        "home depot": "HD",
-        "lowe": "LOW",
-        "target": "TGT",
-        "walmart": "WMT",
-        "costco": "COST",
-    }
-
-    # Check for exact matches in mappings
-    for company_name, ticker in company_mappings.items():
-        if query in company_name or company_name in query:
-            ticker_result = _try_ticker_lookup(ticker)
-            results.extend(ticker_result)
-
-    # Try common expansions
-    expansions = {
-        "vanguard": ["VOO", "VTI", "VWCE.DE", "VUSA.L"],
-        "ishares": ["EUNL.DE", "CSPX.L", "CSSPX.MI"],
-        "spdr": ["SPY", "GLD"],
-        "invesco": ["QQQ"],
-        "s&p": ["SPY", "VOO", "^GSPC", "CSPX.L"],
-        "sp500": ["SPY", "VOO", "^GSPC", "CSPX.L"],
-        "nasdaq": ["QQQ", "^IXIC"],
-        "dow": ["^DJI", "DIA"],
-        "ftse": ["^FTSE", "VUKE.L"],
-        "dax": ["^GDAXI", "EWG"],
-        "cac": ["^FCHI", "EWQ"],
-    }
-
-    for expansion_term, tickers in expansions.items():
-        if expansion_term in query or query in expansion_term:
-            for ticker in tickers[:3]:  # Limit to avoid too many results
-                ticker_result = _try_ticker_lookup(ticker)
-                results.extend(ticker_result)
-
-    return results
-
-
-def _try_partial_matches(query: str) -> List[dict]:
-    """Try partial matches for common ticker patterns."""
-    results = []
-
-    # Common patterns
-    if len(query) >= 2:
-        # Try common single-letter prefixes
-        common_prefixes = ["A", "B", "C", "M", "S", "T"]
-        for prefix in common_prefixes:
-            if query.startswith(prefix.lower()):
-                test_tickers = [f"{prefix}{query[1:].upper()}", f"{prefix}{query[1:].upper()}A"]
-                for ticker in test_tickers:
-                    ticker_result = _try_ticker_lookup(ticker)
-                    if ticker_result:
-                        results.extend(ticker_result)
-                        break  # Only take first successful match per prefix
-
-    return results
-
-
-def _try_cleaned_query(query: str) -> List[dict]:
-    """Try cleaned versions of the query."""
-    results = []
-
-    # Remove common suffixes and try again
-    cleaned_query = query
-    suffixes_to_remove = ["corporation", "corp", "inc", "llc", "ltd", "limited", "company", "co", "group", "holdings", "plc"]
-
-    for suffix in suffixes_to_remove:
-        if cleaned_query.endswith(suffix):
-            cleaned_query = cleaned_query[:-len(suffix)].strip()
-            break
-
-    if cleaned_query != query and len(cleaned_query) >= 2:
-        # Try the cleaned query with existing strategies
-        results.extend(_try_company_name_variations(cleaned_query))
-        results.extend(_try_ticker_lookup(cleaned_query.upper()))
+        logger.debug(f"Direct ticker lookup failed for {query}: {str(e)}")
 
     return results
