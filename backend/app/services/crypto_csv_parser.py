@@ -200,7 +200,7 @@ class CryptoCSVParser:
         return ticker
 
     @staticmethod
-    def generate_crypto_identifier(ticker: str, description: str = None) -> str:
+    def generate_crypto_identifier(ticker: str, description: Optional[str] = None) -> str:
         """
         Generate ISIN-like identifier for cryptocurrency.
 
