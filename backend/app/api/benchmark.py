@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 import logging
 import yfinance as yf
+import asyncio
+import httpx
 
 from app.database import get_db
 from app.models import Benchmark, Transaction
@@ -199,10 +201,7 @@ async def _enhanced_yfinance_search(query_lower: str, search_results: List[dict]
         return
 
     try:
-        # Use yfinance's search functionality
-        import requests
-
-        # Yahoo Finance search URL
+        # Use yfinance's search functionality with async httpx
         search_url = f"https://query2.finance.yahoo.com/v1/finance/search"
         params = {
             'q': query_lower,
@@ -217,10 +216,11 @@ async def _enhanced_yfinance_search(query_lower: str, search_results: List[dict]
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
 
-        response = requests.get(search_url, params=params, headers=headers, timeout=5)
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(search_url, params=params, headers=headers)
 
         if response.status_code == 200:
-            data = response.json()
+            data = await response.json()
 
             if 'quotes' in data and data['quotes']:
                 for quote in data['quotes'][:10]:
@@ -248,28 +248,29 @@ async def _enhanced_yfinance_search(query_lower: str, search_results: List[dict]
         logger.debug(f"Yahoo Finance search failed for '{query_lower}': {str(e)}")
 
         # Fallback to direct ticker lookup
-        fallback_results = _try_direct_ticker_lookup(query_lower)
+        fallback_results = await _try_direct_ticker_lookup(query_lower)
         for result in fallback_results:
             if result not in search_results and len(search_results) < 10:
                 search_results.append(result)
 
 
-def _try_direct_ticker_lookup(query: str) -> List[dict]:
+async def _try_direct_ticker_lookup(query: str) -> List[dict]:
     """Fallback: Try direct ticker lookup using yfinance."""
     results = []
 
     try:
-        # Try the query as a ticker symbol
+        # Try the query as a ticker symbol using asyncio.to_thread to avoid blocking
         ticker_symbol = query.upper()
-        ticker_obj = yf.Ticker(ticker_symbol)
-        info = ticker_obj.info
 
-        if info and info.get('symbol') and info.get('longName'):
+        # Run yfinance operations in a separate thread to avoid blocking the event loop
+        ticker_info = await asyncio.to_thread(lambda: yf.Ticker(ticker_symbol).info)
+
+        if ticker_info and ticker_info.get('symbol') and ticker_info.get('longName'):
             results.append({
-                "ticker": info['symbol'],
-                "name": info.get('longName') or info.get('shortName') or info['symbol'],
-                "type": info.get('quoteType', 'EQUITY'),
-                "exchange": info.get('exchange', '')
+                "ticker": ticker_info['symbol'],
+                "name": ticker_info.get('longName') or ticker_info.get('shortName') or ticker_info['symbol'],
+                "type": ticker_info.get('quoteType', 'EQUITY'),
+                "exchange": ticker_info.get('exchange', '')
             })
     except Exception as e:
         logger.debug(f"Direct ticker lookup failed for {query}: {str(e)}")

@@ -681,14 +681,19 @@ class PriceFetcher:
                 price_data = hist.loc[target_date]
                 logger.info(f"Found exact price for {ticker} on {target_date}")
             else:
-                # If exact date not found, find the closest available date before or after
+                # If exact date not found, prefer dates on or before target_date
                 available_dates = hist.index.date
-                closest_date = min(
-                    available_dates,
-                    key=lambda d: abs((d - target_date).days)
-                )
-                price_data = hist.loc[closest_date]
-                logger.info(f"Using closest available date {closest_date} for {ticker} (target: {target_date})")
+                prior_dates = [d for d in available_dates if d <= target_date]
+
+                if prior_dates:
+                    # Use the latest prior trading day
+                    closest_date = max(prior_dates)
+                    price_data = hist.loc[closest_date]
+                    logger.info(f"Using prior trading day {closest_date} for {ticker} (target: {target_date})")
+                else:
+                    # No prior dates available, use fallback helper
+                    logger.info(f"No prior trading days found for {ticker} on {target_date}, using fallback helper")
+                    return self._find_previous_trading_day_price(ticker, resolved_ticker, target_date)
 
             # Detect currency
             currency = self._detect_currency_from_ticker(resolved_ticker)

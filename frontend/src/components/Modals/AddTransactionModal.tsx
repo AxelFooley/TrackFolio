@@ -65,45 +65,74 @@ export function AddTransactionModal({
         !manuallyModifiedPrice &&
         !isFetchingPrice
       ) {
+        // Create AbortController for cancellation
+        const abortController = new AbortController();
+
+        // Capture ticker and date at the start to prevent stale closures
+        const localTicker = formData.ticker;
+        const localDate = formData.operation_date;
+
         setIsFetchingPrice(true);
         setPriceFetchError(null);
         setPriceAutoFetched(false);
 
         try {
-          const priceData = await getHistoricalPrice(formData.ticker, formData.operation_date);
+          const priceData = await getHistoricalPrice(localTicker, localDate, abortController.signal);
 
-          // Check if we have a valid price and no error
-          if (priceData && priceData.price !== null && priceData.price > 0 && !priceData.error) {
-            setFormData(prev => ({
-              ...prev,
-              amount: priceData.price as number
-            }));
-            lastAutoFetchedPrice.current = priceData.price as number;
-            setPriceAutoFetched(true);
-          } else if (priceData?.error) {
-            // Handle API error response
-            console.error('API returned error:', priceData.error);
-            setPriceFetchError(priceData.error);
+          // Verify component is still interested in this ticker/date before updating state
+          if (formData.ticker === localTicker && formData.operation_date === localDate) {
+            // Check if we have a valid price and no error
+            if (priceData && priceData.price !== null && priceData.price > 0 && !priceData.error) {
+              setFormData(prev => ({
+                ...prev,
+                amount: priceData.price as number
+              }));
+              lastAutoFetchedPrice.current = priceData.price as number;
+              setPriceAutoFetched(true);
+            } else if (priceData?.error) {
+              // Handle API error response
+              console.error('API returned error:', priceData.error);
+              setPriceFetchError(priceData.error);
+            }
           }
         } catch (error: any) {
+          // Don't show toast if request was aborted
+          if (error.name === 'AbortError') {
+            console.log('Historical price fetch aborted');
+            return;
+          }
+
           console.error('Failed to fetch historical price:', error);
           const errorMessage = error.response?.data?.detail || 'Failed to fetch price';
-          setPriceFetchError(errorMessage);
 
-          // Show a subtle toast notification for price fetching errors
-          toast({
-            title: 'Price fetch failed',
-            description: `Could not fetch historical price for ${formData.ticker}. You can enter the price manually.`,
-            variant: 'destructive',
-            duration: 3000, // Short duration to not be too disruptive
-          });
+          // Only update error state if component is still interested in this ticker/date
+          if (formData.ticker === localTicker && formData.operation_date === localDate) {
+            setPriceFetchError(errorMessage);
+
+            // Show a subtle toast notification for price fetching errors
+            toast({
+              title: 'Price fetch failed',
+              description: `Could not fetch historical price for ${localTicker}. You can enter the price manually.`,
+              variant: 'destructive',
+              duration: 3000, // Short duration to not be too disruptive
+            });
+          }
         } finally {
-          setIsFetchingPrice(false);
+          // Only update loading state if component is still interested in this ticker/date
+          if (formData.ticker === localTicker && formData.operation_date === localDate) {
+            setIsFetchingPrice(false);
+          }
         }
+
+        // Cleanup function to abort request if dependencies change
+        return () => {
+          abortController.abort();
+        };
       }
     };
 
-    fetchHistoricalPrice();
+    const cleanup = fetchHistoricalPrice();
+    return cleanup;
   }, [formData.ticker, formData.operation_date, manuallyModifiedPrice]); // Removed isFetchingPrice from dependencies
 
   // Reset price modification state when form is reset or modal opens
