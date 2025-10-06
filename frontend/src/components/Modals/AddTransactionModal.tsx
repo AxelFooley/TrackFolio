@@ -72,13 +72,18 @@ export function AddTransactionModal({
         try {
           const priceData = await getHistoricalPrice(formData.ticker, formData.operation_date);
 
-          if (priceData && priceData.close > 0) {
+          // Check if we have a valid price and no error
+          if (priceData && priceData.price && priceData.price > 0 && !priceData.error) {
             setFormData(prev => ({
               ...prev,
-              amount: priceData.close
+              amount: priceData.price
             }));
-            lastAutoFetchedPrice.current = priceData.close;
+            lastAutoFetchedPrice.current = priceData.price;
             setPriceAutoFetched(true);
+          } else if (priceData?.error) {
+            // Handle API error response
+            console.error('API returned error:', priceData.error);
+            setPriceFetchError(priceData.error);
           }
         } catch (error: any) {
           console.error('Failed to fetch historical price:', error);
@@ -99,7 +104,7 @@ export function AddTransactionModal({
     };
 
     fetchHistoricalPrice();
-  }, [formData.ticker, formData.operation_date, manuallyModifiedPrice, isFetchingPrice]);
+  }, [formData.ticker, formData.operation_date, manuallyModifiedPrice]); // Removed isFetchingPrice from dependencies
 
   // Reset price modification state when form is reset or modal opens
   useEffect(() => {
