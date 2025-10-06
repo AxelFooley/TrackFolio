@@ -100,7 +100,7 @@ export function TodaysMovers() {
                     <div className="text-right">
                       <p className="font-medium text-success">
                         {holding.today_change_percent !== null && holding.today_change_percent !== undefined
-                          ? formatPercentage(holding.today_change_percent * 100)
+                          ? formatPercentage(holding.today_change_percent)
                           : '—'}
                       </p>
                       <p className="text-sm text-gray-600">
@@ -136,7 +136,7 @@ export function TodaysMovers() {
                     <div className="text-right">
                       <p className="font-medium text-danger">
                         {holding.today_change_percent !== null && holding.today_change_percent !== undefined
-                          ? formatPercentage(holding.today_change_percent * 100)
+                          ? formatPercentage(holding.today_change_percent)
                           : '—'}
                       </p>
                       <p className="text-sm text-gray-600">

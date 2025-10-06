@@ -20,6 +20,8 @@ class PositionResponse(BaseModel):
     unrealized_gain: Optional[Decimal] = None
     return_percentage: Optional[float] = None
     irr: Optional[float] = None
+    today_change: Optional[Decimal] = None
+    today_change_percent: Optional[float] = None
     last_calculated_at: datetime
 
     class Config:

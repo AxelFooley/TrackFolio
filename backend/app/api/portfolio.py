@@ -131,14 +131,16 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
     response = []
 
     for position in positions:
-        # Get latest price (use current_ticker)
+        # Get latest and previous prices (use current_ticker)
         price_result = await db.execute(
             select(PriceHistory)
             .where(PriceHistory.ticker == position.current_ticker)
             .order_by(PriceHistory.date.desc())
-            .limit(1)
+            .limit(2)
         )
-        latest_price = price_result.scalar_one_or_none()
+        prices = price_result.scalars().all()
+        latest_price = prices[0] if prices else None
+        previous_price = prices[1] if len(prices) > 1 else None
 
         # Get cached metrics (IRR, etc.) - use current_ticker for backwards compatibility
         metrics_result = await db.execute(
@@ -160,6 +162,13 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
             else None
         )
 
+        # Calculate today's change
+        today_change = None
+        today_change_percent = None
+        if current_price and previous_price:
+            today_change = current_price - previous_price.close
+            today_change_percent = float((today_change / previous_price.close) * 100) if previous_price.close != 0 else None
+
         # Get IRR from cached metrics
         irr = None
         if cached_metrics and cached_metrics.metric_value:
@@ -180,6 +189,8 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
                 unrealized_gain=unrealized_gain,
                 return_percentage=return_percentage,
                 irr=irr,
+                today_change=today_change,
+                today_change_percent=today_change_percent,
                 last_calculated_at=position.last_calculated_at
             )
         )
