@@ -36,15 +36,22 @@ export function EditTransactionModal({
   onOpenChange,
 }: EditTransactionModalProps) {
   // Initialize form state with current transaction values
-  const [operationDate, setOperationDate] = useState(
-    transaction.operation_date.split('T')[0] // Format as YYYY-MM-DD for input[type="date"]
-  );
-  const [ticker, setTicker] = useState(transaction.ticker);
-  const [type, setType] = useState<'buy' | 'sell'>(transaction.type);
-  const [quantity, setQuantity] = useState(transaction.quantity.toString());
-  const [pricePerShare, setPricePerShare] = useState(transaction.price_per_share.toString());
-  const [fees, setFees] = useState(transaction.fees.toString());
-  const [currency, setCurrency] = useState(transaction.currency);
+  const [form, setForm] = useState({
+    operationDate: transaction.operation_date.split('T')[0], // Format as YYYY-MM-DD for input[type="date"]
+    ticker: transaction.ticker,
+    type: transaction.type as 'buy' | 'sell',
+    quantity: transaction.quantity.toString(),
+    pricePerShare: transaction.price_per_share.toString(),
+    fees: transaction.fees.toString(),
+    currency: transaction.currency,
+  });
+
+  const handleFieldChange = (field: keyof typeof form, value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
 
   const updateMutation = useUpdateTransaction();
   const { toast } = useToast();
@@ -55,36 +62,36 @@ export function EditTransactionModal({
     // Validate all form fields
     const errors: string[] = [];
 
-    if (!operationDate) {
+    if (!form.operationDate) {
       errors.push('Operation date is required');
     }
 
-    if (!ticker || ticker.trim().length === 0) {
+    if (!form.ticker || form.ticker.trim().length === 0) {
       errors.push('Ticker is required');
-    } else if (!/^[A-Za-z0-9.-]+$/.test(ticker.trim())) {
+    } else if (!/^[A-Za-z0-9.-]+$/.test(form.ticker.trim())) {
       errors.push('Ticker contains invalid characters');
     }
 
-    if (!type) {
+    if (!form.type) {
       errors.push('Transaction type is required');
     }
 
-    const quantityValue = parseFloat(quantity);
+    const quantityValue = parseFloat(form.quantity);
     if (isNaN(quantityValue) || quantityValue <= 0) {
       errors.push('Quantity must be a positive number');
     }
 
-    const priceValue = parseFloat(pricePerShare);
+    const priceValue = parseFloat(form.pricePerShare);
     if (isNaN(priceValue) || priceValue <= 0) {
       errors.push('Price per share must be a positive number');
     }
 
-    const feesValue = parseFloat(fees);
+    const feesValue = parseFloat(form.fees);
     if (isNaN(feesValue) || feesValue < 0) {
-      errors.push('Fees must be a positive number or zero');
+      errors.push('Fees must be a non-negative number');
     }
 
-    if (!currency || currency.trim().length === 0) {
+    if (!form.currency || form.currency.trim().length === 0) {
       errors.push('Currency is required');
     }
 
@@ -101,12 +108,13 @@ export function EditTransactionModal({
       await updateMutation.mutateAsync({
         id: transaction.id,
         data: {
-          operation_date: new Date(operationDate).toISOString(),
-          ticker: ticker.trim().toUpperCase(),
-          type,
+          operation_date: new Date(form.operationDate).toISOString(),
+          ticker: form.ticker.trim().toUpperCase(),
+          type: form.type,
           quantity: quantityValue,
           amount: priceValue,
           fees: feesValue,
+          currency: form.currency.trim().toUpperCase(),
         },
       });
       toast({
@@ -143,8 +151,8 @@ export function EditTransactionModal({
               <Input
                 id="operation_date"
                 type="date"
-                value={operationDate}
-                onChange={(e) => setOperationDate(e.target.value)}
+                value={form.operationDate}
+                onChange={(e) => handleFieldChange('operationDate', e.target.value)}
                 required
               />
             </div>
@@ -157,8 +165,8 @@ export function EditTransactionModal({
               <Input
                 id="ticker"
                 type="text"
-                value={ticker}
-                onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                value={form.ticker}
+                onChange={(e) => handleFieldChange('ticker', e.target.value.toUpperCase())}
                 placeholder="AAPL"
                 required
               />
@@ -169,7 +177,7 @@ export function EditTransactionModal({
               <Label htmlFor="type">
                 Transaction Type *
               </Label>
-              <Select value={type} onValueChange={(value: 'buy' | 'sell') => setType(value)}>
+              <Select value={form.type} onValueChange={(value: 'buy' | 'sell') => handleFieldChange('type', value)}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
@@ -190,8 +198,8 @@ export function EditTransactionModal({
                 type="number"
                 step="0.000001"
                 min="0.000001"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
+                value={form.quantity}
+                onChange={(e) => handleFieldChange('quantity', e.target.value)}
                 placeholder="0"
                 required
               />
@@ -200,15 +208,15 @@ export function EditTransactionModal({
             {/* Price per Share */}
             <div className="space-y-2">
               <Label htmlFor="price_per_share">
-                Price per Share ({currency}) *
+                Price per Share ({form.currency}) *
               </Label>
               <Input
                 id="price_per_share"
                 type="number"
                 step="0.000001"
                 min="0.000001"
-                value={pricePerShare}
-                onChange={(e) => setPricePerShare(e.target.value)}
+                value={form.pricePerShare}
+                onChange={(e) => handleFieldChange('pricePerShare', e.target.value)}
                 placeholder="0.00"
                 required
               />
@@ -217,15 +225,15 @@ export function EditTransactionModal({
             {/* Fees */}
             <div className="space-y-2">
               <Label htmlFor="fees">
-                Fees ({currency})
+                Fees ({form.currency})
               </Label>
               <Input
                 id="fees"
                 type="number"
                 step="0.01"
                 min="0"
-                value={fees}
-                onChange={(e) => setFees(e.target.value)}
+                value={form.fees}
+                onChange={(e) => handleFieldChange('fees', e.target.value)}
                 placeholder="0.00"
               />
             </div>
@@ -235,15 +243,16 @@ export function EditTransactionModal({
               <Label htmlFor="currency">
                 Currency *
               </Label>
-              <Input
-                id="currency"
-                type="text"
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-                placeholder="USD"
-                maxLength={3}
-                required
-              />
+              <Select value={form.currency} onValueChange={(value) => handleFieldChange('currency', value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select currency" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="EUR">EUR</SelectItem>
+                  <SelectItem value="USD">USD</SelectItem>
+                  <SelectItem value="GBP">GBP</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

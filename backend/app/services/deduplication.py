@@ -7,7 +7,7 @@ as per PRD Section 4.1 - Transaction Management.
 import hashlib
 from datetime import date
 from decimal import Decimal
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Set, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import logging
@@ -169,7 +169,7 @@ class DeduplicationService:
     async def is_duplicate(
         db: AsyncSession,
         transaction_hash: str,
-        exclude_id: int = None
+        exclude_id: Optional[int] = None
     ) -> bool:
         """
         Check if a single transaction is a duplicate based on hash.
