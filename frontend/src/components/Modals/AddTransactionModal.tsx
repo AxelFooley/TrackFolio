@@ -73,12 +73,12 @@ export function AddTransactionModal({
           const priceData = await getHistoricalPrice(formData.ticker, formData.operation_date);
 
           // Check if we have a valid price and no error
-          if (priceData && priceData.price && priceData.price > 0 && !priceData.error) {
+          if (priceData && priceData.price !== null && priceData.price > 0 && !priceData.error) {
             setFormData(prev => ({
               ...prev,
-              amount: priceData.price
+              amount: priceData.price as number
             }));
-            lastAutoFetchedPrice.current = priceData.price;
+            lastAutoFetchedPrice.current = priceData.price as number;
             setPriceAutoFetched(true);
           } else if (priceData?.error) {
             // Handle API error response
