@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.exc import IntegrityError
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import logging
 
@@ -24,7 +24,7 @@ from app.services.csv_parser import DirectaCSVParser
 from app.services.deduplication import DeduplicationService
 from app.services.position_manager import PositionManager
 from app.services.price_fetcher import PriceFetcher
-from app.services.calculations import FinancialCalculator
+from app.services.calculations import FinancialCalculations
 import yfinance as yf
 from decimal import Decimal
 
