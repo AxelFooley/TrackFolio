@@ -44,7 +44,7 @@ export function AssetHeader({ position }: AssetHeaderProps) {
                 <span className="text-lg font-medium">
                   {formatCurrency(position.today_change, position.currency)} (
                   {position.today_change_percent !== null && position.today_change_percent !== undefined
-                    ? formatPercentage(position.today_change_percent * 100)
+                    ? formatPercentage(position.today_change_percent)
                     : '—'})
                 </span>
               </div>
