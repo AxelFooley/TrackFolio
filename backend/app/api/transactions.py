@@ -421,6 +421,9 @@ async def update_transaction(
     if not updates:
         return transaction
 
+    # Store original ISIN before applying updates for position recalculation
+    original_isin = transaction.isin
+
     # Apply updates to the transaction object
     for field, value in updates.items():
         setattr(transaction, field, value)
@@ -485,9 +488,13 @@ async def update_transaction(
     await db.commit()
     await db.refresh(transaction)
 
-    # Recalculate position for this ISIN (might be different if ticker changed)
+    # Recalculate positions for both original and new ISINs
     if transaction.isin:
         await PositionManager.recalculate_position(db, transaction.isin)
+
+    # Also recalculate original ISIN if it's different and not None
+    if original_isin and original_isin != transaction.isin:
+        await PositionManager.recalculate_position(db, original_isin)
 
     # Detect and record any new splits
     await PositionManager.detect_and_record_splits(db)
