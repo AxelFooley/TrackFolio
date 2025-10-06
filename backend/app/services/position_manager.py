@@ -92,7 +92,27 @@ class PositionManager:
 
         # Get asset metadata from first transaction
         first_txn = transactions[0]
-        asset_type = PositionManager._determine_asset_type(current_ticker)
+
+        # Enhanced ISIN handling for crypto assets
+        final_isin = isin
+        if not isin or isin.startswith("UNKNOWN-"):
+            # Check if we should upgrade to a proper crypto ISIN
+            from app.services.crypto_csv_parser import CryptoCSVParser
+            if CryptoCSVParser.is_crypto_transaction(current_ticker):
+                final_isin = CryptoCSVParser.generate_crypto_identifier(
+                    current_ticker,
+                    first_txn.description or current_ticker
+                )
+                logger.info(f"Upgraded ISIN from {isin} to {final_isin} for crypto asset {current_ticker}")
+
+                # Update all transactions with the new ISIN
+                for txn in transactions:
+                    if not txn.isin or txn.isin.startswith("UNKNOWN-"):
+                        txn.isin = final_isin
+
+                isin = final_isin
+
+        asset_type = PositionManager._determine_asset_type(current_ticker, isin)
 
         if position is None:
             # Create new position
@@ -177,37 +197,59 @@ class PositionManager:
         return splits_found
 
     @staticmethod
-    def _determine_asset_type(ticker: str) -> AssetType:
+    def _determine_asset_type(ticker: str, isin: Optional[str] = None) -> AssetType:
         """
-        Determine asset type from ticker symbol.
+        Determine asset type from ticker symbol and ISIN.
 
-        Simple heuristic:
-        - Known crypto tickers -> CRYPTO
+        Enhanced heuristic:
+        - Crypto ISIN (starts with "XC") -> CRYPTO
+        - Crypto ticker detection -> CRYPTO
         - Contains "ETF" or ends with ".L" -> ETF
         - Otherwise -> STOCK
 
         Args:
             ticker: Asset ticker symbol
+            isin: Asset ISIN (optional, helps identify crypto)
 
         Returns:
             AssetType enum value
         """
-        ticker_upper = ticker.upper()
+        if not ticker:
+            logger.warning("Empty ticker provided, defaulting to STOCK")
+            return AssetType.STOCK
 
-        # Known crypto symbols
-        crypto_tickers = {
-            "BTC", "ETH", "USDT", "BNB", "SOL", "XRP", "ADA", "DOGE",
-            "DOT", "MATIC", "SHIB", "AVAX", "LINK", "UNI", "ATOM"
-        }
+        ticker_upper = ticker.upper().strip()
 
-        if ticker_upper in crypto_tickers:
+        # Check ISIN first (most reliable for crypto)
+        if isin:
+            isin_upper = isin.upper().strip()
+            if isin_upper.startswith("XC"):
+                logger.debug(f"Identified crypto asset by ISIN prefix: {isin}")
+                return AssetType.CRYPTO
+            elif isin_upper.startswith("UNKNOWN-"):
+                logger.warning(f"Unknown ISIN format detected: {isin}, defaulting to STOCK")
+                return AssetType.STOCK
+
+        # Enhanced crypto detection using the crypto parser
+        from app.services.crypto_csv_parser import CryptoCSVParser
+        if CryptoCSVParser.is_crypto_transaction(ticker):
+            logger.debug(f"Identified crypto asset by ticker: {ticker}")
             return AssetType.CRYPTO
+
+        # Check for placeholder ISINs that indicate crypto
+        if isin and isin.startswith("UNKNOWN-"):
+            # Check if the unknown ticker might be crypto
+            if CryptoCSVParser.is_crypto_transaction(ticker):
+                logger.info(f"Converting unknown ISIN {isin} to crypto for ticker {ticker}")
+                return AssetType.CRYPTO
 
         # ETF indicators
         if "ETF" in ticker_upper or ticker_upper.endswith(".L"):
+            logger.debug(f"Identified ETF asset: {ticker}")
             return AssetType.ETF
 
         # Default to stock
+        logger.debug(f"Defaulting to STOCK for ticker: {ticker}")
         return AssetType.STOCK
 
     @staticmethod
