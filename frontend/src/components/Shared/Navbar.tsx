@@ -8,6 +8,7 @@ import { TrendingUp } from 'lucide-react';
 const navLinks = [
   { href: '/', label: 'Dashboard' },
   { href: '/holdings', label: 'Holdings' },
+  { href: '/crypto-paper', label: 'Crypto' },
   { href: '/import', label: 'Import' },
   { href: '/settings', label: 'Settings' },
 ];

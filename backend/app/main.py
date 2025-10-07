@@ -13,7 +13,8 @@ from app.api import (
     portfolio_router,
     assets_router,
     prices_router,
-    benchmark_router
+    benchmark_router,
+    crypto_paper_router
 )
 
 # Configure logging
@@ -49,6 +50,7 @@ app.include_router(portfolio_router)
 app.include_router(assets_router)
 app.include_router(prices_router)
 app.include_router(benchmark_router)
+app.include_router(crypto_paper_router)
 
 
 @app.get("/api/health")

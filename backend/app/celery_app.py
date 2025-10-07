@@ -2,6 +2,7 @@
 Celery application configuration for background tasks.
 
 Scheduled tasks:
+- Every 5 minutes: update_crypto_prices - Fetch crypto prices from CoinGecko
 - 23:00 CET: update_daily_prices - Fetch latest prices from APIs
 - 23:15 CET: calculate_all_metrics - Calculate IRR and portfolio metrics
 - 23:30 CET: create_daily_snapshot - Create daily portfolio snapshots
@@ -19,7 +20,8 @@ celery_app = Celery(
         "app.tasks.price_updates",
         "app.tasks.metric_calculation",
         "app.tasks.snapshots",
-        "app.tasks.auto_backfill"
+        "app.tasks.auto_backfill",
+        "app.tasks.crypto_price_updates"
     ]
 )
 
@@ -46,6 +48,14 @@ celery_app.conf.update(
 
     # Beat schedule
     beat_schedule={
+        # Crypto price updates (run every 5 minutes due to high volatility)
+        "update-crypto-prices": {
+            "task": "app.tasks.crypto_price_updates.update_crypto_prices",
+            "schedule": crontab(minute="*/5"),  # Every 5 minutes
+            "options": {
+                "expires": 300,  # Task expires after 5 minutes
+            }
+        },
         "update-daily-prices": {
             "task": "app.tasks.price_updates.update_daily_prices",
             "schedule": crontab(hour=23, minute=0),  # 23:00 CET
