@@ -148,16 +148,15 @@ def validate_crypto_ticker(ticker: str) -> str:
     return normalized
 
 
-def generate_crypto_identifier(ticker: str, description: str = None) -> str:
+def generate_crypto_identifier(ticker: str) -> str:
     """
     Generate ISIN-like identifier for cryptocurrency.
 
     Since cryptos don't have ISINs, we generate a unique identifier
-    based on the ticker and description.
+    based on the ticker only for deterministic results.
 
     Args:
         ticker: Normalized ticker symbol
-        description: Optional description
 
     Returns:
         12-character identifier similar to ISIN format
@@ -170,8 +169,8 @@ def generate_crypto_identifier(ticker: str, description: str = None) -> str:
 
     ticker = validate_crypto_ticker(ticker)
 
-    # Create a deterministic hash of the ticker and description
-    content = f"CRYPTO-{ticker}-{description or 'N/A'}"
+    # Create a deterministic hash of the ticker only
+    content = f"CRYPTO-{ticker}"
     hash_obj = hashlib.sha256(content.encode())
     hash_hex = hash_obj.hexdigest()[:10]  # Take first 10 chars
 
