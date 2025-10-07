@@ -68,6 +68,8 @@ class PositionResponse(BaseModel):
         if not v:
             return v
 
+        # Normalize input first: trim and uppercase
+        v = v.strip().upper()
         asset_type = info.data.get('asset_type')
 
         if asset_type == AssetType.CRYPTO:
@@ -81,7 +83,7 @@ class PositionResponse(BaseModel):
             if not re.match(r'^XC[A-Z0-9]{10}$', v):
                 raise ValueError("Invalid crypto ISIN format")
 
-            return v.upper()
+            return v
         else:
             # Traditional ISIN validation
             if len(v) != 12:
@@ -90,7 +92,7 @@ class PositionResponse(BaseModel):
             if not re.match(r'^[A-Z]{2}[A-Z0-9]{9}[0-9]$', v):
                 raise ValueError("Invalid ISIN format")
 
-            return v.upper()
+            return v
 
     @field_validator('quantity')
     @classmethod
@@ -108,9 +110,9 @@ class PositionResponse(BaseModel):
             if v.as_tuple().exponent < -18:
                 raise ValueError("Crypto quantity precision too high (max 18 decimal places)")
         else:
-            # Traditional assets typically don't need more than 6 decimal places
-            if v.as_tuple().exponent < -6:
-                raise ValueError("Traditional asset quantity precision too high (max 6 decimal places)")
+            # Traditional assets typically don't need more than 8 decimal places
+            if v.as_tuple().exponent < -8:
+                raise ValueError("Traditional asset quantity precision too high (max 8 decimal places)")
 
         return v
 
@@ -257,6 +259,39 @@ class PositionCreate(BaseModel):
             raise ValueError("Ticker contains invalid characters")
 
         return v
+
+    @field_validator('isin')
+    @classmethod
+    def validate_isin(cls, v, info):
+        """Validate ISIN format and ensure it is present."""
+        if not v:
+            raise ValueError("ISIN is required")
+
+        # Normalize input first: trim and uppercase
+        v = v.strip().upper()
+        asset_type = info.data.get('asset_type')
+
+        if asset_type == AssetType.CRYPTO:
+            # Crypto ISIN should start with "XC"
+            if not v.startswith('XC'):
+                raise ValueError("Crypto ISIN must start with 'XC'")
+
+            if len(v) != 12:
+                raise ValueError("Crypto ISIN must be 12 characters")
+
+            if not re.match(r'^XC[A-Z0-9]{10}$', v):
+                raise ValueError("Invalid crypto ISIN format")
+
+            return v
+        else:
+            # Traditional ISIN validation
+            if len(v) != 12:
+                raise ValueError("ISIN must be 12 characters")
+
+            if not re.match(r'^[A-Z]{2}[A-Z0-9]{9}[0-9]$', v):
+                raise ValueError("Invalid ISIN format")
+
+            return v
 
     model_config = {
         "json_schema_extra": {

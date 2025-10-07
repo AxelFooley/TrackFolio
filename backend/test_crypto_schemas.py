@@ -219,7 +219,7 @@ def test_crypto_validators():
     print(f"✅ validate_crypto_ticker: 'btc' -> '{validated_ticker}'")
 
     # Test crypto identifier generation
-    crypto_isin = generate_crypto_identifier("BTC", "Bitcoin")
+    crypto_isin = generate_crypto_identifier("BTC")
     print(f"✅ generate_crypto_identifier: BTC -> {crypto_isin}")
 
     # Test crypto ISIN validation

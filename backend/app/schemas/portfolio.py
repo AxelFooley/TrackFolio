@@ -1,7 +1,7 @@
 """Portfolio schemas."""
 from pydantic import BaseModel, Field
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import date as date_type
 
 from app.models.position import AssetType
@@ -16,6 +16,10 @@ class PortfolioOverview(BaseModel):
     today_gain_loss: Optional[Decimal] = Field(None, description="Today's gain/loss in EUR")
     today_gain_loss_pct: Optional[float] = Field(None, description="Today's gain/loss percentage")
     last_updated: Optional[date_type] = Field(None, description="When overview was last calculated")
+
+    # Additional fields for crypto/traditional breakdown
+    crypto_breakdown: Optional[Dict[str, Any]] = Field(None, description="Cryptocurrency breakdown details")
+    traditional_breakdown: Optional[Dict[str, Any]] = Field(None, description="Traditional assets breakdown details")
 
     model_config = {
         "json_schema_extra": {

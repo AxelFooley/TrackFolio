@@ -158,6 +158,8 @@ class RealtimePriceResponse(BaseModel):
         if not v:
             return v
 
+        # Normalize input to uppercase at the start
+        v = v.upper()
         ticker = info.data.get('ticker', '')
 
         if ManualTransactionCreate._is_crypto_ticker(ticker):
@@ -171,7 +173,7 @@ class RealtimePriceResponse(BaseModel):
             if not re.match(r'^XC[A-Z0-9]{10}$', v):
                 raise ValueError("Invalid crypto ISIN format")
 
-            return v.upper()
+            return v
         else:
             # Traditional ISIN validation
             if len(v) != 12:
@@ -180,7 +182,7 @@ class RealtimePriceResponse(BaseModel):
             if not re.match(r'^[A-Z]{2}[A-Z0-9]{9}[0-9]$', v):
                 raise ValueError("Invalid ISIN format")
 
-            return v.upper()
+            return v
 
     @field_validator('source')
     @classmethod

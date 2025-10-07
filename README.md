@@ -102,7 +102,9 @@ Go to **Import** page and upload your CSV file containing:
 
 Supported CSV formats:
 - Standard format: `date,asset,type,quantity,price,currency`
-- Broker-specific formats (Fineco, Degiro, etc.) - will be auto-detected
+- Directa broker format (Italian broker with ISINs)
+- Crypto exchange formats (Coinbase, Binance, Kraken)
+- Generic crypto exchange formats (auto-detected)
 
 ### 2. Configure Benchmark (Optional)
 
@@ -401,11 +403,59 @@ docker-compose exec redis redis-cli
 
 ## License
 
-This project is private and proprietary.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+This is a permissive open-source license that allows you to use, modify, and distribute the code freely, subject to the simple terms and conditions outlined in the LICENSE file.
 
 ## Contributing
 
-This is a private project. Contact the repository owner for contribution guidelines.
+Contributions are welcome! Here's how you can help improve TrackFolio:
+
+### Getting Started
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature-name`
+3. Make your changes following the guidelines below
+4. Test your changes thoroughly
+5. Submit a pull request with a clear description
+
+### Development Guidelines
+
+- **Code Style**: Follow existing code patterns and conventions
+- **Backend**: Use Python type hints, proper error handling, and async patterns
+- **Frontend**: Use TypeScript, functional components with hooks, and maintainable CSS
+- **Database**: Use Alembic for migrations, follow SQLAlchemy best practices
+- **Testing**: Add unit tests for new functionality when appropriate
+- **Documentation**: Update README and API docs for new features
+
+### Commit Convention
+
+Use clear, descriptive commit messages:
+- `feat: Add new cryptocurrency portfolio tracking`
+- `fix: Resolve CSV parsing error for specific format`
+- `docs: Update installation instructions`
+- `refactor: Improve price fetching performance`
+
+### Areas for Contribution
+
+- **Additional CSV Formats**: Support for more brokers and exchanges
+- **User Interface**: UI/UX improvements and responsive design
+- **Performance**: Database optimization and caching improvements
+- **Features**: New analytics, chart types, export options
+- **Documentation**: Tutorials, examples, and API documentation
+- **Testing**: Unit tests, integration tests, end-to-end tests
+
+### Reporting Issues
+
+When reporting bugs, please include:
+- Steps to reproduce the issue
+- Expected vs actual behavior
+- Environment details (OS, Docker version, etc.)
+- Relevant logs or screenshots
+
+### Questions?
+
+Feel free to open an issue for questions about contributing or to discuss potential changes before implementing them.
 
 ## Support
 

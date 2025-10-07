@@ -87,7 +87,7 @@ class TickerNormalizer:
         for suffix in crypto_suffixes:
             if ticker.endswith(suffix) and len(ticker) > len(suffix):
                 base = ticker[:-len(suffix)]
-                if len(base) >= 2 and base.isalpha():
+                if len(base) >= 2 and base.isalnum():
                     return True
 
         # Check against known crypto tickers

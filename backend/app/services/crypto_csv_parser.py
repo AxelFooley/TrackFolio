@@ -298,6 +298,86 @@ class CryptoCSVParser:
         return transactions
 
     @staticmethod
+    def extract_quote_currency_from_pair(pair: str, base_ticker: str) -> str:
+        """
+        Extract quote currency from a trading pair.
+
+        Args:
+            pair: Trading pair (e.g., "ETHBTC", "BTCBUSD", "ADAEUR")
+            base_ticker: Base asset ticker (e.g., "ETH", "BTC", "ADA")
+
+        Returns:
+            Quote currency symbol (e.g., "BTC", "BUSD", "EUR")
+        """
+        if not pair or not base_ticker:
+            return "USDT"  # Default fallback
+
+        pair = pair.upper().strip()
+        base_ticker = base_ticker.upper().strip()
+
+        # Remove common separators from pair
+        clean_pair = pair.replace("-", "").replace("/", "").replace("_", "")
+
+        # If base ticker is at the start, the rest is quote currency
+        if clean_pair.startswith(base_ticker):
+            quote = clean_pair[len(base_ticker):]
+            if quote:
+                return quote
+
+        # If base ticker is at the end, the rest is quote currency
+        if clean_pair.endswith(base_ticker):
+            quote = clean_pair[:-len(base_ticker)]
+            if quote:
+                return quote
+
+        # Default fallback for common patterns
+        for quote in ["USDT", "USD", "EUR", "BTC", "ETH", "BUSD", "USDC", "GBP"]:
+            if clean_pair.endswith(quote):
+                return quote
+
+        return "USDT"  # Ultimate fallback
+
+    @staticmethod
+    def parse_flexible_timestamp(time_str: str) -> datetime:
+        """
+        Parse timestamp that may be in various formats.
+
+        Args:
+            time_str: Timestamp string
+
+        Returns:
+            datetime object
+
+        Raises:
+            ValueError: If timestamp cannot be parsed
+        """
+        time_str = str(time_str).strip()
+
+        # Try different timestamp formats
+        formats_to_try = [
+            "%Y-%m-%d %H:%M:%S.%f",  # With microseconds
+            "%Y-%m-%d %H:%M:%S",     # Without microseconds
+            "%Y-%m-%d %H:%M:%S.%fZ", # With UTC Z suffix
+            "%Y-%m-%dT%H:%M:%S.%f",  # ISO with microseconds
+            "%Y-%m-%dT%H:%M:%S",     # ISO without microseconds
+            "%Y-%m-%dT%H:%M:%SZ",    # ISO with Z suffix
+        ]
+
+        for fmt in formats_to_try:
+            try:
+                return datetime.strptime(time_str, fmt)
+            except ValueError:
+                continue
+
+        # Try using fromisoformat as last resort
+        try:
+            return datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+        except ValueError:
+            pass
+
+        raise ValueError(f"Unable to parse timestamp: {time_str}")
+
+    @staticmethod
     def parse_binance_csv(df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
         Parse Binance CSV format.
@@ -333,6 +413,9 @@ class CryptoCSVParser:
                 ticker = CryptoCSVParser.normalize_crypto_ticker(pair)
                 crypto_isin = CryptoCSVParser.generate_crypto_identifier(ticker, pair)
 
+                # Extract quote currency from pair instead of hardcoding USDT
+                quote_currency = CryptoCSVParser.extract_quote_currency_from_pair(pair, ticker)
+
                 transaction = {
                     "operation_date": operation_date,
                     "value_date": operation_date,
@@ -344,7 +427,7 @@ class CryptoCSVParser:
                     "price_per_share": price,
                     "amount_eur": total,
                     "amount_currency": total,
-                    "currency": "USDT",  # Binance typically uses USDT
+                    "currency": quote_currency,
                     "fees": fee,
                     "order_reference": f"BINANCE-{idx}",
                 }
@@ -379,9 +462,9 @@ class CryptoCSVParser:
                 if txn_type not in ["buy", "sell"]:
                     continue
 
-                # Parse timestamp
+                # Parse timestamp with flexible format support
                 time_str = str(row.get("time", "")).strip()
-                operation_date = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S.%f").date()
+                operation_date = CryptoCSVParser.parse_flexible_timestamp(time_str).date()
 
                 # Parse amounts
                 volume = Decimal(str(row.get("vol", "0")))

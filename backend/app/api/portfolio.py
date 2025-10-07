@@ -149,7 +149,7 @@ async def get_portfolio_overview(db: AsyncSession = Depends(get_db)):
         if latest_price:
             position_value = position.quantity * latest_price.close
 
-        if position.asset_type.value == "crypto":
+        if position.asset_type == AssetType.CRYPTO:
             crypto_count += 1
             crypto_cost += position.cost_basis
             if position_value:
@@ -194,26 +194,32 @@ async def get_portfolio_overview(db: AsyncSession = Depends(get_db)):
         today_gain_loss_pct=today_gain_loss_pct
     )
 
-    # Add crypto-specific fields as extra data (since they're not in the base schema)
-    overview_dict = overview.model_dump()
-    overview_dict.update({
-        "crypto_breakdown": {
+    # Create PortfolioOverview with breakdown fields
+    overview_with_breakdowns = PortfolioOverview(
+        current_value=overview.current_value,
+        total_cost_basis=overview.total_cost_basis,
+        total_profit=overview.total_profit,
+        average_annual_return=overview.average_annual_return,
+        today_gain_loss=overview.today_gain_loss,
+        today_gain_loss_pct=overview.today_gain_loss_pct,
+        last_updated=overview.last_updated,
+        crypto_breakdown={
             "crypto_value": crypto_value,
             "crypto_cost_basis": crypto_cost,
             "crypto_profit": crypto_value - crypto_cost,
             "crypto_count": crypto_count,
             "crypto_allocation_pct": crypto_allocation
         },
-        "traditional_breakdown": {
+        traditional_breakdown={
             "traditional_value": traditional_value,
             "traditional_cost_basis": traditional_cost,
             "traditional_profit": traditional_value - traditional_cost,
             "traditional_count": traditional_count,
             "traditional_allocation_pct": traditional_allocation
         }
-    })
+    )
 
-    return overview_dict
+    return overview_with_breakdowns
 
 
 @router.get("/holdings", response_model=List[PositionResponse])
@@ -231,7 +237,13 @@ async def get_holdings(
     # Build query with optional asset type filter
     query = select(Position)
     if asset_type:
-        query = query.where(Position.asset_type == asset_type)
+        try:
+            # Convert string to AssetType enum
+            asset_type_enum = AssetType(asset_type.lower())
+            query = query.where(Position.asset_type == asset_type_enum)
+        except ValueError:
+            # Invalid asset type, return empty result
+            return []
 
     result = await db.execute(query)
     positions = result.scalars().all()
@@ -547,7 +559,7 @@ async def get_position(
 async def get_crypto_holdings(db: AsyncSession = Depends(get_db)):
     """Get all cryptocurrency holdings with calculated metrics."""
     result = await db.execute(
-        select(Position).where(Position.asset_type == "crypto")
+        select(Position).where(Position.asset_type == AssetType.CRYPTO)
     )
     crypto_positions = result.scalars().all()
 
@@ -624,7 +636,7 @@ async def get_crypto_summary(db: AsyncSession = Depends(get_db)):
     """Get summary of cryptocurrency holdings and performance."""
     # Get all crypto positions
     result = await db.execute(
-        select(Position).where(Position.asset_type == "crypto")
+        select(Position).where(Position.asset_type == AssetType.CRYPTO)
     )
     crypto_positions = result.scalars().all()
 

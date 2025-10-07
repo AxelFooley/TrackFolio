@@ -8,6 +8,10 @@ and can be imported without syntax errors.
 import sys
 import os
 import ast
+from pathlib import Path
+
+# Compute script directory for absolute paths
+script_dir = Path(__file__).resolve().parent
 
 def validate_file_syntax(filepath):
     """Validate Python syntax of a file."""
@@ -30,13 +34,13 @@ def main():
 
     # List of schema files to validate
     schema_files = [
-        "app/schemas/transaction.py",
-        "app/schemas/position.py",
-        "app/schemas/price.py",
-        "app/schemas/portfolio.py",
-        "app/schemas/crypto_validators.py",
-        "app/schemas/benchmark.py",
-        "app/schemas/__init__.py"
+        script_dir / "app" / "schemas" / "transaction.py",
+        script_dir / "app" / "schemas" / "position.py",
+        script_dir / "app" / "schemas" / "price.py",
+        script_dir / "app" / "schemas" / "portfolio.py",
+        script_dir / "app" / "schemas" / "crypto_validators.py",
+        script_dir / "app" / "schemas" / "benchmark.py",
+        script_dir / "app" / "schemas" / "__init__.py"
     ]
 
     all_valid = True
@@ -44,12 +48,12 @@ def main():
     for schema_file in schema_files:
         print(f"Checking {schema_file}...", end=" ")
 
-        if not os.path.exists(schema_file):
+        if not schema_file.exists():
             print("❌ File not found")
             all_valid = False
             continue
 
-        is_valid, error = validate_file_syntax(schema_file)
+        is_valid, error = validate_file_syntax(str(schema_file))
 
         if is_valid:
             print("✅ Valid")

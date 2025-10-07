@@ -96,7 +96,8 @@ async def get_realtime_prices(db: AsyncSession = Depends(get_db)):
                 previous_close=price["previous_close"],
                 change_amount=price["change_amount"],
                 change_percent=price["change_percent"],
-                timestamp=price["timestamp"]
+                timestamp=price["timestamp"],
+                source=price["source"]
             )
             for price in price_results
         ]
