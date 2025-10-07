@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { CryptoPortfolioCard } from '@/components/CryptoPaper/CryptoPortfolioCard';
-import { Plus, Wallet, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
+import { Plus, Wallet, TrendingUp, TrendingDown, AlertCircle, RefreshCw } from 'lucide-react';
 import { getCryptoPortfolios, createCryptoPortfolio } from '@/lib/api/crypto-paper';
 import type { CryptoPortfolio } from '@/types/crypto-paper';
 
@@ -17,6 +17,7 @@ export default function CryptoPaperPage() {
   const router = useRouter();
   const [portfolios, setPortfolios] = useState<CryptoPortfolio[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -55,6 +56,33 @@ export default function CryptoPaperPage() {
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handlePortfolioUpdated = async () => {
+    // Refresh the portfolio list after a successful update
+    await refreshPortfolios();
+  };
+
+  const handlePortfolioDeleted = async () => {
+    // Refresh the portfolio list after a successful deletion
+    await refreshPortfolios();
+  };
+
+  const refreshPortfolios = async () => {
+    try {
+      setIsRefreshing(true);
+      setError(null);
+      const data = await getCryptoPortfolios();
+      setPortfolios(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh portfolios');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const dismissError = () => {
+    setError(null);
   };
 
   // Calculate totals across all portfolios (with safety checks)
@@ -134,7 +162,17 @@ export default function CryptoPaperPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 relative">
+      {/* Loading Overlay for Refresh Operations */}
+      {isRefreshing && (
+        <div className="absolute inset-0 bg-white bg-opacity-50 flex items-center justify-center z-10 rounded-lg">
+          <div className="flex items-center gap-2 text-blue-600">
+            <RefreshCw className="h-5 w-5 animate-spin" />
+            <span className="font-medium">Updating portfolios...</span>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -142,12 +180,25 @@ export default function CryptoPaperPage() {
           <p className="text-gray-600 mt-2">Track your cryptocurrency portfolio performance</p>
         </div>
 
-        <CreatePortfolioDialog
-          isOpen={isCreateModalOpen}
-          onOpenChange={setIsCreateModalOpen}
-          onCreate={handleCreatePortfolio}
-          isCreating={isCreating}
-        />
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refreshPortfolios}
+            disabled={isRefreshing}
+            className="flex items-center gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+
+          <CreatePortfolioDialog
+            isOpen={isCreateModalOpen}
+            onOpenChange={setIsCreateModalOpen}
+            onCreate={handleCreatePortfolio}
+            isCreating={isCreating}
+          />
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -203,6 +254,35 @@ export default function CryptoPaperPage() {
         </div>
       )}
 
+      {/* Error Banner */}
+      {error && (
+        <Card className="mb-6 border-red-200 bg-red-50">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between">
+              <div className="flex items-start">
+                <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm font-medium text-red-800">
+                    Error
+                  </h3>
+                  <p className="mt-1 text-sm text-red-700">
+                    {error}
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={dismissError}
+                className="text-red-600 hover:text-red-800 hover:bg-red-100"
+              >
+                ×
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Portfolios Grid */}
       {portfolios.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -210,6 +290,8 @@ export default function CryptoPaperPage() {
             <CryptoPortfolioCard
               key={portfolio.id}
               portfolio={portfolio}
+              onPortfolioUpdated={handlePortfolioUpdated}
+              onPortfolioDeleted={handlePortfolioDeleted}
             />
           ))}
         </div>

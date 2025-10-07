@@ -104,6 +104,40 @@ export interface CryptoAssetAllocation {
   quantity: number;
 }
 
+// Error handling types
+export interface CryptoApiError {
+  detail?: string;
+  message?: string;
+  error_type?: string;
+  field?: string;
+}
+
+export interface CryptoPortfolioUpdateResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+  message?: string;
+}
+
+export interface CryptoPortfolioDeleteResponse {
+  message: string;
+  deleted_id: number;
+}
+
+// Validation types
+export interface CryptoPortfolioValidationError {
+  field: string;
+  message: string;
+  code: string;
+}
+
+export interface CryptoPortfolioValidationResult {
+  is_valid: boolean;
+  errors: CryptoPortfolioValidationError[];
+}
+
 // Transaction type display mapping
 export const CryptoTransactionTypeLabels = {
   buy: 'Buy',
