@@ -226,9 +226,6 @@ class PositionManager:
             if isin_upper.startswith("XC"):
                 logger.debug(f"Identified crypto asset by ISIN prefix: {isin}")
                 return AssetType.CRYPTO
-            elif isin_upper.startswith("UNKNOWN-"):
-                logger.warning(f"Unknown ISIN format detected: {isin}, defaulting to STOCK")
-                return AssetType.STOCK
 
         # Enhanced crypto detection using the crypto parser
         from app.services.crypto_csv_parser import CryptoCSVParser
@@ -236,12 +233,15 @@ class PositionManager:
             logger.debug(f"Identified crypto asset by ticker: {ticker}")
             return AssetType.CRYPTO
 
-        # Check for placeholder ISINs that indicate crypto
+        # Check for placeholder ISINs that might indicate crypto
         if isin and isin.startswith("UNKNOWN-"):
             # Check if the unknown ticker might be crypto
             if CryptoCSVParser.is_crypto_transaction(ticker):
                 logger.info(f"Converting unknown ISIN {isin} to crypto for ticker {ticker}")
                 return AssetType.CRYPTO
+            else:
+                logger.warning(f"Unknown ISIN format detected: {isin}, defaulting to STOCK")
+                return AssetType.STOCK
 
         # ETF indicators
         if "ETF" in ticker_upper or ticker_upper.endswith(".L"):

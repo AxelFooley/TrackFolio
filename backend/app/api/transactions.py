@@ -22,7 +22,7 @@ from app.schemas.transaction import (
     TransactionUpdate,
     TransactionImportSummary
 )
-from app.services.csv_parser import DirectaCSVParser
+from app.services.unified_csv_parser import UnifiedCSVParser
 from app.services.deduplication import DeduplicationService
 from app.services.position_manager import PositionManager
 from app.services.price_fetcher import PriceFetcher
@@ -78,7 +78,11 @@ async def import_transactions(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Upload and import Directa CSV file.
+    Upload and import CSV file (Directa broker or crypto exchanges).
+
+    Automatically detects format and parses accordingly:
+    - Directa broker CSV format (stocks/ETFs)
+    - Crypto exchange formats (Coinbase, Binance, Kraken, etc.)
 
     Returns summary of imported transactions and duplicates skipped.
     """
@@ -90,8 +94,13 @@ async def import_transactions(
         content = await file.read()
         file_content = content.decode('utf-8')
 
-        # Parse CSV (skips first 9 rows)
-        parsed_transactions = DirectaCSVParser.parse(file_content)
+        # Parse CSV with automatic format detection
+        parsed_transactions = UnifiedCSVParser.parse(file_content)
+
+        # Get format info for logging
+        format_type = UnifiedCSVParser.detect_csv_format(file_content)
+        format_description = UnifiedCSVParser.get_format_description(format_type)
+        logger.info(f"Importing CSV in {format_description} format")
 
         # Check for duplicates
         new_transactions, duplicates = await DeduplicationService.check_duplicates(
@@ -115,14 +124,44 @@ async def import_transactions(
 
         try:
             for txn_data in new_transactions:
+                # Handle ISIN generation for all transaction types
+                isin = txn_data.get("isin")
+                ticker = txn_data["ticker"]
+                description = txn_data.get("description", "")
+
+                if not isin:
+                    # Check if this is a crypto transaction and generate ISIN if needed
+                    from app.services.crypto_csv_parser import CryptoCSVParser
+                    if CryptoCSVParser.is_crypto_transaction(ticker):
+                        isin = CryptoCSVParser.generate_crypto_identifier(ticker, description)
+                        logger.info(f"Generated crypto ISIN {isin} for ticker {ticker}")
+                    else:
+                        # For traditional assets, try to fetch ISIN from Yahoo Finance
+                        try:
+                            fetched_isin, fetched_description = await fetch_ticker_metadata(ticker)
+                            isin = fetched_isin
+                            if fetched_description and not description:
+                                description = fetched_description
+                            logger.info(f"Fetched ISIN {isin} for ticker {ticker}")
+                        except Exception as e:
+                            logger.warning(f"Could not fetch ISIN for {ticker}: {str(e)}")
+                            # For traditional assets without ISIN, create a placeholder
+                            # This shouldn't happen for valid stock/ETF tickers
+                            isin = f"UNKNOWN-{ticker.upper()[:10]}"
+                            logger.warning(f"Created placeholder ISIN {isin} for ticker {ticker}")
+
+                # Ensure we have a valid ISIN
+                if not isin:
+                    raise ValueError(f"Unable to determine ISIN for ticker {ticker}")
+
                 # Create Transaction model
                 transaction = Transaction(
                     operation_date=txn_data["operation_date"],
                     value_date=txn_data["value_date"],
                     transaction_type=TransactionType(txn_data["transaction_type"]),
-                    ticker=txn_data["ticker"],
-                    isin=txn_data.get("isin"),
-                    description=txn_data["description"],
+                    ticker=ticker,
+                    isin=isin,
+                    description=description or txn_data["description"],
                     quantity=txn_data["quantity"],
                     price_per_share=txn_data["price_per_share"],
                     amount_eur=txn_data["amount_eur"],
@@ -134,7 +173,7 @@ async def import_transactions(
                     imported_at=datetime.utcnow()
                 )
                 db.add(transaction)
-                affected_isins.add(txn_data["isin"])
+                affected_isins.add(isin)
                 imported_count += 1
 
             await db.commit()
@@ -199,8 +238,20 @@ async def create_transaction(
         # 1. Map frontend 'type' to backend 'transaction_type'
         transaction_type = transaction_data.type  # 'buy' or 'sell'
 
-        # 2. Fetch ticker metadata (ISIN and description) from Yahoo Finance
-        isin, description = await fetch_ticker_metadata(transaction_data.ticker)
+        # 2. Determine if this is a crypto transaction and handle ISIN accordingly
+        from app.services.crypto_csv_parser import CryptoCSVParser
+
+        if CryptoCSVParser.is_crypto_transaction(transaction_data.ticker):
+            # Crypto transaction - generate ISIN
+            isin = CryptoCSVParser.generate_crypto_identifier(
+                transaction_data.ticker,
+                transaction_data.ticker
+            )
+            description = f"{transaction_data.ticker.upper()} - Cryptocurrency"
+            logger.info(f"Generated crypto ISIN {isin} for ticker {transaction_data.ticker}")
+        else:
+            # Traditional asset - fetch from Yahoo Finance
+            isin, description = await fetch_ticker_metadata(transaction_data.ticker)
 
         # 3. Set price_per_share from frontend 'amount' field
         price_per_share = transaction_data.amount
@@ -392,8 +443,22 @@ async def update_transaction(
     # Update ticker if provided
     if transaction_update.ticker is not None:
         updates['ticker'] = transaction_update.ticker
-        # Fetch new ISIN and description for the new ticker
-        isin, description = await fetch_ticker_metadata(transaction_update.ticker)
+
+        # Determine if this is a crypto transaction and handle ISIN accordingly
+        from app.services.crypto_csv_parser import CryptoCSVParser
+
+        if CryptoCSVParser.is_crypto_transaction(transaction_update.ticker):
+            # Crypto transaction - generate ISIN
+            isin = CryptoCSVParser.generate_crypto_identifier(
+                transaction_update.ticker,
+                transaction_update.ticker
+            )
+            description = f"{transaction_update.ticker.upper()} - Cryptocurrency"
+            logger.info(f"Generated crypto ISIN {isin} for updated ticker {transaction_update.ticker}")
+        else:
+            # Traditional asset - fetch from Yahoo Finance
+            isin, description = await fetch_ticker_metadata(transaction_update.ticker)
+
         updates['isin'] = isin
         updates['description'] = description
 

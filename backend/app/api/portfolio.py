@@ -128,6 +128,42 @@ async def get_portfolio_overview(db: AsyncSession = Depends(get_db)):
 
     total_profit = current_value - total_cost_basis
 
+    # Calculate crypto vs traditional asset breakdown
+    crypto_value = Decimal("0")
+    crypto_cost = Decimal("0")
+    traditional_value = Decimal("0")
+    traditional_cost = Decimal("0")
+    crypto_count = 0
+    traditional_count = 0
+
+    for position in positions:
+        position_value = None
+        # Get latest price for this position
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == position.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(1)
+        )
+        latest_price = price_result.scalar_one_or_none()
+        if latest_price:
+            position_value = position.quantity * latest_price.close
+
+        if position.asset_type.value == "crypto":
+            crypto_count += 1
+            crypto_cost += position.cost_basis
+            if position_value:
+                crypto_value += position_value
+        else:
+            traditional_count += 1
+            traditional_cost += position.cost_basis
+            if position_value:
+                traditional_value += position_value
+
+    # Calculate allocation percentages
+    crypto_allocation = float((crypto_value / current_value) * 100) if current_value > 0 else 0
+    traditional_allocation = float((traditional_value / current_value) * 100) if current_value > 0 else 0
+
     # Get portfolio metrics from cached_metrics
     portfolio_metrics_result = await db.execute(
         select(CachedMetrics)
@@ -148,7 +184,8 @@ async def get_portfolio_overview(db: AsyncSession = Depends(get_db)):
     if portfolio_metrics and portfolio_metrics.metric_value:
         average_annual_return = portfolio_metrics.metric_value.get("portfolio_return")
 
-    return PortfolioOverview(
+    # Enhance response with crypto breakdown
+    overview = PortfolioOverview(
         current_value=current_value,
         total_cost_basis=total_cost_basis,
         total_profit=total_profit,
@@ -157,11 +194,46 @@ async def get_portfolio_overview(db: AsyncSession = Depends(get_db)):
         today_gain_loss_pct=today_gain_loss_pct
     )
 
+    # Add crypto-specific fields as extra data (since they're not in the base schema)
+    overview_dict = overview.model_dump()
+    overview_dict.update({
+        "crypto_breakdown": {
+            "crypto_value": crypto_value,
+            "crypto_cost_basis": crypto_cost,
+            "crypto_profit": crypto_value - crypto_cost,
+            "crypto_count": crypto_count,
+            "crypto_allocation_pct": crypto_allocation
+        },
+        "traditional_breakdown": {
+            "traditional_value": traditional_value,
+            "traditional_cost_basis": traditional_cost,
+            "traditional_profit": traditional_value - traditional_cost,
+            "traditional_count": traditional_count,
+            "traditional_allocation_pct": traditional_allocation
+        }
+    })
+
+    return overview_dict
+
 
 @router.get("/holdings", response_model=List[PositionResponse])
-async def get_holdings(db: AsyncSession = Depends(get_db)):
-    """Get all current holdings/positions with calculated metrics."""
-    result = await db.execute(select(Position))
+async def get_holdings(
+    asset_type: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all current holdings/positions with calculated metrics.
+
+    Args:
+        asset_type: Optional filter by asset type ('crypto', 'stock', 'etf')
+        db: Database session
+    """
+    # Build query with optional asset type filter
+    query = select(Position)
+    if asset_type:
+        query = query.where(Position.asset_type == asset_type)
+
+    result = await db.execute(query)
     positions = result.scalars().all()
 
     response = []
@@ -468,4 +540,180 @@ async def get_position(
             }
             for s in splits
         ] if splits else []
+    }
+
+
+@router.get("/crypto/holdings", response_model=List[PositionResponse])
+async def get_crypto_holdings(db: AsyncSession = Depends(get_db)):
+    """Get all cryptocurrency holdings with calculated metrics."""
+    result = await db.execute(
+        select(Position).where(Position.asset_type == "crypto")
+    )
+    crypto_positions = result.scalars().all()
+
+    response = []
+
+    for position in crypto_positions:
+        # Get latest and previous prices (use current_ticker)
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == position.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(2)  # Get latest and previous day's price
+        )
+        price_history = price_result.scalars().all()
+
+        # Get cached metrics (IRR, etc.) - use current_ticker for backwards compatibility
+        metrics_result = await db.execute(
+            select(CachedMetrics)
+            .where(
+                CachedMetrics.metric_type == "position_metrics",
+                CachedMetrics.metric_key == position.current_ticker
+            )
+        )
+        cached_metrics = metrics_result.scalar_one_or_none()
+
+        # Calculate current values
+        latest_price = price_history[0] if price_history else None
+        current_price = latest_price.close if latest_price else None
+        current_value = position.quantity * current_price if current_price else None
+        unrealized_gain = current_value - position.cost_basis if current_value else None
+        return_percentage = (
+            float((current_value - position.cost_basis) / position.cost_basis)
+            if current_value and position.cost_basis > 0
+            else None
+        )
+
+        # Calculate today's change using helper function
+        today_change, today_change_percent = calculate_today_change(
+            position.quantity,
+            price_history
+        )
+
+        # Get IRR from cached metrics
+        irr = None
+        if cached_metrics and cached_metrics.metric_value:
+            irr = cached_metrics.metric_value.get("irr")
+
+        response.append(
+            PositionResponse(
+                id=position.id,
+                ticker=position.current_ticker,
+                isin=position.isin,
+                description=position.description,
+                asset_type=position.asset_type.value,
+                quantity=position.quantity,
+                average_cost=position.average_cost,
+                cost_basis=position.cost_basis,
+                current_price=current_price,
+                current_value=current_value,
+                unrealized_gain=unrealized_gain,
+                return_percentage=return_percentage,
+                irr=irr,
+                today_change=today_change,
+                today_change_percent=today_change_percent,
+                last_calculated_at=position.last_calculated_at
+            )
+        )
+
+    return response
+
+
+@router.get("/crypto/summary")
+async def get_crypto_summary(db: AsyncSession = Depends(get_db)):
+    """Get summary of cryptocurrency holdings and performance."""
+    # Get all crypto positions
+    result = await db.execute(
+        select(Position).where(Position.asset_type == "crypto")
+    )
+    crypto_positions = result.scalars().all()
+
+    if not crypto_positions:
+        return {
+            "crypto_count": 0,
+            "total_crypto_value": Decimal("0"),
+            "total_crypto_cost": Decimal("0"),
+            "total_crypto_profit": Decimal("0"),
+            "crypto_allocation_pct": 0.0,
+            "top_crypto_holdings": []
+        }
+
+    # Calculate totals
+    total_crypto_value = Decimal("0")
+    total_crypto_cost = Decimal("0")
+
+    for position in crypto_positions:
+        # Get latest price
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == position.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(1)
+        )
+        latest_price = price_result.scalar_one_or_none()
+
+        if latest_price:
+            position_value = position.quantity * latest_price.close
+            total_crypto_value += position_value
+
+        total_crypto_cost += position.cost_basis
+
+    total_crypto_profit = total_crypto_value - total_crypto_cost
+
+    # Get total portfolio value for allocation calculation
+    portfolio_result = await db.execute(select(Position))
+    all_positions = portfolio_result.scalars().all()
+
+    total_portfolio_value = Decimal("0")
+    for pos in all_positions:
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == pos.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(1)
+        )
+        latest_price = price_result.scalar_one_or_none()
+        if latest_price:
+            total_portfolio_value += pos.quantity * latest_price.close
+
+    crypto_allocation_pct = float((total_crypto_value / total_portfolio_value) * 100) if total_portfolio_value > 0 else 0
+
+    # Get top crypto holdings by value
+    crypto_holdings_with_values = []
+    for position in crypto_positions:
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == position.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(1)
+        )
+        latest_price = price_result.scalar_one_or_none()
+
+        current_value = None
+        if latest_price:
+            current_value = position.quantity * latest_price.close
+
+        crypto_holdings_with_values.append({
+            "ticker": position.current_ticker,
+            "description": position.description,
+            "quantity": position.quantity,
+            "current_value": current_value or Decimal("0"),
+            "cost_basis": position.cost_basis,
+            "profit": (current_value or Decimal("0")) - position.cost_basis
+        })
+
+    # Sort by value and take top 10
+    top_crypto_holdings = sorted(
+        crypto_holdings_with_values,
+        key=lambda x: x["current_value"],
+        reverse=True
+    )[:10]
+
+    return {
+        "crypto_count": len(crypto_positions),
+        "total_crypto_value": total_crypto_value,
+        "total_crypto_cost": total_crypto_cost,
+        "total_crypto_profit": total_crypto_profit,
+        "crypto_allocation_pct": crypto_allocation_pct,
+        "top_crypto_holdings": top_crypto_holdings
     }
