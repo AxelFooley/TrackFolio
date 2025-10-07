@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     price_cache_ttl: int = 86400  # 24 hours
     metrics_cache_ttl: int = 86400  # 24 hours
 
+    # Security settings
+    encryption_key: str = ""  # Required for wallet credential encryption
+    security_key_rotation_days: int = 90  # Days between key rotations (future)
+    wallet_api_timeout: int = 30  # Timeout for wallet API calls
+    max_wallet_connections: int = 10  # Maximum wallet connections per user
+    rate_limit_wallet_api: int = 60  # Rate limit for wallet API calls per minute
+
 
 # Global settings instance
 settings = Settings()
