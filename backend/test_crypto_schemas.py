@@ -8,6 +8,9 @@ to ensure all schemas work correctly with cryptocurrency data.
 import sys
 import os
 from decimal import Decimal
+
+# Import CryptoValidationError for specific error handling
+from app.schemas.crypto_validators import CryptoValidationError
 from datetime import date, datetime
 
 # Add the backend directory to Python path
@@ -65,7 +68,7 @@ def test_crypto_transaction_schemas():
         value_date=date(2025, 1, 15),
         transaction_type="buy",
         ticker="BTC",
-        isin="XC1A2B3C4D5E6",
+        isin="XC1A2B3C4D5E",
         description="Bitcoin purchase",
         quantity=Decimal("0.025"),
         price_per_share=Decimal("42000.00"),
@@ -102,7 +105,7 @@ def test_crypto_position_schemas():
     crypto_position = PositionResponse(
         id=1,
         ticker="BTC",
-        isin="XC1A2B3C4D5E6",
+        isin="XC1A2B3C4D5E",
         description="Bitcoin",
         asset_type=AssetType.CRYPTO,
         quantity=Decimal("0.025"),
@@ -124,7 +127,7 @@ def test_crypto_position_schemas():
     # Test PositionCreate with crypto
     crypto_position_create = PositionCreate(
         ticker="ETH",
-        isin="XC7H8I9J0K1L2",
+        isin="XC7H8I9J0K1L",
         description="Ethereum",
         asset_type=AssetType.CRYPTO,
         quantity=Decimal("1.5"),
@@ -159,7 +162,7 @@ def test_crypto_price_schemas():
     # Test RealtimePriceResponse with crypto
     crypto_realtime = RealtimePriceResponse(
         ticker="BTC",
-        isin="XC1A2B3C4D5E6",
+        isin="XC1A2B3C4D5E",
         current_price=Decimal("43000.00"),
         previous_close=Decimal("42000.00"),
         change_amount=Decimal("1000.00"),
@@ -251,15 +254,15 @@ def test_error_cases():
             amount=Decimal("100")
         )
         print("❌ Should have failed with invalid ticker")
-    except Exception as e:
-        print(f"✅ Correctly caught invalid ticker error: {str(e)}")
+    except CryptoValidationError as e:
+        print(f"✅ Correctly caught invalid ticker error: {e}")
 
     try:
         # Test invalid crypto ISIN
         validate_crypto_isin("INVALID_ISIN")
         print("❌ Should have failed with invalid ISIN")
-    except Exception as e:
-        print(f"✅ Correctly caught invalid ISIN error: {str(e)}")
+    except CryptoValidationError as e:
+        print(f"✅ Correctly caught invalid ISIN error: {e}")
 
     try:
         # Test excessive crypto precision
@@ -271,8 +274,8 @@ def test_error_cases():
             amount=Decimal("42000")
         )
         print("❌ Should have failed with excessive precision")
-    except Exception as e:
-        print(f"✅ Correctly caught excessive precision error: {str(e)}")
+    except CryptoValidationError as e:
+        print(f"✅ Correctly caught excessive precision error: {e}")
 
 
 def main():

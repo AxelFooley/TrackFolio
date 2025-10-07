@@ -140,16 +140,23 @@ async def import_transactions(
                         # For traditional assets, try to fetch ISIN from Yahoo Finance
                         try:
                             fetched_isin, fetched_description = await fetch_ticker_metadata(ticker)
-                            isin = fetched_isin
+                            if fetched_isin:
+                                isin = fetched_isin
+                                logger.info(f"Fetched ISIN {isin} for ticker {ticker}")
+                            else:
+                                # Generate placeholder ISIN if Yahoo Finance returns None
+                                ticker_hash = hashlib.sha256(ticker.upper().encode()).hexdigest()[:10].upper()
+                                isin = f"XX{ticker_hash}"
+                                logger.warning(f"Generated placeholder ISIN {isin} for ticker {ticker} (Yahoo Finance returned None)")
+
                             if fetched_description and not description:
                                 description = fetched_description
-                            logger.info(f"Fetched ISIN {isin} for ticker {ticker}")
                         except Exception as e:
                             logger.warning(f"Could not fetch ISIN for {ticker}: {str(e)}")
                             # For traditional assets without ISIN, create a 12-char placeholder
                             # Generate deterministic hash-based ISIN
-                            ticker_hash = hashlib.sha1(ticker.upper().encode()).hexdigest()[:10].upper()
-                            isin = f"UN{ticker_hash}"
+                            ticker_hash = hashlib.sha256(ticker.upper().encode()).hexdigest()[:10].upper()
+                            isin = f"XX{ticker_hash}"
                             logger.warning(f"Created placeholder ISIN {isin} for ticker {ticker}")
 
                 # Ensure we have a valid ISIN
@@ -256,7 +263,7 @@ async def create_transaction(
             isin, description = await fetch_ticker_metadata(transaction_data.ticker)
             if not isin:
                 # Generate placeholder ISIN if Yahoo Finance returns None
-                ticker_hash = hashlib.sha1(transaction_data.ticker.upper().encode()).hexdigest()[:10].upper()
+                ticker_hash = hashlib.sha256(transaction_data.ticker.upper().encode()).hexdigest()[:10].upper()
                 isin = f"XX{ticker_hash}"
                 logger.warning(f"Generated placeholder ISIN {isin} for ticker {transaction_data.ticker} (Yahoo Finance returned None)")
             if not description:
@@ -469,7 +476,7 @@ async def update_transaction(
             isin, description = await fetch_ticker_metadata(transaction_update.ticker)
             if not isin:
                 # Generate placeholder ISIN if Yahoo Finance returns None
-                ticker_hash = hashlib.sha1(transaction_update.ticker.upper().encode()).hexdigest()[:10].upper()
+                ticker_hash = hashlib.sha256(transaction_update.ticker.upper().encode()).hexdigest()[:10].upper()
                 isin = f"XX{ticker_hash}"
                 logger.warning(f"Generated placeholder ISIN {isin} for ticker {transaction_update.ticker} (Yahoo Finance returned None)")
             if not description:

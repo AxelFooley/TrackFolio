@@ -79,14 +79,14 @@ SELECT
     'Transactions' as table_name,
     COUNT(*) as total_rows,
     COUNT(CASE WHEN isin LIKE 'XC%' THEN 1 END) as crypto_rows,
-    ROUND(100.0 * COUNT(CASE WHEN isin LIKE 'XC%' THEN 1 END) / COUNT(*), 2) as crypto_percentage
+    COALESCE(ROUND(100.0 * COUNT(CASE WHEN isin LIKE 'XC%' THEN 1 END) / NULLIF(COUNT(*), 0), 2), 0) as crypto_percentage
 FROM transactions
 UNION ALL
 SELECT
     'Positions' as table_name,
     COUNT(*) as total_rows,
     COUNT(CASE WHEN asset_type = 'crypto' THEN 1 END) as crypto_rows,
-    ROUND(100.0 * COUNT(CASE WHEN asset_type = 'crypto' THEN 1 END) / COUNT(*), 2) as crypto_percentage
+    COALESCE(ROUND(100.0 * COUNT(CASE WHEN asset_type = 'crypto' THEN 1 END) / NULLIF(COUNT(*), 0), 2), 0) as crypto_percentage
 FROM positions
 UNION ALL
 SELECT
@@ -94,8 +94,8 @@ SELECT
     COUNT(*) as total_rows,
     COUNT(CASE WHEN ticker IN ('BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'MATIC',
                              'BTC-USD', 'ETH-USD', 'BNB-USD', 'ADA-USD', 'SOL-USD', 'XRP-USD') THEN 1 END) as crypto_rows,
-    ROUND(100.0 * COUNT(CASE WHEN ticker IN ('BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'MATIC',
-                             'BTC-USD', 'ETH-USD', 'BNB-USD', 'ADA-USD', 'SOL-USD', 'XRP-USD') THEN 1 END) / COUNT(*), 2) as crypto_percentage
+    COALESCE(ROUND(100.0 * COUNT(CASE WHEN ticker IN ('BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'MATIC',
+                             'BTC-USD', 'ETH-USD', 'BNB-USD', 'ADA-USD', 'SOL-USD', 'XRP-USD') THEN 1 END) / NULLIF(COUNT(*), 0), 2), 0) as crypto_percentage
 FROM price_history
 WHERE ticker IN ('BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'MATIC',
                 'BTC-USD', 'ETH-USD', 'BNB-USD', 'ADA-USD', 'SOL-USD', 'XRP-USD');

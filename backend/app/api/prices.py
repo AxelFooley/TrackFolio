@@ -90,14 +90,14 @@ async def get_realtime_prices(db: AsyncSession = Depends(get_db)):
         # Convert to response models
         price_responses = [
             RealtimePriceResponse(
-                ticker=price["ticker"],
-                isin=price["isin"],
-                current_price=price["current_price"],
-                previous_close=price["previous_close"],
-                change_amount=price["change_amount"],
-                change_percent=price["change_percent"],
-                timestamp=price["timestamp"],
-                source=price["source"]
+                ticker=price.get("ticker", ""),
+                isin=price.get("isin"),
+                current_price=price.get("current_price", Decimal("0")),
+                previous_close=price.get("previous_close", Decimal("0")),
+                change_amount=price.get("change_amount", Decimal("0")),
+                change_percent=price.get("change_percent", Decimal("0")),
+                timestamp=price.get("timestamp", datetime.utcnow()),
+                source=price.get("source", "UNKNOWN")
             )
             for price in price_results
         ]

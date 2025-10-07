@@ -187,7 +187,7 @@ class CryptoCSVParser:
 
         ticker = ticker.upper().strip()
 
-        # Handle various trading pair formats
+        # Handle various trading pair formats with explicit separators
         separators = ['-', '/', 'USD', 'USDT', 'EUR', 'GBP']
 
         for sep in separators:
@@ -196,6 +196,19 @@ class CryptoCSVParser:
                 parts = ticker.split(sep)
                 ticker = parts[0]
                 break
+
+        # Handle compact trading pairs (e.g., ETHBTC, BTCUSDT)
+        # Check if the ticker still looks like a compact pair
+        if len(ticker) >= 4:  # Minimum length for a compact pair
+            known_quote_currencies = ['BTC', 'USDT', 'USD', 'ETH', 'EUR', 'GBP', 'BUSD', 'USDC']
+
+            for quote in known_quote_currencies:
+                if ticker.endswith(quote) and len(ticker) > len(quote):
+                    # Remove the quote currency to get the base
+                    base = ticker[:-len(quote)]
+                    if len(base) >= 2:  # Ensure base is meaningful
+                        ticker = base
+                        break
 
         return ticker
 

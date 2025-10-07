@@ -13,9 +13,9 @@ class PositionResponse(BaseModel):
     """Schema for position response."""
     id: int = Field(..., description="Position ID")
     ticker: str = Field(..., description="Asset ticker symbol")
+    asset_type: AssetType = Field(..., description="Asset type: stock, etf, or crypto")
     isin: Optional[str] = Field(None, description="ISIN identifier (XC prefixed for crypto)")
     description: str = Field(..., description="Asset description")
-    asset_type: AssetType = Field(..., description="Asset type: stock, etf, or crypto")
     quantity: Decimal = Field(..., description="Current quantity held")
     average_cost: Decimal = Field(..., description="Average cost per unit including fees")
     cost_basis: Decimal = Field(..., description="Total cost basis (quantity × average_cost)")
@@ -220,9 +220,9 @@ class PositionResponse(BaseModel):
 class PositionCreate(BaseModel):
     """Schema for creating a position (typically auto-generated)."""
     ticker: str = Field(..., min_length=1, max_length=20, description="Asset ticker symbol")
+    asset_type: AssetType = Field(..., description="Asset type: stock, etf, or crypto")
     isin: str = Field(..., min_length=12, max_length=12, description="ISIN identifier")
     description: str = Field(..., min_length=1, description="Asset description")
-    asset_type: AssetType = Field(..., description="Asset type: stock, etf, or crypto")
     quantity: Decimal = Field(..., gt=0, description="Current quantity held")
     average_cost: Decimal = Field(..., gt=0, description="Average cost per unit including fees")
     cost_basis: Decimal = Field(..., gt=0, description="Total cost basis")
@@ -331,8 +331,8 @@ class PositionUpdate(BaseModel):
 
     @field_validator('quantity')
     @classmethod
-    def validate_quantity_precision(cls, v, info):
-        """Validate quantity precision based on asset type."""
+    def validate_quantity_precision(cls, v):
+        """Validate quantity precision with permissive 18-decimal limit."""
         if v is None:
             return v
 
