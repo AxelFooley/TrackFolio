@@ -9,7 +9,8 @@ import { useMemo } from 'react';
 
 export function TodaysMovers() {
   const { data: holdings, isLoading } = useHoldings();
-  const { realtimePrices } = useRealtimePrices();
+  const symbols = holdings?.map(h => h.ticker) || [];
+  const { realtimePrices } = useRealtimePrices(symbols);
 
   // Merge holdings with real-time data for consistency
   const holdingsWithRealtimeData = useMemo(() => {
@@ -21,10 +22,18 @@ export function TodaysMovers() {
       if (realtimePrice) {
         // Calculate updated values with real-time price
         const currentValue = holding.quantity * realtimePrice.current_price;
-        const unrealizedGain = currentValue - holding.cost_basis;
-        const returnPercentage = holding.cost_basis > 0
-          ? unrealizedGain / holding.cost_basis
+        const costBasis = holding.cost_basis || 0;
+        const unrealizedGain = currentValue - costBasis;
+        const returnPercentage = costBasis > 0
+          ? unrealizedGain / costBasis
           : 0;
+
+        // Calculate change values if not provided
+        const changeAmount = realtimePrice.change_amount ??
+          (realtimePrice.current_price - realtimePrice.previous_close);
+        const changePercent = realtimePrice.change_percent ??
+          (realtimePrice.previous_close > 0 ?
+            ((realtimePrice.current_price - realtimePrice.previous_close) / realtimePrice.previous_close) * 100 : 0);
 
         return {
           ...holding,
@@ -33,8 +42,8 @@ export function TodaysMovers() {
           unrealized_gain: unrealizedGain,
           return_percentage: returnPercentage,
           // Total position change (not per-share)
-          today_change: realtimePrice.change_amount * holding.quantity,
-          today_change_percent: realtimePrice.change_percent,
+          today_change: changeAmount * holding.quantity,
+          today_change_percent: changePercent,
         };
       }
 

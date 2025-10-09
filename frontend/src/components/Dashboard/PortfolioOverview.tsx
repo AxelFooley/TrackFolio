@@ -11,7 +11,8 @@ import { TrendingUp, TrendingDown, DollarSign, Target, Activity } from 'lucide-r
 export function PortfolioOverview() {
   const { data: overview, isLoading, error } = usePortfolioOverview();
   const { data: holdings } = useHoldings();
-  const { realtimePrices, isLoading: pricesLoading, lastUpdate } = useRealtimePrices();
+  const symbols = holdings?.map(h => h.ticker) || [];
+  const { realtimePrices, isLoading: pricesLoading, lastUpdate } = useRealtimePrices(symbols);
 
   // Calculate real-time portfolio metrics
   const realtimeMetrics = useMemo(() => {
@@ -21,21 +22,23 @@ export function PortfolioOverview() {
     let totalPreviousValue = 0;
     let hasRealtimeData = false;
 
-    holdings.forEach((holding) => {
-      const realtimePrice = realtimePrices.get(holding.ticker);
+    if (Array.isArray(holdings)) {
+      holdings.forEach((holding) => {
+        const realtimePrice = realtimePrices.get(holding.ticker);
 
-      if (realtimePrice) {
-        hasRealtimeData = true;
-        const currentValue = holding.quantity * realtimePrice.current_price;
-        const previousValue = holding.quantity * realtimePrice.previous_close;
-        totalCurrentValue += currentValue;
-        totalPreviousValue += previousValue;
-      } else {
-        // Use fallback values from holdings if no real-time data
-        totalCurrentValue += holding.current_value ?? 0;
-        totalPreviousValue += holding.current_value ?? 0;
-      }
-    });
+        if (realtimePrice) {
+          hasRealtimeData = true;
+          const currentValue = holding.quantity * realtimePrice.current_price;
+          const previousValue = holding.quantity * realtimePrice.previous_close;
+          totalCurrentValue += currentValue;
+          totalPreviousValue += previousValue;
+        } else {
+          // Use fallback values from holdings if no real-time data
+          totalCurrentValue += holding.current_value ?? 0;
+          totalPreviousValue += holding.current_value ?? 0;
+        }
+      });
+    }
 
     if (!hasRealtimeData) return null;
 

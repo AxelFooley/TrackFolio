@@ -98,12 +98,14 @@ export function PriceChart({ ticker, position }: PriceChartProps) {
               labelFormatter={(label) => new Date(label).toLocaleDateString()}
             />
             <Legend />
-            <ReferenceLine
-              y={position.average_cost}
-              stroke="#F59E0B"
-              strokeDasharray="5 5"
-              label="Avg Cost"
-            />
+            {position.average_cost && (
+              <ReferenceLine
+                y={position.average_cost}
+                stroke="#F59E0B"
+                strokeDasharray="5 5"
+                label="Avg Cost"
+              />
+            )}
             <Line
               type="monotone"
               dataKey="close"

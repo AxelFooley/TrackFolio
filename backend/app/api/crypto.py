@@ -1,0 +1,721 @@
+"""
+Crypto portfolio API endpoints.
+
+Comprehensive API for managing crypto portfolios, transactions, and analytics.
+Follows existing codebase patterns with proper error handling and async database sessions.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete, func
+from datetime import datetime, date
+from decimal import Decimal
+from typing import List, Optional
+import logging
+
+from app.database import get_db
+from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
+from app.schemas.crypto import (
+    CryptoPortfolioCreate,
+    CryptoPortfolioUpdate,
+    CryptoPortfolioResponse,
+    CryptoPortfolioList,
+    CryptoTransactionCreate,
+    CryptoTransactionUpdate,
+    CryptoTransactionResponse,
+    CryptoTransactionList,
+    CryptoPortfolioMetrics,
+    CryptoHolding,
+    CryptoPerformanceData,
+    CryptoPortfolioPerformance,
+    CryptoPriceData,
+    CryptoHistoricalPrice,
+    CryptoPriceRequest,
+    CryptoPriceResponse,
+    CryptoPriceHistoryRequest,
+    CryptoPriceHistoryResponse,
+    CryptoPortfolioSummary,
+    CryptoError
+)
+from app.services.crypto_calculations import CryptoCalculationService
+from app.services.coincap import coincap_service
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/crypto", tags=["crypto"])
+
+
+# Portfolio Management Endpoints
+
+@router.post("/portfolios", response_model=CryptoPortfolioResponse, status_code=201)
+async def create_crypto_portfolio(
+    portfolio_data: CryptoPortfolioCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new crypto portfolio."""
+    try:
+        # Check if portfolio with same name already exists for user
+        existing_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.name == portfolio_data.name)
+        )
+        existing_portfolio = existing_result.scalar_one_or_none()
+
+        if existing_portfolio:
+            raise HTTPException(
+                status_code=400,
+                detail="Portfolio with this name already exists"
+            )
+
+        # Create new portfolio
+        portfolio = CryptoPortfolio(
+            name=portfolio_data.name,
+            description=portfolio_data.description,
+            base_currency=portfolio_data.base_currency,
+            is_active=True
+        )
+
+        db.add(portfolio)
+        await db.commit()
+        await db.refresh(portfolio)
+
+        return portfolio
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create portfolio: {str(e)}")
+
+
+@router.get("/portfolios", response_model=CryptoPortfolioList)
+async def list_crypto_portfolios(
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    skip: int = Query(0, ge=0, description="Number of portfolios to skip"),
+    limit: int = Query(50, ge=1, le=100, description="Maximum number of portfolios to return"),
+    db: AsyncSession = Depends(get_db)
+):
+    """List crypto portfolios with optional filtering and pagination."""
+    try:
+        query = select(CryptoPortfolio)
+
+        # Apply filters
+        if is_active is not None:
+            query = query.where(CryptoPortfolio.is_active == is_active)
+
+        # Count total portfolios
+        count_query = select(func.count()).select_from(query.subquery())
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
+
+        # Apply pagination
+        query = query.offset(skip).limit(limit)
+        result = await db.execute(query)
+        portfolios = result.scalars().all()
+
+        # Calculate metrics for each portfolio
+        calc_service = CryptoCalculationService(db)
+        portfolio_responses = []
+
+        for portfolio in portfolios:
+            metrics = await calc_service.calculate_portfolio_metrics(portfolio.id)
+            portfolio_dict = {
+                "id": portfolio.id,
+                "name": portfolio.name,
+                "description": portfolio.description,
+                "is_active": portfolio.is_active,
+                "base_currency": portfolio.base_currency,
+                "created_at": portfolio.created_at,
+                "updated_at": portfolio.updated_at,
+                "total_value": metrics.total_value if metrics else None,
+                "total_cost_basis": metrics.total_cost_basis if metrics else None,
+                "total_profit_loss": metrics.total_profit_loss if metrics else None,
+                "total_profit_loss_pct": metrics.total_profit_loss_pct if metrics else None,
+                "transaction_count": metrics.transaction_count if metrics else 0
+            }
+            portfolio_responses.append(CryptoPortfolioResponse(**portfolio_dict))
+
+        return CryptoPortfolioList(
+            portfolios=portfolio_responses,
+            total_count=total_count
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list portfolios: {str(e)}")
+
+
+@router.get("/portfolios/{portfolio_id}", response_model=CryptoPortfolioSummary)
+async def get_crypto_portfolio(
+    portfolio_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get detailed crypto portfolio information with metrics and holdings."""
+    try:
+        calc_service = CryptoCalculationService(db)
+        summary = await calc_service.calculate_portfolio_summary(portfolio_id)
+
+        if not summary or not summary.get('portfolio'):
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        return summary
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get portfolio: {str(e)}")
+
+
+@router.put("/portfolios/{portfolio_id}", response_model=CryptoPortfolioResponse)
+async def update_crypto_portfolio(
+    portfolio_id: int,
+    portfolio_update: CryptoPortfolioUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update crypto portfolio details."""
+    try:
+        # Get existing portfolio
+        result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # Check for name conflicts
+        if portfolio_update.name and portfolio_update.name != portfolio.name:
+            existing_result = await db.execute(
+                select(CryptoPortfolio).where(
+                    CryptoPortfolio.name == portfolio_update.name,
+                    CryptoPortfolio.id != portfolio_id
+                )
+            )
+            existing_portfolio = existing_result.scalar_one_or_none()
+
+            if existing_portfolio:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Portfolio with this name already exists"
+                )
+
+        # Update portfolio fields
+        update_data = portfolio_update.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(portfolio, field, value)
+
+        portfolio.updated_at = datetime.utcnow()
+
+        await db.commit()
+        await db.refresh(portfolio)
+
+        return portfolio
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update portfolio: {str(e)}")
+
+
+@router.delete("/portfolios/{portfolio_id}", status_code=204)
+async def delete_crypto_portfolio(
+    portfolio_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a crypto portfolio and all its transactions."""
+    try:
+        # Check if portfolio exists
+        result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # Delete portfolio (cascades to transactions)
+        await db.delete(portfolio)
+        await db.commit()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete portfolio: {str(e)}")
+
+
+# Transaction Management Endpoints
+
+@router.post("/portfolios/{portfolio_id}/transactions", response_model=CryptoTransactionResponse, status_code=201)
+async def create_crypto_transaction(
+    portfolio_id: int,
+    transaction_data: CryptoTransactionCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Add a transaction to a crypto portfolio."""
+    try:
+        # Verify portfolio exists
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        if not portfolio.is_active:
+            raise HTTPException(status_code=400, detail="Cannot add transactions to inactive portfolio")
+
+        # Validate transaction data
+        if transaction_data.transaction_hash:
+            # Check for duplicate transaction hash
+            existing_hash_result = await db.execute(
+                select(CryptoTransaction).where(
+                    CryptoTransaction.transaction_hash == transaction_data.transaction_hash
+                )
+            )
+            existing_hash = existing_hash_result.scalar_one_or_none()
+
+            if existing_hash:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Transaction with this hash already exists"
+                )
+
+        # Calculate total amount
+        total_amount = transaction_data.quantity * transaction_data.price_at_execution
+
+        # Create transaction
+        transaction = CryptoTransaction(
+            portfolio_id=portfolio_id,
+            symbol=transaction_data.symbol.upper(),
+            transaction_type=transaction_data.transaction_type,
+            quantity=transaction_data.quantity,
+            price_at_execution=transaction_data.price_at_execution,
+            currency=transaction_data.currency,
+            total_amount=total_amount,
+            fee=transaction_data.fee,
+            fee_currency=transaction_data.fee_currency,
+            timestamp=transaction_data.timestamp,
+            exchange=transaction_data.exchange,
+            transaction_hash=transaction_data.transaction_hash,
+            notes=transaction_data.notes
+        )
+
+        db.add(transaction)
+        await db.commit()
+        await db.refresh(transaction)
+
+        return transaction
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create transaction: {str(e)}")
+
+
+@router.get("/portfolios/{portfolio_id}/transactions", response_model=CryptoTransactionList)
+async def list_crypto_transactions(
+    portfolio_id: int,
+    symbol: Optional[str] = Query(None, description="Filter by crypto symbol"),
+    transaction_type: Optional[CryptoTransactionType] = Query(None, description="Filter by transaction type"),
+    start_date: Optional[datetime] = Query(None, description="Filter transactions from this date"),
+    end_date: Optional[datetime] = Query(None, description="Filter transactions to this date"),
+    skip: int = Query(0, ge=0, description="Number of transactions to skip"),
+    limit: int = Query(50, ge=1, le=200, description="Maximum number of transactions to return"),
+    db: AsyncSession = Depends(get_db)
+):
+    """List transactions for a crypto portfolio with filtering and pagination."""
+    try:
+        # Verify portfolio exists
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # Build query
+        query = select(CryptoTransaction).where(CryptoTransaction.portfolio_id == portfolio_id)
+
+        # Apply filters
+        if symbol:
+            query = query.where(CryptoTransaction.symbol == symbol.upper())
+        if transaction_type:
+            query = query.where(CryptoTransaction.transaction_type == transaction_type)
+        if start_date:
+            query = query.where(CryptoTransaction.timestamp >= start_date)
+        if end_date:
+            query = query.where(CryptoTransaction.timestamp <= end_date)
+
+        # Count total transactions
+        count_query = select(func.count()).select_from(query.subquery())
+        total_count_result = await db.execute(count_query)
+        total_count = total_count_result.scalar()
+
+        # Apply pagination and ordering
+        query = query.order_by(CryptoTransaction.timestamp.desc()).offset(skip).limit(limit)
+        result = await db.execute(query)
+        transactions = result.scalars().all()
+
+        return CryptoTransactionList(
+            transactions=transactions,
+            total_count=total_count
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list transactions: {str(e)}")
+
+
+@router.put("/transactions/{transaction_id}", response_model=CryptoTransactionResponse)
+async def update_crypto_transaction(
+    transaction_id: int,
+    transaction_update: CryptoTransactionUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update a crypto transaction."""
+    try:
+        # Get existing transaction
+        result = await db.execute(
+            select(CryptoTransaction).where(CryptoTransaction.id == transaction_id)
+        )
+        transaction = result.scalar_one_or_none()
+
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+
+        # Check for duplicate transaction hash
+        if transaction_update.transaction_hash and transaction_update.transaction_hash != transaction.transaction_hash:
+            existing_hash_result = await db.execute(
+                select(CryptoTransaction).where(
+                    CryptoTransaction.transaction_hash == transaction_update.transaction_hash,
+                    CryptoTransaction.id != transaction_id
+                )
+            )
+            existing_hash = existing_hash_result.scalar_one_or_none()
+
+            if existing_hash:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Transaction with this hash already exists"
+                )
+
+        # Update transaction fields
+        update_data = transaction_update.dict(exclude_unset=True)
+
+        # Recalculate total amount if quantity or price changed
+        if 'quantity' in update_data or 'price_at_execution' in update_data:
+            quantity = update_data.get('quantity', transaction.quantity)
+            price = update_data.get('price_at_execution', transaction.price_at_execution)
+            update_data['total_amount'] = quantity * price
+
+        for field, value in update_data.items():
+            if field == 'symbol':
+                setattr(transaction, field, value.upper())
+            else:
+                setattr(transaction, field, value)
+
+        transaction.updated_at = datetime.utcnow()
+
+        await db.commit()
+        await db.refresh(transaction)
+
+        return transaction
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update transaction: {str(e)}")
+
+
+@router.delete("/transactions/{transaction_id}", status_code=204)
+async def delete_crypto_transaction(
+    transaction_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a crypto transaction."""
+    try:
+        # Check if transaction exists
+        result = await db.execute(
+            select(CryptoTransaction).where(CryptoTransaction.id == transaction_id)
+        )
+        transaction = result.scalar_one_or_none()
+
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+
+        # Delete transaction
+        await db.delete(transaction)
+        await db.commit()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete transaction: {str(e)}")
+
+
+# Metrics and Analytics Endpoints
+
+@router.get("/portfolios/{portfolio_id}/metrics", response_model=CryptoPortfolioMetrics)
+async def get_crypto_portfolio_metrics(
+    portfolio_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get comprehensive metrics for a crypto portfolio."""
+    try:
+        calc_service = CryptoCalculationService(db)
+        metrics = await calc_service.calculate_portfolio_metrics(portfolio_id)
+
+        if not metrics:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        return metrics
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to calculate portfolio metrics: {str(e)}")
+
+
+@router.get("/portfolios/{portfolio_id}/holdings", response_model=List[CryptoHolding])
+async def get_crypto_portfolio_holdings(
+    portfolio_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get current holdings for a crypto portfolio."""
+    try:
+        calc_service = CryptoCalculationService(db)
+        holdings = await calc_service.calculate_holdings(portfolio_id)
+
+        if holdings is None:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        return holdings
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to calculate holdings: {str(e)}")
+
+
+@router.get("/portfolios/{portfolio_id}/history", response_model=CryptoPortfolioPerformance)
+async def get_crypto_portfolio_history(
+    portfolio_id: int,
+    start_date: date = Query(..., description="Start date for performance data"),
+    end_date: date = Query(..., description="End date for performance data"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get historical performance data for a crypto portfolio."""
+    try:
+        # Validate date range
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="Start date must be before end date")
+
+        # Verify portfolio exists
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        calc_service = CryptoCalculationService(db)
+        performance_data = await calc_service.calculate_performance_history(
+            portfolio_id, start_date, end_date
+        )
+
+        # Calculate summary metrics
+        start_value = None
+        end_value = None
+        total_return = None
+        total_return_pct = None
+
+        if performance_data:
+            start_value = performance_data[0].portfolio_value
+            end_value = performance_data[-1].portfolio_value
+            total_return = end_value - start_value
+            total_return_pct = float(
+                (total_return / start_value) * 100
+            ) if start_value > 0 else 0
+
+        return CryptoPortfolioPerformance(
+            portfolio_id=portfolio_id,
+            performance_data=performance_data,
+            start_value=start_value,
+            end_value=end_value,
+            total_return=total_return,
+            total_return_pct=total_return_pct
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get portfolio history: {str(e)}")
+
+
+# Price Data Endpoints
+
+@router.get("/prices", response_model=CryptoPriceResponse)
+async def get_crypto_prices(
+    symbols: str = Query(..., description="Comma-separated list of crypto symbols (e.g., BTC,ETH,ADA)"),
+    currency: str = Query("eur", regex="^(eur|usd)$", description="Target currency"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get current prices for multiple cryptocurrencies."""
+    try:
+        # Parse symbols
+        symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+
+        if not symbol_list:
+            raise HTTPException(status_code=400, detail="At least one symbol is required")
+
+        if len(symbol_list) > 50:
+            raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed per request")
+
+        # Get prices from CoinCap
+        prices = []
+        for symbol in symbol_list:
+            try:
+                price_data = coincap_service.get_current_price(symbol, currency)
+                if price_data:
+                    prices.append(CryptoPriceData(
+                        symbol=price_data['symbol'],
+                        price=price_data['price'],
+                        currency=price_data['currency'],
+                        price_usd=price_data.get('price_usd'),
+                        market_cap_usd=price_data.get('market_cap_usd'),
+                        volume_24h_usd=price_data.get('volume_24h_usd'),
+                        change_percent_24h=price_data.get('change_percent_24h'),
+                        timestamp=price_data['timestamp'],
+                        source=price_data['source']
+                    ))
+            except Exception as e:
+                logger.warning(f"Failed to get price for {symbol}: {e}")
+                # Continue with other symbols
+                continue
+
+        return CryptoPriceResponse(
+            prices=prices,
+            currency=currency.upper(),
+            timestamp=datetime.utcnow()
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get crypto prices: {str(e)}")
+
+
+@router.get("/prices/history", response_model=CryptoPriceHistoryResponse)
+async def get_crypto_price_history(
+    symbol: str = Query(..., description="Crypto symbol (e.g., BTC, ETH)"),
+    start_date: date = Query(..., description="Start date for historical data"),
+    end_date: date = Query(..., description="End date for historical data"),
+    currency: str = Query("eur", regex="^(eur|usd)$", description="Target currency"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get historical price data for a cryptocurrency."""
+    try:
+        # Validate inputs
+        if not symbol or len(symbol) > 20:
+            raise HTTPException(status_code=400, detail="Invalid symbol")
+
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="Start date must be before end date")
+
+        # Limit date range to prevent excessive requests
+        days_diff = (end_date - start_date).days
+        if days_diff > 365:
+            raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
+
+        symbol = symbol.upper().strip()
+
+        # Get historical prices from CoinCap
+        historical_prices = coincap_service.get_historical_prices(
+            symbol, start_date, end_date, currency
+        )
+
+        if not historical_prices:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No historical price data found for {symbol} in the specified date range"
+            )
+
+        # Convert to response format
+        prices = [
+            CryptoHistoricalPrice(
+                date=item['date'],
+                symbol=item['symbol'],
+                price=item['price'],
+                currency=item['currency'],
+                price_usd=item.get('price_usd'),
+                timestamp=item['timestamp'],
+                source=item['source']
+            )
+            for item in historical_prices
+        ]
+
+        return CryptoPriceHistoryResponse(
+            symbol=symbol,
+            currency=currency.upper(),
+            prices=prices,
+            total_count=len(prices)
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get crypto price history: {str(e)}")
+
+
+# Utility Endpoints
+
+@router.get("/supported-symbols")
+async def get_supported_crypto_symbols():
+    """Get list of supported cryptocurrency symbols."""
+    try:
+        supported_assets = coincap_service.get_supported_symbols()
+
+        return {
+            "symbols": [
+                {
+                    "symbol": asset["symbol"],
+                    "name": asset["name"],
+                    "coincapec_id": asset["coincapec_id"]
+                }
+                for asset in supported_assets[:100]  # Limit to top 100 for performance
+            ],
+            "total_count": len(supported_assets),
+            "timestamp": datetime.utcnow()
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get supported symbols: {str(e)}")
+
+
+@router.get("/health")
+async def crypto_health_check():
+    """Health check for crypto services."""
+    try:
+        # Test CoinCap connection
+        coincap_healthy = coincap_service.test_connection()
+
+        return {
+            "status": "healthy" if coincap_healthy else "degraded",
+            "services": {
+                "coincap": "healthy" if coincap_healthy else "unhealthy"
+            },
+            "timestamp": datetime.utcnow()
+        }
+
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.utcnow()
+        }

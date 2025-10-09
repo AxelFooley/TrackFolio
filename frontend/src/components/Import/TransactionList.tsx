@@ -44,7 +44,7 @@ export function TransactionList() {
     );
   }
 
-  if (!transactions || transactions.length === 0) {
+  if (!transactions || !transactions.items || transactions.items.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -79,26 +79,26 @@ export function TransactionList() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {transactions.map((transaction) => (
+                {transactions.items.map((transaction) => (
                   <TableRow key={transaction.id}>
-                    <TableCell>{formatDate(transaction.operation_date)}</TableCell>
+                    <TableCell>{formatDate(transaction.date)}</TableCell>
                     <TableCell className="font-medium">{transaction.ticker || '-'}</TableCell>
                     <TableCell>
                       <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          transaction.transaction_type === 'buy'
+                          transaction.transaction_type === 'BUY'
                             ? 'bg-success/10 text-success'
                             : 'bg-danger/10 text-danger'
                         }`}
                       >
-                        {transaction.transaction_type?.toUpperCase() || 'N/A'}
+                        {transaction.transaction_type || 'N/A'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {transaction.quantity || '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(transaction.price_per_share * transaction.quantity, transaction.currency)}
+                      {formatCurrency((transaction.price || 0) * (transaction.quantity || 0), transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       <div className="flex items-center justify-end gap-2">

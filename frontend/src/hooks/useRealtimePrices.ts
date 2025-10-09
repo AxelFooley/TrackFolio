@@ -12,7 +12,7 @@ interface UseRealtimePricesReturn {
   lastUpdate: Date | null;
 }
 
-export function useRealtimePrices(): UseRealtimePricesReturn {
+export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesReturn {
   const [realtimePrices, setRealtimePrices] = useState<Map<string, RealtimePrice>>(new Map());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
@@ -24,7 +24,7 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
 
   const fetchPrices = useCallback(async () => {
     try {
-      const response = await getRealtimePrices();
+      const response = await getRealtimePrices(symbols);
 
       // Debounce the state update to prevent UI flickering
       if (debounceTimerRef.current) {
@@ -33,9 +33,15 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
 
       debounceTimerRef.current = setTimeout(() => {
         const priceMap = new Map<string, RealtimePrice>();
-response.prices.forEach((price) => {
-          priceMap.set(price.ticker, price);
-        });
+
+        // Extract prices from response structure
+        const prices = response?.prices || [];
+
+        if (Array.isArray(prices)) {
+          prices.forEach((price) => {
+            priceMap.set(price.symbol, price);
+          });
+        }
 
         setRealtimePrices(priceMap);
         setLastUpdate(new Date());
@@ -47,7 +53,7 @@ response.prices.forEach((price) => {
       setError(err instanceof Error ? err : new Error('Failed to fetch realtime prices'));
       setIsLoading(false);
     }
-  }, []);
+  }, [symbols]);
 
   const startPolling = useCallback(() => {
     // Clear existing interval

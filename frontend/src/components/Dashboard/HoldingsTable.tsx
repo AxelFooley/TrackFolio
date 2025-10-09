@@ -24,7 +24,8 @@ type SortDirection = 'asc' | 'desc';
 export function HoldingsTable() {
   const router = useRouter();
   const { data: holdings, isLoading } = useHoldings();
-  const { realtimePrices, isLoading: pricesLoading, lastUpdate } = useRealtimePrices();
+  const symbols = holdings?.map(h => h.ticker) || [];
+  const { realtimePrices, isLoading: pricesLoading, lastUpdate } = useRealtimePrices(symbols);
   const [sortField, setSortField] = useState<SortField>('current_value');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -38,10 +39,18 @@ export function HoldingsTable() {
       if (realtimePrice) {
         // Calculate updated values with real-time price
         const currentValue = holding.quantity * realtimePrice.current_price;
-        const unrealizedGain = currentValue - holding.cost_basis;
-        const returnPercentage = holding.cost_basis > 0
-          ? unrealizedGain / holding.cost_basis
+        const costBasis = holding.cost_basis || 0;
+        const unrealizedGain = currentValue - costBasis;
+        const returnPercentage = costBasis > 0
+          ? unrealizedGain / costBasis
           : 0;
+
+        // Calculate change values if not provided
+        const changeAmount = realtimePrice.change_amount ??
+          (realtimePrice.current_price - realtimePrice.previous_close);
+        const changePercent = realtimePrice.change_percent ??
+          (realtimePrice.previous_close > 0 ?
+            ((realtimePrice.current_price - realtimePrice.previous_close) / realtimePrice.previous_close) * 100 : 0);
 
         return {
           ...holding,
@@ -50,8 +59,8 @@ export function HoldingsTable() {
           unrealized_gain: unrealizedGain,
           return_percentage: returnPercentage,
           // Total position change (not per-share)
-          today_change: realtimePrice.change_amount * holding.quantity,
-          today_change_percent: realtimePrice.change_percent,
+          today_change: changeAmount * holding.quantity,
+          today_change_percent: changePercent,
         };
       }
 
@@ -238,7 +247,7 @@ export function HoldingsTable() {
                     onClick={() => router.push(`/asset/${holding.ticker}`)}
                   >
                     <TableCell className="font-medium">{holding.ticker}</TableCell>
-                    <TableCell className="max-w-xs truncate" title={holding.description}>
+                    <TableCell className="max-w-xs truncate" title={holding.description || undefined}>
                       {holding.description || '—'}
                     </TableCell>
                     <TableCell className="text-right font-mono">

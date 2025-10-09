@@ -35,13 +35,16 @@ export function AddTransactionModal({
   onOpenChange,
 }: AddTransactionModalProps) {
   const [formData, setFormData] = useState<TransactionCreate>({
-    operation_date: new Date().toISOString().split('T')[0],
+    isin: '',
     ticker: '',
-    type: 'buy',
+    transaction_type: 'BUY',
     quantity: 0,
-    amount: 0,
+    price: 0,
     currency: 'EUR',
     fees: 0,
+    date: new Date().toISOString().split('T')[0],
+    broker: null,
+    description: null,
   });
 
   const createMutation = useCreateTransaction();
@@ -60,7 +63,7 @@ export function AddTransactionModal({
       return;
     }
 
-    if (formData.quantity <= 0) {
+    if (!formData.quantity || formData.quantity <= 0) {
       toast({
         title: 'Validation error',
         description: 'Quantity must be greater than 0',
@@ -69,7 +72,7 @@ export function AddTransactionModal({
       return;
     }
 
-    if (formData.amount <= 0) {
+    if (!formData.price || formData.price <= 0) {
       toast({
         title: 'Validation error',
         description: 'Price per share must be greater than 0',
@@ -78,7 +81,7 @@ export function AddTransactionModal({
       return;
     }
 
-    if (formData.fees < 0) {
+    if (!formData.fees || formData.fees < 0) {
       toast({
         title: 'Validation error',
         description: 'Fees must be 0 or greater',
@@ -91,18 +94,21 @@ export function AddTransactionModal({
       await createMutation.mutateAsync(formData);
       toast({
         title: 'Transaction created',
-        description: `Successfully added ${formData.type} transaction for ${formData.ticker}`,
+        description: `Successfully added ${formData.transaction_type} transaction for ${formData.ticker}`,
       });
       onOpenChange(false);
       // Reset form
       setFormData({
-        operation_date: new Date().toISOString().split('T')[0],
+        isin: '',
         ticker: '',
-        type: 'buy',
+        transaction_type: 'BUY',
         quantity: 0,
-        amount: 0,
+        price: 0,
         currency: 'EUR',
         fees: 0,
+        date: new Date().toISOString().split('T')[0],
+        broker: null,
+        description: null,
       });
     } catch (error: any) {
       toast({
@@ -134,17 +140,17 @@ export function AddTransactionModal({
           <div className="space-y-4 py-4">
             {/* Transaction Type */}
             <div className="space-y-2">
-              <Label htmlFor="type">Transaction Type</Label>
+              <Label htmlFor="transaction_type">Transaction Type</Label>
               <Select
-                value={formData.type}
-                onValueChange={(value) => handleFieldChange('type', value as 'buy' | 'sell')}
+                value={formData.transaction_type}
+                onValueChange={(value) => handleFieldChange('transaction_type', value as 'BUY' | 'SELL')}
               >
-                <SelectTrigger id="type">
+                <SelectTrigger id="transaction_type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="buy">Buy</SelectItem>
-                  <SelectItem value="sell">Sell</SelectItem>
+                  <SelectItem value="BUY">Buy</SelectItem>
+                  <SelectItem value="SELL">Sell</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -159,14 +165,26 @@ export function AddTransactionModal({
               />
             </div>
 
+            {/* ISIN */}
+            <div className="space-y-2">
+              <Label htmlFor="isin">ISIN (Optional)</Label>
+              <Input
+                id="isin"
+                type="text"
+                value={formData.isin || ''}
+                onChange={(e) => handleFieldChange('isin', e.target.value)}
+                placeholder="e.g., US0378331005"
+              />
+            </div>
+
             {/* Date */}
             <div className="space-y-2">
-              <Label htmlFor="operation_date">Date</Label>
+              <Label htmlFor="date">Date</Label>
               <Input
-                id="operation_date"
+                id="date"
                 type="date"
-                value={formData.operation_date}
-                onChange={(e) => handleFieldChange('operation_date', e.target.value)}
+                value={formData.date}
+                onChange={(e) => handleFieldChange('date', e.target.value)}
                 required
               />
             </div>
@@ -188,14 +206,14 @@ export function AddTransactionModal({
 
             {/* Price per Share */}
             <div className="space-y-2">
-              <Label htmlFor="amount">Price per Share</Label>
+              <Label htmlFor="price">Price per Share</Label>
               <Input
-                id="amount"
+                id="price"
                 type="number"
                 step="0.01"
                 min="0.01"
-                value={formData.amount || ''}
-                onChange={(e) => handleFieldChange('amount', parseFloat(e.target.value) || 0)}
+                value={formData.price || ''}
+                onChange={(e) => handleFieldChange('price', parseFloat(e.target.value) || 0)}
                 placeholder="0.00"
                 required
               />
@@ -240,19 +258,19 @@ export function AddTransactionModal({
                 <div className="flex justify-between">
                   <span>Subtotal:</span>
                   <span className="font-mono">
-                    {(formData.quantity * formData.amount).toFixed(2)} {formData.currency}
+                    {((formData.quantity || 0) * (formData.price || 0)).toFixed(2)} {formData.currency}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Fees:</span>
                   <span className="font-mono">
-                    {formData.fees.toFixed(2)} {formData.currency}
+                    {(formData.fees || 0).toFixed(2)} {formData.currency}
                   </span>
                 </div>
                 <div className="flex justify-between font-medium text-gray-900 pt-1 border-t">
                   <span>Total:</span>
                   <span className="font-mono">
-                    {(formData.quantity * formData.amount + formData.fees).toFixed(2)} {formData.currency}
+                    {((formData.quantity || 0) * (formData.price || 0) + (formData.fees || 0)).toFixed(2)} {formData.currency}
                   </span>
                 </div>
               </div>

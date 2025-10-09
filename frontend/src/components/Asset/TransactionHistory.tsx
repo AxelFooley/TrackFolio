@@ -70,26 +70,26 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
             </TableHeader>
             <TableBody>
               {transactions.map((transaction) => {
-                const amount = transaction.price_per_share * transaction.quantity;
+                const amount = (transaction.price || 0) * (transaction.quantity || 0);
                 return (
                   <TableRow key={transaction.id}>
-                    <TableCell>{formatDate(transaction.operation_date)}</TableCell>
+                    <TableCell>{formatDate(transaction.date)}</TableCell>
                     <TableCell>
                       <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          transaction.transaction_type === 'buy'
+                          transaction.transaction_type === 'BUY'
                             ? 'bg-success/10 text-success'
                             : 'bg-danger/10 text-danger'
                         }`}
                       >
-                        {transaction.transaction_type?.toUpperCase() || 'N/A'}
+                        {transaction.transaction_type}
                       </span>
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {transaction.quantity || '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(transaction.price_per_share, transaction.currency)}
+                      {formatCurrency(transaction.price, transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {formatCurrency(amount, transaction.currency)}

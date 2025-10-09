@@ -1,7 +1,7 @@
 """
 Daily price update tasks.
 
-Fetches latest prices from Yahoo Finance and CoinGecko for all active positions.
+Fetches latest prices from Yahoo Finance for all active positions.
 """
 from celery import shared_task
 from datetime import date, timedelta
