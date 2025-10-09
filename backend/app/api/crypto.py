@@ -6,8 +6,8 @@ Follows existing codebase patterns with proper error handling and async database
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, func
-from datetime import datetime, date
+from sqlalchemy import select, delete, func, and_
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import List, Optional
 import logging
@@ -70,6 +70,7 @@ async def create_crypto_portfolio(
             name=portfolio_data.name,
             description=portfolio_data.description,
             base_currency=portfolio_data.base_currency,
+            wallet_address=portfolio_data.wallet_address,
             is_active=True
         )
 
@@ -117,19 +118,58 @@ async def list_crypto_portfolios(
 
         for portfolio in portfolios:
             metrics = await calc_service.calculate_portfolio_metrics(portfolio.id)
+
+            # Get wallet sync status if wallet address is configured
+            wallet_sync_status = None
+            if portfolio.wallet_address:
+                try:
+                    # Get recent blockchain transaction count for sync status
+                    blockchain_tx_count = await db.execute(
+                        select(func.count(CryptoTransaction.id))
+                        .where(
+                            and_(
+                                CryptoTransaction.portfolio_id == portfolio.id,
+                                CryptoTransaction.exchange == 'Bitcoin Blockchain',
+                                CryptoTransaction.timestamp >= datetime.utcnow() - timedelta(days=7)
+                            )
+                        )
+                    )
+                    recent_blockchain_txs = blockchain_tx_count.scalar() or 0
+
+                    wallet_sync_status = {
+                        "wallet_configured": True,
+                        "wallet_address": portfolio.wallet_address,
+                        "recent_blockchain_transactions": recent_blockchain_txs,
+                        "last_sync_check": datetime.utcnow().isoformat()
+                    }
+                except Exception as e:
+                    logger.warning(f"Failed to get wallet sync status for portfolio {portfolio.id}: {e}")
+                    wallet_sync_status = {
+                        "wallet_configured": True,
+                        "wallet_address": portfolio.wallet_address,
+                        "status": "error",
+                        "error": "Failed to check sync status"
+                    }
+            else:
+                wallet_sync_status = {
+                    "wallet_configured": False
+                }
+
             portfolio_dict = {
                 "id": portfolio.id,
                 "name": portfolio.name,
                 "description": portfolio.description,
                 "is_active": portfolio.is_active,
                 "base_currency": portfolio.base_currency,
+                "wallet_address": portfolio.wallet_address,
                 "created_at": portfolio.created_at,
                 "updated_at": portfolio.updated_at,
                 "total_value": metrics.total_value if metrics else None,
                 "total_cost_basis": metrics.total_cost_basis if metrics else None,
                 "total_profit_loss": metrics.total_profit_loss if metrics else None,
                 "total_profit_loss_pct": metrics.total_profit_loss_pct if metrics else None,
-                "transaction_count": metrics.transaction_count if metrics else 0
+                "transaction_count": metrics.transaction_count if metrics else 0,
+                "wallet_sync_status": wallet_sync_status
             }
             portfolio_responses.append(CryptoPortfolioResponse(**portfolio_dict))
 
@@ -154,6 +194,79 @@ async def get_crypto_portfolio(
 
         if not summary or not summary.get('portfolio'):
             raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # Add wallet sync status to portfolio response
+        portfolio = summary['portfolio']
+        wallet_sync_status = None
+
+        if portfolio.wallet_address:
+            try:
+                # Get recent blockchain transaction count for sync status
+                blockchain_tx_count = await db.execute(
+                    select(func.count(CryptoTransaction.id))
+                    .where(
+                        and_(
+                            CryptoTransaction.portfolio_id == portfolio_id,
+                            CryptoTransaction.exchange == 'Bitcoin Blockchain',
+                            CryptoTransaction.timestamp >= datetime.utcnow() - timedelta(days=7)
+                        )
+                    )
+                )
+                recent_blockchain_txs = blockchain_tx_count.scalar() or 0
+
+                # Get total blockchain transactions
+                total_blockchain_tx_count = await db.execute(
+                    select(func.count(CryptoTransaction.id))
+                    .where(
+                        and_(
+                            CryptoTransaction.portfolio_id == portfolio_id,
+                            CryptoTransaction.exchange == 'Bitcoin Blockchain'
+                        )
+                    )
+                )
+                total_blockchain_txs = total_blockchain_tx_count.scalar() or 0
+
+                # Get last blockchain transaction date
+                last_blockchain_tx_result = await db.execute(
+                    select(CryptoTransaction.timestamp)
+                    .where(
+                        and_(
+                            CryptoTransaction.portfolio_id == portfolio_id,
+                            CryptoTransaction.exchange == 'Bitcoin Blockchain'
+                        )
+                    )
+                    .order_by(CryptoTransaction.timestamp.desc())
+                    .limit(1)
+                )
+                last_blockchain_tx = last_blockchain_tx_result.scalar_one_or_none()
+
+                wallet_sync_status = {
+                    "wallet_configured": True,
+                    "wallet_address": portfolio.wallet_address,
+                    "recent_blockchain_transactions": recent_blockchain_txs,
+                    "total_blockchain_transactions": total_blockchain_txs,
+                    "last_blockchain_transaction": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
+                    "last_sync_check": datetime.utcnow().isoformat()
+                }
+            except Exception as e:
+                logger.warning(f"Failed to get wallet sync status for portfolio {portfolio_id}: {e}")
+                wallet_sync_status = {
+                    "wallet_configured": True,
+                    "wallet_address": portfolio.wallet_address,
+                    "status": "error",
+                    "error": "Failed to check sync status"
+                }
+        else:
+            wallet_sync_status = {
+                "wallet_configured": False
+            }
+
+        # Add wallet sync status to the portfolio object
+        if hasattr(portfolio, '__dict__'):
+            portfolio.__dict__['wallet_sync_status'] = wallet_sync_status
+        else:
+            # For SQLAlchemy objects, we'll add this in the response serialization
+            summary['wallet_sync_status'] = wallet_sync_status
 
         return summary
 

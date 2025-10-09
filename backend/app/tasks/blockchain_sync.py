@@ -1,0 +1,494 @@
+"""
+Blockchain wallet synchronization tasks.
+
+This module handles automatic synchronization of Bitcoin wallet transactions
+from blockchain APIs to the crypto portfolio system.
+"""
+from celery import shared_task
+from datetime import datetime, timedelta
+from decimal import Decimal
+from sqlalchemy import select, func, and_, or_
+from sqlalchemy.exc import IntegrityError
+import logging
+import time
+
+from app.celery_app import celery_app
+from app.database import SyncSessionLocal
+from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType, CryptoCurrency
+from app.services.blockchain_fetcher import blockchain_fetcher
+from app.services.blockchain_deduplication import blockchain_deduplication
+from app.services.coincap import coincap_service
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 3, 'countdown': 300},
+    retry_backoff=True,
+    retry_backoff_max=1800,
+    retry_jitter=True
+)
+def sync_bitcoin_wallets():
+    """
+    Sync all Bitcoin wallets configured in crypto portfolios.
+
+    This task:
+    1. Finds all portfolios with Bitcoin wallet addresses
+    2. Fetches new transactions from blockchain APIs
+    3. Detects and prevents duplicate transactions
+    4. Calculates accurate prices at execution time
+    5. Saves new transactions to the database
+
+    Scheduled to run every 30 minutes.
+
+    Returns:
+        dict: Summary of sync results across all wallets
+    """
+    # Check if blockchain sync is enabled
+    if not settings.blockchain_sync_enabled:
+        logger.info("Blockchain synchronization is disabled in settings")
+        return {
+            "status": "disabled",
+            "message": "Blockchain synchronization is disabled",
+            "wallets_synced": 0,
+            "total_transactions": 0
+        }
+
+    logger.info("Starting Bitcoin wallet synchronization task")
+
+    db = SyncSessionLocal()
+
+    try:
+        # Get all portfolios with Bitcoin wallet addresses
+        result = db.execute(
+            select(CryptoPortfolio)
+            .where(
+                and_(
+                    CryptoPortfolio.is_active == True,
+                    CryptoPortfolio.wallet_address.isnot(None)
+                )
+            )
+        )
+        portfolios = result.scalars().all()
+
+        if not portfolios:
+            logger.info("No active Bitcoin wallets found. Skipping sync.")
+            return {
+                "status": "success",
+                "message": "No active Bitcoin wallets found",
+                "wallets_synced": 0,
+                "total_transactions": 0
+            }
+
+        logger.info(f"Found {len(portfolios)} Bitcoin wallets to sync")
+
+        # Track overall results
+        total_transactions = 0
+        total_skipped = 0
+        total_failed = 0
+        wallet_results = []
+
+        # Sync each wallet
+        for portfolio in portfolios:
+            try:
+                wallet_result = sync_single_wallet(
+                    portfolio.wallet_address,
+                    portfolio.id,
+                    db
+                )
+
+                wallet_results.append({
+                    "portfolio_id": portfolio.id,
+                    "portfolio_name": portfolio.name,
+                    "wallet_address": portfolio.wallet_address,
+                    **wallet_result
+                })
+
+                total_transactions += wallet_result.get("transactions_added", 0)
+                total_skipped += wallet_result.get("transactions_skipped", 0)
+                total_failed += wallet_result.get("transactions_failed", 0)
+
+                logger.info(
+                    f"Synced wallet {portfolio.wallet_address}: "
+                    f"+{wallet_result.get('transactions_added', 0)} "
+                    f"skipped {wallet_result.get('transactions_skipped', 0)} "
+                    f"failed {wallet_result.get('transactions_failed', 0)}"
+                )
+
+                # Rate limiting between wallets
+                time.sleep(2)
+
+            except Exception as e:
+                logger.error(f"Failed to sync wallet {portfolio.wallet_address}: {e}")
+                wallet_results.append({
+                    "portfolio_id": portfolio.id,
+                    "portfolio_name": portfolio.name,
+                    "wallet_address": portfolio.wallet_address,
+                    "status": "error",
+                    "error": str(e),
+                    "transactions_added": 0,
+                    "transactions_skipped": 0,
+                    "transactions_failed": 0
+                })
+                total_failed += 1
+
+        # Build summary
+        summary = {
+            "status": "success",
+            "message": f"Synced {len(portfolios)} Bitcoin wallets",
+            "wallets_synced": len(portfolios),
+            "total_transactions_added": total_transactions,
+            "total_transactions_skipped": total_skipped,
+            "total_wallets_failed": total_failed,
+            "sync_timestamp": datetime.utcnow().isoformat(),
+            "wallet_results": wallet_results
+        }
+
+        logger.info(
+            f"Bitcoin wallet sync complete: "
+            f"{len(portfolios)} wallets, "
+            f"{total_transactions} new transactions, "
+            f"{total_skipped} skipped, "
+            f"{total_failed} failed"
+        )
+
+        return summary
+
+    except Exception as e:
+        logger.error(f"Fatal error in Bitcoin wallet sync task: {e}")
+        raise
+
+    finally:
+        db.close()
+
+
+def sync_single_wallet(
+    wallet_address: str,
+    portfolio_id: int,
+    db_session,
+    max_transactions: int = None,
+    days_back: int = None
+) -> dict:
+    """
+    Sync transactions for a single Bitcoin wallet.
+
+    Args:
+        wallet_address: Bitcoin wallet address to sync
+        portfolio_id: Portfolio ID to associate transactions with
+        db_session: Database session
+        max_transactions: Maximum number of transactions to fetch (from config if None)
+        days_back: Number of days to look back for new transactions (from config if None)
+
+    Returns:
+        dict: Sync result for this wallet
+    """
+    # Use configuration defaults if not provided
+    if max_transactions is None:
+        max_transactions = settings.blockchain_max_transactions_per_sync
+    if days_back is None:
+        days_back = settings.blockchain_sync_days_back
+
+    logger.info(f"Syncing Bitcoin wallet {wallet_address} (portfolio {portfolio_id})")
+
+    try:
+        # Get existing transaction hashes for this portfolio using deduplication service
+        existing_hashes = blockchain_deduplication.get_portfolio_transaction_hashes(portfolio_id)
+        logger.info(f"Found {len(existing_hashes)} existing transactions for wallet {wallet_address}")
+
+        # Fetch transactions from blockchain API
+        blockchain_result = blockchain_fetcher.fetch_transactions(
+            wallet_address=wallet_address,
+            portfolio_id=portfolio_id,
+            max_transactions=max_transactions,
+            days_back=days_back
+        )
+
+        if blockchain_result['status'] != 'success':
+            return {
+                "status": "error",
+                "error": blockchain_result.get('message', 'Unknown error'),
+                "transactions_added": 0,
+                "transactions_skipped": 0,
+                "transactions_failed": 0
+            }
+
+        blockchain_transactions = blockchain_result.get('transactions', [])
+        logger.info(f"Fetched {len(blockchain_transactions)} transactions from blockchain for wallet {wallet_address}")
+
+        # Process and filter transactions
+        new_transactions = []
+        skipped_transactions = []
+        failed_transactions = []
+
+        for tx_data in blockchain_transactions:
+            try:
+                tx_hash = tx_data.get('transaction_hash')
+
+                # Check for duplicates
+                if tx_hash and tx_hash in existing_hashes:
+                    logger.debug(f"Skipping duplicate transaction: {tx_hash}")
+                    skipped_transactions.append(tx_data)
+                    continue
+
+                # Get historical price at transaction time
+                price_at_time = get_historical_price_at_time(
+                    symbol='BTC',
+                    timestamp=tx_data['timestamp'],
+                    base_currency='EUR'
+                )
+
+                if price_at_time:
+                    tx_data['price_at_execution'] = price_at_time
+                    tx_data['total_amount'] = tx_data['quantity'] * price_at_time
+                    tx_data['currency'] = CryptoCurrency.EUR
+                else:
+                    # Fallback to current price if historical price not available
+                    logger.warning(f"Could not get historical price for transaction {tx_hash}, using current price")
+                    current_price_data = coincap_service.get_current_price('BTC', 'eur')
+                    if current_price_data and current_price_data.get('price'):
+                        tx_data['price_at_execution'] = current_price_data['price']
+                        tx_data['total_amount'] = tx_data['quantity'] * current_price_data['price']
+                        tx_data['currency'] = CryptoCurrency.EUR
+                    else:
+                        logger.error(f"Could not get any price data for transaction {tx_hash}")
+                        failed_transactions.append(tx_data)
+                        continue
+
+                # Create transaction record
+                transaction = CryptoTransaction(
+                    portfolio_id=portfolio_id,
+                    symbol=tx_data['symbol'],
+                    transaction_type=tx_data['transaction_type'],
+                    quantity=tx_data['quantity'],
+                    price_at_execution=tx_data['price_at_execution'],
+                    total_amount=tx_data['total_amount'],
+                    currency=tx_data['currency'],
+                    fee=tx_data.get('fee', Decimal('0')),
+                    fee_currency=tx_data.get('fee_currency'),
+                    timestamp=tx_data['timestamp'],
+                    exchange=tx_data.get('exchange', 'Bitcoin Blockchain'),
+                    transaction_hash=tx_data.get('transaction_hash'),
+                    notes=tx_data.get('notes', f'Blockchain transaction: {tx_hash}')
+                )
+
+                new_transactions.append(transaction)
+
+            except Exception as e:
+                logger.error(f"Error processing transaction {tx_data.get('transaction_hash', 'unknown')}: {e}")
+                failed_transactions.append(tx_data)
+                continue
+
+        # Save new transactions to database
+        transactions_added = 0
+        for transaction in new_transactions:
+            try:
+                db_session.add(transaction)
+                db_session.commit()
+                transactions_added += 1
+                logger.debug(f"Added new transaction: {transaction.transaction_hash}")
+
+            except IntegrityError as e:
+                db_session.rollback()
+                # This could happen due to race conditions or duplicate hash constraints
+                logger.warning(f"Integrity error adding transaction {transaction.transaction_hash}: {e}")
+                skipped_transactions.append(transaction.transaction_hash)
+                continue
+
+            except Exception as e:
+                db_session.rollback()
+                logger.error(f"Error saving transaction {transaction.transaction_hash}: {e}")
+                failed_transactions.append(transaction.transaction_hash)
+                continue
+
+        result = {
+            "status": "success",
+            "transactions_added": transactions_added,
+            "transactions_skipped": len(skipped_transactions),
+            "transactions_failed": len(failed_transactions),
+            "total_fetched": len(blockchain_transactions),
+            "message": f"Added {transactions_added} new transactions for wallet {wallet_address}"
+        }
+
+        logger.info(
+            f"Wallet {wallet_address} sync complete: "
+            f"{transactions_added} added, "
+            f"{len(skipped_transactions)} skipped, "
+            f"{len(failed_transactions)} failed"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error syncing wallet {wallet_address}: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "transactions_added": 0,
+            "transactions_skipped": 0,
+            "transactions_failed": 0
+        }
+
+
+def get_historical_price_at_time(
+    symbol: str,
+    timestamp: datetime,
+    base_currency: str = 'EUR'
+) -> Decimal:
+    """
+    Get historical price for a cryptocurrency at a specific time.
+
+    Args:
+        symbol: Cryptocurrency symbol (e.g., 'BTC')
+        timestamp: Target timestamp
+        base_currency: Target currency
+
+    Returns:
+        Historical price or None if not available
+    """
+    try:
+        # Get date from timestamp
+        target_date = timestamp.date()
+
+        # Try to get historical price from CoinCap
+        historical_prices = coincap_service.get_historical_prices(
+            symbol=symbol,
+            start_date=target_date,
+            end_date=target_date,
+            currency=base_currency.lower()
+        )
+
+        if historical_prices:
+            # Find the price closest to the target timestamp
+            closest_price = None
+            min_time_diff = float('inf')
+
+            for price_data in historical_prices:
+                price_time = price_data.get('timestamp', datetime.utcnow())
+                time_diff = abs((price_time - timestamp).total_seconds())
+
+                if time_diff < min_time_diff:
+                    min_time_diff = time_diff
+                    closest_price = price_data.get('price')
+
+            if closest_price:
+                logger.debug(f"Found historical price for {symbol} at {timestamp}: {closest_price}")
+                return closest_price
+
+        # Fallback: try to get current price if historical not available
+        logger.warning(f"No historical price available for {symbol} at {timestamp}, trying current price")
+        current_price_data = coincap_service.get_current_price(symbol, base_currency.lower())
+
+        if current_price_data and current_price_data.get('price'):
+            return current_price_data['price']
+
+        return None
+
+    except Exception as e:
+        logger.error(f"Error getting historical price for {symbol} at {timestamp}: {e}")
+        return None
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 2, 'countdown': 60}
+)
+def sync_wallet_manually(self, wallet_address: str, portfolio_id: int):
+    """
+    Manually trigger sync for a specific Bitcoin wallet.
+
+    This task can be called from API endpoints for immediate wallet sync.
+
+    Args:
+        wallet_address: Bitcoin wallet address to sync
+        portfolio_id: Portfolio ID to associate transactions with
+
+    Returns:
+        dict: Sync result for the wallet
+    """
+    logger.info(f"Manual sync triggered for Bitcoin wallet {wallet_address} (portfolio {portfolio_id})")
+
+    db = SyncSessionLocal()
+
+    try:
+        # Verify portfolio exists and has this wallet address
+        portfolio = db.execute(
+            select(CryptoPortfolio)
+            .where(
+                and_(
+                    CryptoPortfolio.id == portfolio_id,
+                    CryptoPortfolio.wallet_address == wallet_address,
+                    CryptoPortfolio.is_active == True
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not portfolio:
+            return {
+                "status": "error",
+                "error": f"Portfolio {portfolio_id} not found or wallet address doesn't match",
+                "transactions_added": 0,
+                "transactions_skipped": 0,
+                "transactions_failed": 0
+            }
+
+        # Sync the wallet with larger limits for manual sync
+        result = sync_single_wallet(
+            wallet_address=wallet_address,
+            portfolio_id=portfolio_id,
+            db_session=db,
+            max_transactions=200,  # Higher limit for manual sync
+            days_back=30  # Look back further for manual sync
+        )
+
+        logger.info(f"Manual sync completed for wallet {wallet_address}: {result}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in manual wallet sync for {wallet_address}: {e}")
+        raise
+
+    finally:
+        db.close()
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 1, 'countdown': 30}
+)
+def test_blockchain_connection(self):
+    """
+    Test connection to all blockchain APIs.
+
+    Returns:
+        dict: Connection test results
+    """
+    logger.info("Testing blockchain API connections")
+
+    try:
+        results = blockchain_fetcher.test_api_connection()
+
+        success_count = sum(1 for status in results.values() if status)
+        total_count = len(results)
+
+        summary = {
+            "status": "success",
+            "message": f"Connected to {success_count}/{total_count} blockchain APIs",
+            "api_results": results,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        logger.info(f"Blockchain API connection test: {summary}")
+        return summary
+
+    except Exception as e:
+        logger.error(f"Error testing blockchain API connections: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }

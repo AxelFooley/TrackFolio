@@ -25,7 +25,8 @@ celery_app = Celery(
         "app.tasks.auto_backfill",
         "app.tasks.update_crypto_prices",
         "app.tasks.crypto_metric_calculation",
-        "app.tasks.crypto_snapshots"
+        "app.tasks.crypto_snapshots",
+        "app.tasks.blockchain_sync"
     ]
 )
 
@@ -99,6 +100,15 @@ celery_app.conf.update(
             "schedule": crontab(hour=23, minute=30),  # 23:30 CET
             "options": {
                 "expires": 3600,
+            }
+        },
+
+        # Blockchain sync tasks - sync wallets every 30 minutes
+        "sync-blockchain-wallets": {
+            "task": "app.tasks.blockchain_sync.sync_all_wallets",
+            "schedule": crontab(minute="*/30"),  # Every 30 minutes
+            "options": {
+                "expires": 1800,  # Task expires after 30 minutes
             }
         },
     },

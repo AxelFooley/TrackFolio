@@ -2,7 +2,7 @@
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
 from datetime import datetime, date
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from enum import Enum
 
 
@@ -26,6 +26,7 @@ class CryptoPortfolioCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Portfolio name")
     description: Optional[str] = Field(None, max_length=500, description="Portfolio description")
     base_currency: CryptoCurrency = Field(CryptoCurrency.EUR, description="Base currency")
+    wallet_address: Optional[str] = Field(None, max_length=100, description="Bitcoin wallet address for paper wallet integration")
 
 
 class CryptoPortfolioUpdate(BaseModel):
@@ -34,6 +35,7 @@ class CryptoPortfolioUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=500, description="Portfolio description")
     is_active: Optional[bool] = Field(None, description="Whether the portfolio is active")
     base_currency: Optional[CryptoCurrency] = Field(None, description="Base currency")
+    wallet_address: Optional[str] = Field(None, max_length=100, description="Bitcoin wallet address for paper wallet integration")
 
 
 class CryptoPortfolioResponse(BaseModel):
@@ -43,6 +45,7 @@ class CryptoPortfolioResponse(BaseModel):
     description: Optional[str]
     is_active: bool
     base_currency: CryptoCurrency
+    wallet_address: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -52,6 +55,9 @@ class CryptoPortfolioResponse(BaseModel):
     total_profit_loss: Optional[Decimal] = None
     total_profit_loss_pct: Optional[float] = None
     transaction_count: Optional[int] = None
+
+    # Wallet sync status
+    wallet_sync_status: Optional[Dict[str, Any]] = None
 
     model_config = {"from_attributes": True}
 

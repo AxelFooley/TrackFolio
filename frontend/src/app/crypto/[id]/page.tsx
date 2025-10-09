@@ -10,6 +10,7 @@ import { formatCurrency, formatPercentage, formatDate } from '@/lib/utils';
 import { Bitcoin, TrendingUp, TrendingDown, ArrowLeft, RefreshCw, Eye, Plus } from 'lucide-react';
 import { CryptoHoldingsTable } from '@/components/Crypto/CryptoHoldingsTable';
 import { CryptoPriceChart } from '@/components/Crypto/CryptoPriceChart';
+import { WalletSync } from '@/components/Crypto/WalletSync';
 import { useToast } from '@/hooks/use-toast';
 
 export default function CryptoPortfolioDetailPage() {
@@ -280,6 +281,11 @@ export default function CryptoPortfolioDetailPage() {
               </CardContent>
             </Card>
           </div>
+        )}
+
+        {/* Wallet Sync Section */}
+        {portfolio.wallet_address && (
+          <WalletSync portfolioId={portfolioId} walletAddress={portfolio.wallet_address} />
         )}
 
         {/* Holdings Table */}

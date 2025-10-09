@@ -1,10 +1,11 @@
 """
 Crypto portfolio database models - Standalone crypto tracking feature.
 """
+import re
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import String, Numeric, DateTime, Enum as SQLEnum, ForeignKey, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 import enum
 
 from app.database import Base
@@ -61,6 +62,14 @@ class CryptoPortfolio(Base):
         comment="Base currency for the portfolio"
     )
 
+    # Bitcoin wallet address (optional)
+    wallet_address: Mapped[str] = mapped_column(
+        String(62),
+        nullable=True,
+        index=True,
+        comment="Bitcoin wallet address for paper wallet tracking (optional)"
+    )
+
     # Metadata
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -84,12 +93,58 @@ class CryptoPortfolio(Base):
         order_by="CryptoTransaction.timestamp.desc()"
     )
 
+    @validates("wallet_address")
+    def validate_wallet_address(self, key, wallet_address):
+        """
+        Validate Bitcoin address format.
+
+        Supports:
+        - Legacy addresses (starting with '1')
+        - P2SH addresses (starting with '3')
+        - Bech32 addresses (starting with 'bc1')
+
+        Args:
+            wallet_address: The Bitcoin address to validate
+
+        Returns:
+            The validated wallet address
+
+        Raises:
+            ValueError: If the address format is invalid
+        """
+        if wallet_address is None:
+            return None
+
+        wallet_address = wallet_address.strip()
+
+        if not wallet_address:
+            return None
+
+        # Basic Bitcoin address validation using regex
+        # Legacy (P2PKH) addresses: start with '1', 26-35 characters (1 + 25-34 = 26-35 total)
+        # P2SH addresses: start with '3', 26-35 characters (3 + 25-34 = 26-35 total)
+        # Bech32 addresses: start with 'bc1', 42-62 characters (bc1 + 39-59 = 42-62 total)
+        legacy_p2pkh_pattern = r'^1[1-9A-HJ-NP-Za-km-z]{25,34}$'
+        p2sh_pattern = r'^3[1-9A-HJ-NP-Za-km-z]{25,34}$'
+        bech32_pattern = r'^bc1[02-9ac-hj-np-z]{39,59}$'
+
+        if (re.match(legacy_p2pkh_pattern, wallet_address) or
+            re.match(p2sh_pattern, wallet_address) or
+            re.match(bech32_pattern, wallet_address)):
+            return wallet_address
+
+        raise ValueError(
+            f"Invalid Bitcoin address format: {wallet_address}. "
+            "Address must start with '1', '3', or 'bc1' and have valid length and characters."
+        )
+
     def __repr__(self) -> str:
         return (
             f"CryptoPortfolio(id={self.id!r}, "
             f"name={self.name!r}, "
             f"currency={self.base_currency.value!r}, "
-            f"active={self.is_active!r})"
+            f"active={self.is_active!r}, "
+            f"wallet_address={self.wallet_address!r})"
         )
 
 
