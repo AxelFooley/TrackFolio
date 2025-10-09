@@ -61,6 +61,7 @@ portfolio_tracker_prd.md
 
 # Claude Stuff
 .claude
+CLAUDE.md
 
 # Docker
 docker-compose.override.yml
