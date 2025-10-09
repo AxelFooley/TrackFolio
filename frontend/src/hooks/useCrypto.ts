@@ -18,6 +18,11 @@ import {
   searchCryptoAssets,
   importCryptoTransactions,
   refreshCryptoPrices,
+  syncWallet,
+  configureWalletAddress,
+  getWalletTransactionsPreview,
+  getBlockchainServiceStatus,
+  getWalletSyncStatus,
 } from '@/lib/api';
 import type {
   CryptoPortfolio,
@@ -33,6 +38,8 @@ import type {
   CryptoTransactionCreate,
   CryptoTransactionUpdate,
   PaginatedResponse,
+  WalletSyncStatus,
+  WalletTransactionPreview,
 } from '@/lib/types';
 
 // Portfolio Management
@@ -258,5 +265,93 @@ export function useRefreshCryptoPrices() {
         queryClient.invalidateQueries({ queryKey: ['crypto', 'prices'] });
       }
     },
+  });
+}
+
+// Wallet Management
+export function useWalletSyncStatus(portfolioId: number) {
+  return useQuery({
+    queryKey: ['crypto', 'portfolios', portfolioId, 'wallet-sync-status'],
+    queryFn: () => getWalletSyncStatus(portfolioId),
+    staleTime: 60000, // 1 minute
+    enabled: !!portfolioId,
+    refetchInterval: (data) => {
+      // Refetch every 30 seconds when syncing, every 5 minutes otherwise
+      return data?.status === 'syncing' ? 30000 : 300000;
+    },
+  });
+}
+
+export function useSyncWallet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (portfolioId: number) => syncWallet(portfolioId),
+    onMutate: async (portfolioId) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'wallet-sync-status'] });
+
+      // Snapshot the previous value
+      const previousStatus = queryClient.getQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status']);
+
+      // Optimistically update to syncing status
+      queryClient.setQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status'], {
+        status: 'syncing',
+        last_sync: null,
+        transaction_count: null,
+        error_message: null,
+      });
+
+      return { previousStatus };
+    },
+    onError: (err, portfolioId, context) => {
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousStatus) {
+        queryClient.setQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status'], context.previousStatus);
+      }
+    },
+    onSuccess: (data, portfolioId) => {
+      // Update with the new status from the server
+      queryClient.setQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status'], data.status);
+
+      // Invalidate related queries
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId] });
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'holdings'] });
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'metrics'] });
+    },
+  });
+}
+
+export function useConfigureWalletAddress() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ portfolioId, walletAddress }: { portfolioId: number; walletAddress: string }) =>
+      configureWalletAddress(portfolioId, walletAddress),
+    onSuccess: (_, { portfolioId }) => {
+      // Invalidate related queries
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId] });
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'wallet-sync-status'] });
+      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios'] }); // Update the portfolio list
+    },
+  });
+}
+
+export function useWalletTransactionsPreview(walletAddress: string, enabled: boolean = false) {
+  return useQuery({
+    queryKey: ['blockchain', 'wallet', walletAddress, 'transactions-preview'],
+    queryFn: () => getWalletTransactionsPreview(walletAddress),
+    staleTime: 300000, // 5 minutes
+    enabled: enabled && !!walletAddress,
+  });
+}
+
+export function useBlockchainServiceStatus() {
+  return useQuery({
+    queryKey: ['blockchain', 'service-status'],
+    queryFn: getBlockchainServiceStatus,
+    staleTime: 300000, // 5 minutes
+    refetchInterval: 300000, // Refetch every 5 minutes
   });
 }
