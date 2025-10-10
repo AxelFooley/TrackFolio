@@ -174,11 +174,10 @@ class CryptoPortfolioMetrics(BaseModel):
     transaction_count: int
 
     # Currency breakdown
-    currency_breakdown: List[dict] = []
+    currency_breakdown: List[dict] = Field(default_factory=list)
 
     # Asset allocation (by value)
-    asset_allocation: List[dict] = []
-
+    asset_allocation: List[dict] = Field(default_factory=list)
 
 class CryptoPriceData(BaseModel):
     """Schema for crypto price data."""
