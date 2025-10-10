@@ -25,6 +25,11 @@ Represents a standalone crypto portfolio for organizing cryptocurrency holdings.
 
 **Relationships:**
 - `transactions` - One-to-many relationship with CryptoTransaction (cascade delete)
+- `wallet_address` (String(90), Optional) - Bitcoin wallet address for paper wallet tracking
+
+**Validation:**
+- Name is required and cannot be empty
+- Base currency must be a valid CryptoCurrency enum value
 
 ### 2. CryptoTransaction
 
