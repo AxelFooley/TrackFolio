@@ -615,6 +615,69 @@ async def get_crypto_portfolio_holdings(
         raise HTTPException(status_code=500, detail=f"Failed to calculate holdings: {str(e)}")
 
 
+@router.get("/portfolios/{portfolio_id}/performance")
+async def get_crypto_portfolio_performance(
+    portfolio_id: int,
+    range: str = Query("1M", regex="^(1D|1W|1M|3M|6M|1Y|ALL)$", description="Time range for performance data"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get performance data for a crypto portfolio within a time range."""
+    try:
+        # Verify portfolio exists
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # Calculate date range based on range parameter
+        end_date = datetime.utcnow().date()
+
+        if range == "1D":
+            start_date = end_date - timedelta(days=1)
+        elif range == "1W":
+            start_date = end_date - timedelta(weeks=1)
+        elif range == "1M":
+            start_date = end_date - timedelta(days=30)
+        elif range == "3M":
+            start_date = end_date - timedelta(days=90)
+        elif range == "6M":
+            start_date = end_date - timedelta(days=180)
+        elif range == "1Y":
+            start_date = end_date - timedelta(days=365)
+        else:  # ALL
+            start_date = end_date - timedelta(days=365 * 5)  # 5 years max
+
+        calc_service = CryptoCalculationService(db)
+        performance_data = await calc_service.calculate_performance_history(
+            portfolio_id, start_date, end_date
+        )
+
+        # If no performance data, return empty array
+        if not performance_data:
+            return []
+
+        # Convert to frontend-compatible format
+        frontend_performance_data = []
+        for data_point in performance_data:
+            frontend_performance_data.append({
+                "date": data_point.date.isoformat() if hasattr(data_point.date, 'isoformat') else str(data_point.date),
+                "portfolio_value": float(data_point.portfolio_value) if data_point.portfolio_value else 0.0,
+                "cost_basis": float(data_point.cost_basis) if data_point.cost_basis else 0.0,
+                "profit_loss": float(data_point.profit_loss) if data_point.profit_loss else 0.0,
+                "profit_loss_pct": float(data_point.profit_loss_pct) if data_point.profit_loss_pct is not None else 0.0
+            })
+
+        return frontend_performance_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get portfolio performance: {str(e)}")
+
+
 @router.get("/portfolios/{portfolio_id}/history", response_model=CryptoPortfolioPerformance)
 async def get_crypto_portfolio_history(
     portfolio_id: int,
@@ -787,6 +850,71 @@ async def get_crypto_price_history(
 
 
 # Utility Endpoints
+
+@router.post("/portfolios/{portfolio_id}/refresh-prices")
+async def refresh_crypto_prices(
+    portfolio_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Trigger a refresh of crypto prices for a portfolio."""
+    try:
+        # Verify portfolio exists
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # Get unique symbols from portfolio transactions
+        symbols_result = await db.execute(
+            select(func.distinct(CryptoTransaction.symbol))
+            .where(CryptoTransaction.portfolio_id == portfolio_id)
+        )
+        symbols = [row[0] for row in symbols_result.all()]
+
+        if not symbols:
+            return {
+                "status": "success",
+                "message": "No crypto symbols found in portfolio to refresh",
+                "portfolio_id": portfolio_id,
+                "symbols_updated": [],
+                "prices_updated": 0
+            }
+
+        # Trigger price update task (synchronous for now)
+        from app.tasks.update_crypto_prices import update_crypto_price_for_symbol
+        updated_symbols = []
+        failed_symbols = []
+
+        for symbol in symbols:
+            try:
+                # Trigger price update for this symbol
+                task_result = update_crypto_price_for_symbol(symbol)
+                if task_result.get("status") == "success":
+                    updated_symbols.append(symbol)
+                else:
+                    failed_symbols.append(symbol)
+            except Exception as e:
+                logger.error(f"Failed to update price for {symbol}: {e}")
+                failed_symbols.append(symbol)
+
+        return {
+            "status": "success",
+            "message": f"Price refresh completed for {len(updated_symbols)} symbols",
+            "portfolio_id": portfolio_id,
+            "symbols_updated": updated_symbols,
+            "symbols_failed": failed_symbols,
+            "prices_updated": len(updated_symbols),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to refresh crypto prices: {str(e)}")
+
 
 @router.get("/supported-symbols")
 async def get_supported_crypto_symbols():

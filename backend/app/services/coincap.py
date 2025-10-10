@@ -617,7 +617,7 @@ class CoinCapService:
                 logger.error(f"Could not map symbol {symbol} to CoinCap ID")
                 return None
 
-            # Fetch asset data
+            # Fetch asset data using v2 endpoint
             response = self._make_request(f'assets/{coincapec_id}')
 
             if not response or 'data' not in response:
@@ -652,7 +652,7 @@ class CoinCapService:
             volume_24h_usd = Decimal(str(asset_data.get('volumeUsd24Hr', '0')))
             change_percent_24h = Decimal(str(asset_data.get('changePercent24Hr', '0')))
 
-            return {
+            result = {
                 'symbol': symbol.upper(),
                 'coincapec_id': coincapec_id,
                 'price': price,
@@ -700,7 +700,7 @@ class CoinCapService:
             return cached_result
 
         try:
-            # Map symbol to CoinCap ID
+            # Map symbol to CoinCap ID (for v3 we need the slug like 'bitcoin')
             coincapec_id = self.map_symbol_to_coincec_id(symbol)
             if not coincapec_id:
                 logger.error(f"Could not map symbol {symbol} to CoinCap ID")
@@ -710,7 +710,7 @@ class CoinCapService:
             start_timestamp = int(datetime.combine(start_date, datetime.min.time()).timestamp() * 1000)
             end_timestamp = int(datetime.combine(end_date, datetime.max.time()).timestamp() * 1000)
 
-            # Fetch historical data
+            # Fetch historical data using v3 endpoint
             response = self._make_request(
                 f'assets/{coincapec_id}/history',
                 {

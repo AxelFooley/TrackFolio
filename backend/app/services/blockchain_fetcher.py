@@ -337,7 +337,7 @@ class BlockchainFetcherService:
             # Extract relevant data
             tx_hash = tx_data.get('hash')
             timestamp_ms = tx_data.get('time', 0) * 1000  # Convert to milliseconds
-            total_value = tx_data.get('balance', 0)
+            result = tx_data.get('result', 0)  # Net change in wallet balance for this transaction
 
             if not tx_hash or not timestamp_ms:
                 logger.warning(f"Missing required fields in transaction data: {tx_data}")
@@ -346,23 +346,36 @@ class BlockchainFetcherService:
             # Convert timestamp to datetime
             timestamp = datetime.fromtimestamp(timestamp_ms / 1000)
 
+            # Calculate the actual amount received/sent by our wallet
+            # Look through outputs to find those belonging to our wallet
+            wallet_total = 0
+            for output in tx_data.get('out', []):
+                if output.get('addr') == wallet_address:
+                    wallet_total += output.get('value', 0)
+
             # Convert from satoshis to BTC
-            quantity = Decimal(str(total_value)) / Decimal('100000000')
+            quantity = Decimal(str(abs(wallet_total))) / Decimal('100000000')
+
+            # Detect transaction type based on result (positive = incoming, negative = outgoing)
+            if result > 0:
+                tx_type = CryptoTransactionType.TRANSFER_IN
+            elif result < 0:
+                tx_type = CryptoTransactionType.TRANSFER_OUT
+            else:
+                # Zero result - check if we have outputs (likely incoming)
+                tx_type = CryptoTransactionType.TRANSFER_IN if wallet_total > 0 else CryptoTransactionType.TRANSFER_OUT
 
             # For now, we'll estimate the price
             estimated_price = Decimal("1.0")  # Placeholder
-
-            # Detect transaction type
-            tx_type = self._detect_transaction_type(tx_data, wallet_address)
 
             return {
                 'transaction_hash': tx_hash,
                 'timestamp': timestamp,
                 'transaction_type': tx_type,
                 'symbol': 'BTC',
-                'quantity': abs(quantity),
+                'quantity': quantity,
                 'price_at_execution': estimated_price,
-                'total_amount': abs(quantity) * estimated_price,
+                'total_amount': quantity * estimated_price,
                 'currency': CryptoCurrency.USD,
                 'fee': Decimal("0"),
                 'fee_currency': None,
@@ -607,7 +620,7 @@ class BlockchainFetcherService:
         days_back: int
     ) -> Optional[Dict[str, Any]]:
         """
-        Fetch transactions using Blockchain.com API.
+        Fetch transactions using Blockchain.info API.
 
         Args:
             wallet_address: Bitcoin wallet address
@@ -621,19 +634,19 @@ class BlockchainFetcherService:
         try:
             # Calculate date threshold
             date_threshold = datetime.utcnow() - timedelta(days=days_back)
-            threshold_timestamp = int(date_threshold.timestamp() * 1000)  # Blockchain.com uses milliseconds
+            threshold_timestamp = int(date_threshold.timestamp() * 1000)  # Blockchain.info uses milliseconds
 
-            # Build request URL
-            endpoint = f"/{wallet_address}"
+            # Build request URL - use the correct rawaddr endpoint structure
+            endpoint = f"/rawaddr/{wallet_address}"
             params = {
-                'limit': min(max_transactions, 50)  # Blockchain.com has a 50 transaction limit
+                'limit': min(max_transactions, 50)  # Blockchain.info has a 50 transaction limit
             }
 
             # Make request
             data = self._make_request('blockchain_com', endpoint, params)
 
             if not data:
-                return self._build_result([], 'error', 'No data received from Blockchain.com API')
+                return self._build_result([], 'error', 'No data received from Blockchain.info API')
 
             transactions = []
 
@@ -659,7 +672,7 @@ class BlockchainFetcherService:
             return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions')
 
         except Exception as e:
-            logger.error(f"Error fetching from Blockchain.com API: {e}")
+            logger.error(f"Error fetching from Blockchain.info API: {e}")
             return self._build_result([], 'error', str(e))
 
     def _fetch_from_blockcypher(
@@ -762,8 +775,8 @@ class BlockchainFetcherService:
                     data = self._make_request('blockstream', '/blocks')
                     results[api_name] = data is not None
                 elif api_name == 'blockchain_com':
-                    # Test with a simple request
-                    data = self._make_request('blockchain_com', '/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')  # Satoshi's address
+                    # Test with a simple request using the correct rawaddr endpoint
+                    data = self._make_request('blockchain_com', '/rawaddr/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')  # Satoshi's address
                     results[api_name] = data is not None
                 elif api_name == 'blockcypher':
                     # Test with a simple request

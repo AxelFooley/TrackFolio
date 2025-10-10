@@ -108,20 +108,20 @@ class CryptoCalculationService:
 
             # Calculate deposits and withdrawals
             for tx in transactions:
-                if tx.transaction_type == CryptoTransactionType.BUY:
+                if tx.transaction_type in [CryptoTransactionType.BUY, CryptoTransactionType.TRANSFER_IN]:
                     total_deposits += tx.total_amount
-                elif tx.transaction_type == CryptoTransactionType.SELL:
+                elif tx.transaction_type in [CryptoTransactionType.SELL, CryptoTransactionType.TRANSFER_OUT]:
                     total_withdrawals += tx.total_amount
 
             # Calculate realized gains/losses using FIFO
             fifo_queues = defaultdict(list)  # symbol -> list of (quantity, price, timestamp)
 
             for tx in transactions:
-                if tx.transaction_type == CryptoTransactionType.BUY:
+                if tx.transaction_type in [CryptoTransactionType.BUY, CryptoTransactionType.TRANSFER_IN]:
                     # Add to FIFO queue
                     fifo_queues[tx.symbol].append((tx.quantity, tx.price_at_execution, tx.timestamp))
                     cost_basis += tx.total_amount
-                elif tx.transaction_type == CryptoTransactionType.SELL:
+                elif tx.transaction_type in [CryptoTransactionType.SELL, CryptoTransactionType.TRANSFER_OUT]:
                     # Process FIFO
                     remaining_quantity = tx.quantity
                     realized_proceeds = Decimal("0")
@@ -369,7 +369,8 @@ class CryptoCalculationService:
                     'transactions': []
                 }
 
-            if tx.transaction_type == CryptoTransactionType.BUY:
+            # Handle different transaction types
+            if tx.transaction_type in [CryptoTransactionType.BUY, CryptoTransactionType.TRANSFER_IN]:
                 holdings[symbol]['quantity'] += tx.quantity
                 holdings[symbol]['cost_basis'] += tx.total_amount
                 holdings[symbol]['last_transaction_date'] = tx.timestamp.date()
@@ -377,7 +378,7 @@ class CryptoCalculationService:
                 if not holdings[symbol]['first_purchase_date']:
                     holdings[symbol]['first_purchase_date'] = tx.timestamp.date()
 
-            elif tx.transaction_type == CryptoTransactionType.SELL:
+            elif tx.transaction_type in [CryptoTransactionType.SELL, CryptoTransactionType.TRANSFER_OUT]:
                 holdings[symbol]['quantity'] -= tx.quantity
                 holdings[symbol]['last_transaction_date'] = tx.timestamp.date()
 
@@ -412,6 +413,36 @@ class CryptoCalculationService:
                 price_data = coincap_service.get_current_price(symbol, currency)
                 if price_data:
                     prices[symbol] = price_data
+                else:
+                    # Use fallback price if CoinCap fails
+                    logger.warning(f"Using fallback price for {symbol} due to CoinCap API failure")
+                    # Use reasonable fallback prices based on current market conditions (2025)
+                    fallback_prices = {
+                        'BTC': Decimal("95000.0"),  # ~$95,000 EUR for Bitcoin
+                        'ETH': Decimal("3500.0"),   # ~$3,500 EUR for Ethereum
+                        'USDT': Decimal("1.0"),      # ~$1 EUR for Tether
+                        'USDC': Decimal("1.0"),      # ~$1 EUR for USD Coin
+                    }
+
+                    if symbol in fallback_prices:
+                        price_eur = fallback_prices[symbol]
+                        if currency.lower() == 'eur':
+                            price = price_eur
+                        else:
+                            # Convert EUR to USD using fallback rate
+                            price = price_eur / Decimal("0.92")  # EUR to USD
+
+                        prices[symbol] = {
+                            'symbol': symbol,
+                            'price': price,
+                            'currency': currency.upper(),
+                            'price_usd': price if currency.lower() == 'usd' else price_eur,
+                            'timestamp': datetime.utcnow(),
+                            'source': 'fallback'
+                        }
+                        logger.info(f"Used fallback price for {symbol}: {price} {currency.upper()}")
+                    else:
+                        logger.warning(f"No fallback price available for {symbol}")
             except Exception as e:
                 logger.warning(f"Error getting current price for {symbol}: {e}")
 

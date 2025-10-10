@@ -57,7 +57,7 @@ class Settings(BaseSettings):
 
     # Blockchain API endpoints (can be overridden)
     blockstream_api_url: str = "https://blockstream.info/api"
-    blockchain_com_api_url: str = "https://blockchain.info/rawaddr"
+    blockchain_com_api_url: str = "https://blockchain.info"
     blockcypher_api_url: str = "https://api.blockcypher.com/v1/btc/main"
 
     # Blockchain cache settings
