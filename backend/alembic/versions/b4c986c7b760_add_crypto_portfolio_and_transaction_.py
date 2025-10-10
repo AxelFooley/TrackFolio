@@ -23,7 +23,7 @@ def upgrade() -> None:
 
     # Create crypto_portfolios table
     op.create_table('crypto_portfolios',
-        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('name', sa.String(length=100), nullable=False, comment='Portfolio name for identification'),
         sa.Column('description', sa.String(length=500), nullable=True, comment='Optional portfolio description'),
         sa.Column('is_active', sa.Boolean(), nullable=False, comment='Whether the portfolio is active'),
