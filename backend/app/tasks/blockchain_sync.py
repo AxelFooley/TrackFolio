@@ -221,8 +221,8 @@ def sync_single_wallet(
     wallet_address: str,
     portfolio_id: int,
     db_session,
-    max_transactions: int = None,
-    days_back: int = None
+    max_transactions: Optional[int] = None,
+    days_back: Optional[int] = None
 ) -> dict:
     """
     Sync transactions for a single Bitcoin wallet.
