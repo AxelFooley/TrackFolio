@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
     retry_backoff_max=600,
     retry_jitter=True
 )
-def update_crypto_prices():
+def update_crypto_prices(self):
     """
     Fetch and store latest prices for all crypto assets.
 

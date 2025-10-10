@@ -31,7 +31,30 @@ logger = logging.getLogger(__name__)
     retry_backoff_max=1800,
     retry_jitter=True
 )
-def sync_bitcoin_wallets():
+def sync_all_wallets(self):
+    """
+    Sync all Bitcoin wallets configured in crypto portfolios.
+
+    This task:
+    1. Finds all portfolios with Bitcoin wallet addresses
+    2. Fetches new transactions from blockchain APIs
+    3. Detects and prevents duplicate transactions
+    4. Calculates accurate prices at execution time
+    5. Saves new transactions to the database
+
+    Scheduled to run every 30 minutes.
+
+    Returns:
+        dict: Summary of sync results across all wallets
+    """
+    return _sync_bitcoin_wallets_impl()
+
+
+# Alias for backwards compatibility
+sync_bitcoin_wallets = sync_all_wallets
+
+
+def _sync_bitcoin_wallets_impl():
     """
     Sync all Bitcoin wallets configured in crypto portfolios.
 

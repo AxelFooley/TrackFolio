@@ -270,15 +270,14 @@ export function useRefreshCryptoPrices() {
 
 // Wallet Management
 export function useWalletSyncStatus(portfolioId: number) {
+  const queryKey = ['crypto', 'portfolios', portfolioId, 'wallet-sync-status'];
+
   return useQuery({
-    queryKey: ['crypto', 'portfolios', portfolioId, 'wallet-sync-status'],
+    queryKey,
     queryFn: () => getWalletSyncStatus(portfolioId),
     staleTime: 60000, // 1 minute
     enabled: !!portfolioId,
-    refetchInterval: (data) => {
-      // Refetch every 30 seconds when syncing, every 5 minutes otherwise
-      return data?.status === 'syncing' ? 30000 : 300000;
-    },
+    refetchInterval: 300000, // Default: 5 minutes
   });
 }
 

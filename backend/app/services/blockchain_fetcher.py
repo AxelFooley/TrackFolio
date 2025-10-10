@@ -192,13 +192,20 @@ class BlockchainFetcherService:
             if not (26 <= len(address) <= 62):
                 return False
 
-            # Check for valid Bitcoin address characters
-            valid_chars = set('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz')
-            if not all(c in valid_chars for c in address):
-                return False
-
-            # Check basic address patterns
-            if address.startswith('1') or address.startswith('3') or address.startswith('bc1'):
+            # Check basic address patterns and character sets
+            if address.startswith('1') or address.startswith('3'):
+                # Legacy/SegWit addresses - use Base58 character set
+                valid_chars = set('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz')
+                if not all(c in valid_chars for c in address):
+                    return False
+                return True
+            elif address.startswith('bc1'):
+                # Bech32 addresses - use different character set (lowercase only + numbers)
+                # Remove the 'bc1' prefix for character validation
+                bech32_part = address[3:]  # Remove 'bc1' prefix
+                valid_chars = set('023456789acdefghjklmnpqrstuvwxyzqpzry9x8gf2tvdw0s3jn54khce6mua7l')
+                if not all(c in valid_chars for c in bech32_part):
+                    return False
                 return True
 
             return False

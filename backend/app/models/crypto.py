@@ -126,7 +126,7 @@ class CryptoPortfolio(Base):
         # Bech32 addresses: start with 'bc1', 42-62 characters (bc1 + 39-59 = 42-62 total)
         legacy_p2pkh_pattern = r'^1[1-9A-HJ-NP-Za-km-z]{25,34}$'
         p2sh_pattern = r'^3[1-9A-HJ-NP-Za-km-z]{25,34}$'
-        bech32_pattern = r'^bc1[02-9ac-hj-np-z]{39,59}$'
+        bech32_pattern = r'^bc1[023456789acdefghjklmnpqrstuvwxyzqpzry9x8gf2tvdw0s3jn54khce6mua7l]{39,59}$'
 
         if (re.match(legacy_p2pkh_pattern, wallet_address) or
             re.match(p2sh_pattern, wallet_address) or
