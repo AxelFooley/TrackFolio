@@ -103,14 +103,6 @@ from sqlalchemy.dialects.postgresql import insert
                 )
                 db.execute(stmt)
                 db.commit()
-                logger.info(f"Calculated crypto metrics for portfolio {portfolio.name}: Total value = {metrics.get('total_value_eur')}")
-                calculated += 1
-
-                # Calculate metrics for each symbol in the portfolio
-                symbol_metrics = await_calculate_crypto_position_metrics(db, portfolio.id)
-                if symbol_metrics:
-                    for symbol, symbol_metric in symbol_metrics.items():
-                        # Upsert symbol metrics
                         metric_key = f"crypto_{portfolio.id}_{symbol}"
 
                         stmt = (
@@ -327,23 +319,23 @@ def await_calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
             price_usd = price_data["current_price"]
             price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
 
-                        value_eur = holding["quantity"] * price_eur
-                        value_usd = holding["quantity"] * price_usd
+            value_eur = holding["quantity"] * price_eur
+            value_usd = holding["quantity"] * price_usd
 
-                        total_value_eur += value_eur
-                        total_value_usd += value_usd
+            total_value_eur += value_eur
+            total_value_usd += value_usd
 
-                        current_holdings[symbol] = {
-                            "quantity": float(holding["quantity"]),
-                            "average_cost": float(holding["total_cost"] / holding["quantity"]) if holding["quantity"] > 0 else 0,
-                            "current_price_eur": float(price_eur),
-                            "current_price_usd": float(price_usd),
-                            "value_eur": float(value_eur),
-                            "value_usd": float(value_usd),
-                            "cost_basis": float(holding["total_cost"]),
-                            "unrealized_pnl_eur": float(value_eur - holding["total_cost"]),
-                            "unrealized_pnl_pct": float((value_eur / holding["total_cost"] - 1) * 100) if holding["total_cost"] > 0 else 0
-                        }
+            current_holdings[symbol] = {
+                "quantity": float(holding["quantity"]),
+                "average_cost": float(holding["total_cost"] / holding["quantity"]) if holding["quantity"] > 0 else 0,
+                "current_price_eur": float(price_eur),
+                "current_price_usd": float(price_usd),
+                "value_eur": float(value_eur),
+                "value_usd": float(value_usd),
+                "cost_basis": float(holding["total_cost"]),
+                "unrealized_pnl_eur": float(value_eur - holding["total_cost"]),
+                "unrealized_pnl_pct": float((value_eur / holding["total_cost"] - 1) * 100) if holding["total_cost"] > 0 else 0,
+            }
         else:
             # If no price available, use cost basis
             current_holdings[symbol] = {

@@ -805,29 +805,6 @@ async def get_crypto_prices(
         currency=currency.upper(),
         timestamp=datetime.utcnow(),
     )
-
-@router.get("/prices/history", response_model=CryptoPriceHistoryResponse)
-async def get_crypto_price_history(
-    symbol: str = Query(..., description="Crypto symbol (e.g., BTC, ETH)"),
-    start_date: date = Query(..., description="Start date for historical data"),
-    end_date: date = Query(..., description="End date for historical data"),
-    currency: str = Query("eur", regex="^(eur|usd)$", description="Target currency"),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get historical price data for a cryptocurrency using Yahoo Finance."""
-    try:
-        # Validate inputs
-        if not symbol or len(symbol) > 20:
-            raise HTTPException(status_code=400, detail="Invalid symbol")
-
-        if start_date > end_date:
-            raise HTTPException(status_code=400, detail="Start date must be before end date")
-
-        # Limit date range to prevent excessive requests
-        days_diff = (end_date - start_date).days
-        if days_diff > 365:
-            raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
-
         # Get historical prices from Yahoo Finance
 @router.get("/prices/history", response_model=CryptoPriceHistoryResponse)
 async def get_crypto_price_history(
@@ -869,6 +846,22 @@ async def get_crypto_price_history(
                 date=dp["date"],
                 symbol=symbol.upper(),
                 price=px_conv,
+                currency=currency.upper(),
+                price_usd=dp["close"],
+                timestamp=datetime.utcnow(),
+                source=dp.get("source", "yahoo"),
+            ))
+
+        return CryptoPriceHistoryResponse(
+            symbol=symbol,
+            currency=currency.upper(),
+            prices=prices,
+            total_count=len(prices)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get crypto price history: {str(e)}")
                 currency=currency.upper(),
                 price_usd=dp["close"],
                 timestamp=datetime.utcnow(),

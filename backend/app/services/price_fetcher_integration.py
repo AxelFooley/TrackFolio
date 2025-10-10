@@ -130,8 +130,9 @@ class UnifiedPriceFetcher:
             if asset_type.lower() == "crypto":
                 # Use Yahoo Finance for cryptocurrencies with -USD suffix
                 yahoo_symbol = f"{ticker}-USD"
-                result = self.yahoo_fetcher.fetch_historical_prices_sync(yahoo_symbol, start_date=start_date, end_date=end_date)
+                result = await self.yahoo_fetcher.fetch_historical_prices(yahoo_symbol, start_date=start_date, end_date=end_date)
                 logger.info(f"Fetched {len(result)} crypto price points for {ticker}")
+
 
                 # Convert to target currency if needed
                 if currency.lower() == "eur" and result:
