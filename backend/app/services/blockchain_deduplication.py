@@ -93,9 +93,9 @@ class BlockchainDeduplicationService:
         if self._redis_client:
             try:
                 cache_key = self._get_cache_key(portfolio_id)
-                cached_data = self._redis_client.get(cache_key)
-                if cached_data:
-                    hashes = pickle.loads(cached_data)
+                members = self._redis_client.smembers(cache_key)
+                if members:
+                    hashes = {m.decode('utf-8') if isinstance(m, bytes) else m for m in members}
                     logger.debug(f"Cache hit for portfolio {portfolio_id} hashes: {len(hashes)}")
                     return hashes
             except Exception as e:
