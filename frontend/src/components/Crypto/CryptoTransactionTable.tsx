@@ -105,18 +105,18 @@ export function CryptoTransactionTable({
 
     try {
       await updateTransactionMutation.mutateAsync({
-        portfolioId,
-        transactionId: editingTransaction.id,
-        data: {
-          transaction_type: editingTransaction.transaction_type,
-          quantity: editingTransaction.quantity,
-          price: editingTransaction.price,
-          fees: editingTransaction.fees,
-          currency: editingTransaction.currency,
-          date: editingTransaction.date,
-          exchange: editingTransaction.exchange,
-          notes: editingTransaction.notes,
-        },
+      portfolioId,
+      transactionId: editingTransaction.id,
+      data: {
+        transaction_type: editingTransaction.transaction_type,
+        quantity: editingTransaction.quantity,
+        price_at_execution: editingTransaction.price,
+        fee: editingTransaction.fees,
+        currency: editingTransaction.currency,
+        timestamp: editingTransaction.date,
+        exchange: editingTransaction.exchange,
+        notes: editingTransaction.notes,
+      },
       });
 
       toast({
