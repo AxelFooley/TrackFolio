@@ -447,11 +447,10 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
                 continue
 
         value_eur = holding["quantity"] * price_eur
-        value_usd = holding["quantity"] * price_usd
+        value_usd = holding["quantity"] * price_usd if price_usd is not None else Decimal("0")
 
         total_value_eur += value_eur
         total_value_usd += value_usd
-
         holdings_breakdown[symbol] = {
             "quantity": float(holding["quantity"]),
             "value_eur": float(value_eur),
