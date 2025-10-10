@@ -113,33 +113,23 @@ def calculate_crypto_metrics(self):
             global_metrics = calculate_global_crypto_metrics(db)
 
             if global_metrics:
-                # Upsert global metrics
-                stmt = (
-                    update(CachedMetrics)
-                    .where(
-                        CachedMetrics.metric_type == "crypto_global_metrics",
-                        CachedMetrics.metric_key == "global"
-                    )
-                    .values(
-                        metric_value=global_metrics,
-                        calculated_at=datetime.utcnow(),
-                        expires_at=expires_at
-                    )
+                # Atomic upsert (PostgreSQL)
+                stmt = insert(CachedMetrics).values(
+                    metric_type="crypto_global_metrics",
+                    metric_key="global",
+                    metric_value=global_metrics,
+                    calculated_at=datetime.utcnow(),
+                    expires_at=expires_at
+                ).on_conflict_do_update(
+                    index_elements=["metric_type", "metric_key"],
+                    set_={
+                        "metric_value": global_metrics,
+                        "calculated_at": datetime.utcnow(),
+                        "expires_at": expires_at,
+                    }
                 )
-
-                result = db.execute(stmt)
+                db.execute(stmt)
                 db.commit()
-
-                if result.rowcount == 0:
-                    cached_metric = CachedMetrics(
-                        metric_type="crypto_global_metrics",
-                        metric_key="global",
-                        metric_value=global_metrics,
-                        calculated_at=datetime.utcnow(),
-                        expires_at=expires_at
-                    )
-                    db.add(cached_metric)
-                    db.commit()
 
                 logger.info(f"Calculated global crypto metrics: Total value = {global_metrics.get('total_value_eur')}")
 
@@ -276,18 +266,29 @@ def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
     asset_allocation = {}
     current_holdings = {}
 
+    # Reuse one fetcher per portfolio
+    price_fetcher = PriceFetcher()
+
+    # Fetch EURUSD once (USD per EUR). Convert USD->EUR by dividing.
+    eurusd = price_fetcher.fetch_realtime_price("EURUSD=X")
+    eurusd_rate = None
+    if eurusd and eurusd.get("current_price"):
+        try:
+            eurusd_rate = Decimal(str(eurusd["current_price"]))
+        except Exception:
+            eurusd_rate = None
+
     for symbol, holding in holdings.items():
         if holding["quantity"] <= 0:
             continue
 
         # Get current price from Yahoo Finance
-        price_fetcher = PriceFetcher()
         yahoo_symbol = f"{symbol}-USD"
         price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
         if price_data and price_data.get("current_price"):
             price_usd = price_data["current_price"]
-            price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
+            price_eur = (price_usd / eurusd_rate) if eurusd_rate and eurusd_rate != 0 else (price_usd * Decimal("0.92"))
 
             value_eur = holding["quantity"] * price_eur
             value_usd = holding["quantity"] * price_usd
@@ -418,18 +419,30 @@ def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
 
     # Calculate metrics for each symbol
     metrics = {}
+
+    # Reuse one fetcher
+    price_fetcher = PriceFetcher()
+
+    # Fetch EURUSD rate
+    eurusd = price_fetcher.fetch_realtime_price("EURUSD=X")
+    eurusd_rate = None
+    if eurusd and eurusd.get("current_price"):
+        try:
+            eurusd_rate = Decimal(str(eurusd["current_price"]))
+        except Exception:
+            eurusd_rate = None
+
     for symbol, holding in holdings.items():
         if holding["quantity"] <= 0:
             continue
 
         # Get current price from Yahoo Finance
-        price_fetcher = PriceFetcher()
         yahoo_symbol = f"{symbol}-USD"
         price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
         if price_data and price_data.get("current_price"):
             price_usd = price_data["current_price"]
-            price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
+            price_eur = (price_usd / eurusd_rate) if eurusd_rate and eurusd_rate != 0 else (price_usd * Decimal("0.92"))
             current_value = holding["quantity"] * price_eur
 
             # Calculate simple return as IRR substitute for now
