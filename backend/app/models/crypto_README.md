@@ -36,7 +36,7 @@ Represents a standalone crypto portfolio for organizing cryptocurrency holdings.
 Represents individual cryptocurrency transactions within a portfolio.
 
 **Table:** `crypto_transactions`
-
+- `transaction_type` (SQLEnum(CryptoTransactionType, native_enum=False), Required, Indexed) - Type of transaction (BUY, SELL, TRANSFER_IN, TRANSFER_OUT) stored as strings
 **Fields:**
 - `id` (Integer, Primary Key) - Auto-incrementing unique identifier
 - `portfolio_id` (Integer, Required, Foreign Key) - Associated portfolio ID (CASCADE DELETE)
