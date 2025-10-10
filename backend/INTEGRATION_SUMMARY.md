@@ -230,10 +230,9 @@ The integration provides comprehensive wallet sync status in all portfolio respo
 - Development and production configurations
 
 ### Database Migration
-- No database schema changes required
-- Existing `wallet_address` field in crypto portfolios used
-- Backward compatible with existing data
-
+- New/updated Alembic migrations are included for crypto portfolios/transactions and snapshots
+- Adds/updates wallet_address, tables, indexes; run migrations before deploy
+- Changes are backward compatible with existing data after migration
 ## 🎯 Next Steps
 
 ### Production Readiness
