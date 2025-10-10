@@ -829,16 +829,51 @@ async def get_crypto_price_history(
             raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
 
         # Get historical prices from Yahoo Finance
+@router.get("/prices/history", response_model=CryptoPriceHistoryResponse)
+async def get_crypto_price_history(
+    symbol: str = Query(..., description="Crypto symbol (e.g., BTC, ETH)"),
+    start_date: date = Query(..., description="Start date for historical data"),
+    end_date: date = Query(..., description="End date for historical data"),
+    currency: str = Query("eur", pattern="^(eur|usd)$", description="Target currency"),
+):
+    """Get historical price data for a cryptocurrency using Yahoo Finance."""
+    try:
+        # Validate inputs
+        if not symbol or len(symbol) > 20:
+            raise HTTPException(status_code=400, detail="Invalid symbol")
+
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="Start date must be before end date")
+
+        # Limit date range to prevent excessive requests
+        days_diff = (end_date - start_date).days
+        if days_diff > 365:
+            raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
+
+        # Get historical prices from Yahoo Finance (USD)
         price_fetcher = PriceFetcher()
         yahoo_symbol = f"{symbol}-USD"
-
         historical_prices = await price_fetcher.fetch_historical_prices(
-            yahoo_symbol,
-            start_date=start_date,
-            end_date=end_date
+            yahoo_symbol, start_date=start_date, end_date=end_date
         )
-            for data_point in historical_prices
-        ]
+
+        eur_rate = None
+        if currency.lower() == "eur":
+            eur_rate = await _get_usd_to_eur_rate()
+
+        prices = []
+        for dp in historical_prices:
+            px = dp["close"]
+            px_conv = px * eur_rate if (eur_rate and currency.lower() == "eur") else px
+            prices.append(CryptoHistoricalPrice(
+                date=dp["date"],
+                symbol=symbol.upper(),
+                price=px_conv,
+                currency=currency.upper(),
+                price_usd=dp["close"],
+                timestamp=datetime.utcnow(),
+                source=dp.get("source", "yahoo"),
+            ))
 
         return CryptoPriceHistoryResponse(
             symbol=symbol,
@@ -846,29 +881,10 @@ async def get_crypto_price_history(
             prices=prices,
             total_count=len(prices)
         )
-
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get crypto price history: {str(e)}")
-
-
-# Utility Endpoints
-
-@router.post("/portfolios/{portfolio_id}/refresh-prices")
-async def refresh_crypto_prices(
-    portfolio_id: int,
-    db: AsyncSession = Depends(get_db)
-):
-    """Trigger a refresh of crypto prices for a portfolio."""
-    try:
-        # Verify portfolio exists
-        portfolio_result = await db.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        )
-        portfolio = portfolio_result.scalar_one_or_none()
-
-        if not portfolio:
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
         # Get unique symbols from portfolio transactions
