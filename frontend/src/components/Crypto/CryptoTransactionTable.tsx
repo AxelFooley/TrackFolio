@@ -506,7 +506,7 @@ export function CryptoTransactionTable({
           {editingTransaction && (
             <div className="space-y-2">
               <p><strong>Symbol:</strong> {editingTransaction.symbol}</p>
-              <p><strong>Type:</strong> {transactionTypeConfig[editingTransaction.transaction_type].label}</p>
+              <p><strong>Type:</strong> {(transactionTypeConfig[editingTransaction.transaction_type] ?? { label: editingTransaction.transaction_type }).label}</p>
               <p><strong>Quantity:</strong> {formatCryptoQuantity(editingTransaction.quantity)}</p>
               <p><strong>Date:</strong> {formatDate(editingTransaction.date)}</p>
             </div>
