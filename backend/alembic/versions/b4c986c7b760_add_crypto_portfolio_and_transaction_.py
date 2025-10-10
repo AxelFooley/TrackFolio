@@ -65,7 +65,7 @@ def upgrade() -> None:
     op.create_index('ix_crypto_transactions_portfolio_date', 'crypto_transactions', ['portfolio_id', 'timestamp'], unique=False)
     op.create_index('ix_crypto_transactions_symbol_date', 'crypto_transactions', ['symbol', 'timestamp'], unique=False)
     op.create_index('ix_crypto_transactions_type_date', 'crypto_transactions', ['transaction_type', 'timestamp'], unique=False)
-    op.create_index('ix_crypto_transactions_transaction_hash', 'crypto_transactions', ['transaction_hash'], unique=False)
+
 
     # ### end Alembic commands ###
 
