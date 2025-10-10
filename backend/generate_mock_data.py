@@ -99,7 +99,7 @@ class MockDataGenerator:
                 else:
                     # Fallback to realistic base price
                     base_prices[position["ticker"]] = random.uniform(50, 300)
-            except:
+            except Exception:
                 base_prices[position["ticker"]] = random.uniform(50, 300)
 
         # Generate transaction schedule for each position
