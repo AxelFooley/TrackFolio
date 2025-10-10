@@ -4,18 +4,18 @@ Crypto metric calculation tasks.
 Calculates and caches IRR, TWR, and other crypto portfolio metrics.
 """
 from celery import shared_task
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from decimal import Decimal
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.exc import IntegrityError
 import logging
-import json
 
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
-from app.models import PriceHistory, CachedMetrics
+from app.models import CachedMetrics
 from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
 from app.services.price_fetcher import PriceFetcher
+from sqlalchemy.dialects.postgresql import insert
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def calculate_crypto_metrics(self):
         # Get all active crypto portfolios
         result = db.execute(
             select(CryptoPortfolio)
-            .where(CryptoPortfolio.is_active == True)
+            .where(CryptoPortfolio.is_active)
             .order_by(CryptoPortfolio.name)
         )
         active_portfolios = result.scalars().all()
@@ -73,18 +73,13 @@ def calculate_crypto_metrics(self):
         for portfolio in active_portfolios:
             try:
                 # Calculate portfolio metrics
-                metrics = await_calculate_crypto_portfolio_metrics(db, portfolio.id)
+                metrics = calculate_crypto_portfolio_metrics(db, portfolio.id)
 
                 if not metrics:
                     logger.warning(f"Could not calculate metrics for crypto portfolio {portfolio.name}")
                     failed += 1
                     failed_portfolios.append(portfolio.name)
                     continue
-
-# At the top of backend/app/tasks/crypto_metric_calculation.py
-from sqlalchemy.dialects.postgresql import insert
-
-# …later, in the metric‐calculation function…
 
                 # Atomic upsert (PostgreSQL)
                 stmt = insert(CachedMetrics).values(
@@ -103,44 +98,19 @@ from sqlalchemy.dialects.postgresql import insert
                 )
                 db.execute(stmt)
                 db.commit()
-                        metric_key = f"crypto_{portfolio.id}_{symbol}"
 
-                        stmt = (
-                            update(CachedMetrics)
-                            .where(
-                                CachedMetrics.metric_type == "crypto_position_metrics",
-                                CachedMetrics.metric_key == metric_key
-                            )
-                            .values(
-                                metric_value=symbol_metric,
-                                calculated_at=datetime.utcnow(),
-                                expires_at=expires_at
-                            )
-                        )
+                calculated += 1
+                logger.info(f"Cached metrics for crypto portfolio {portfolio.name}")
 
-                        result = db.execute(stmt)
-                        db.commit()
-
-                        if result.rowcount == 0:
-                            cached_metric = CachedMetrics(
-                                metric_type="crypto_position_metrics",
-                                metric_key=metric_key,
-                                metric_value=symbol_metric,
-                                calculated_at=datetime.utcnow(),
-                                expires_at=expires_at
-                            )
-                            db.add(cached_metric)
-                            db.commit()
-
-            except Exception as e:
+            except Exception:
                 db.rollback()
-                logger.error(f"Error calculating crypto metrics for portfolio {portfolio.name}: {str(e)}")
+                logger.exception(f"Error calculating crypto metrics for portfolio {portfolio.name}")
                 failed += 1
                 failed_portfolios.append(portfolio.name)
 
         # Calculate global crypto metrics (across all portfolios)
         try:
-            global_metrics = await_calculate_global_crypto_metrics(db)
+            global_metrics = calculate_global_crypto_metrics(db)
 
             if global_metrics:
                 # Upsert global metrics
@@ -173,9 +143,9 @@ from sqlalchemy.dialects.postgresql import insert
 
                 logger.info(f"Calculated global crypto metrics: Total value = {global_metrics.get('total_value_eur')}")
 
-        except Exception as e:
+        except Exception:
             db.rollback()
-            logger.error(f"Error calculating global crypto metrics: {str(e)}")
+            logger.exception("Error calculating global crypto metrics")
 
         # Clean up expired metrics
         try:
@@ -188,9 +158,9 @@ from sqlalchemy.dialects.postgresql import insert
             if result.rowcount > 0:
                 logger.info(f"Cleaned up {result.rowcount} expired crypto metrics")
 
-        except Exception as e:
+        except Exception:
             db.rollback()
-            logger.error(f"Error cleaning up expired crypto metrics: {str(e)}")
+            logger.exception("Error cleaning up expired crypto metrics")
 
         # Summary
         summary = {
@@ -210,15 +180,15 @@ from sqlalchemy.dialects.postgresql import insert
 
         return summary
 
-    except Exception as e:
-        logger.error(f"Fatal error in crypto metric calculation task: {str(e)}")
+    except Exception:
+        logger.exception("Fatal error in crypto metric calculation task")
         raise
 
     finally:
         db.close()
 
 
-def await_calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
+def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
     """
     Calculate all metrics for a crypto portfolio.
 
@@ -366,6 +336,10 @@ def await_calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
     total_return_pct = ((total_value_eur / total_cost_basis) - 1) * 100 if total_cost_basis > 0 else 0
 
     # Build metrics dictionary
+    # Note: unrealized_pnl_pct and total_return_pct are intentionally the same for crypto portfolios.
+    # Both represent the simple return calculation. This differs from traditional portfolios where
+    # IRR and TWR might be different. For crypto, we use the same calculation to maintain consistency
+    # with the frontend expectations.
     metrics = {
         "portfolio_id": portfolio_id,
         "portfolio_name": portfolio.name,
@@ -385,7 +359,7 @@ def await_calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
     return metrics
 
 
-def await_calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
+def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
     """
     Calculate metrics for each crypto position in a portfolio.
 
@@ -478,7 +452,7 @@ def await_calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
     return metrics
 
 
-def await_calculate_global_crypto_metrics(db) -> dict:
+def calculate_global_crypto_metrics(db) -> dict:
     """
     Calculate global metrics across all crypto portfolios.
 
@@ -490,7 +464,7 @@ def await_calculate_global_crypto_metrics(db) -> dict:
     """
     # Get all active crypto portfolios
     portfolios = db.execute(
-        select(CryptoPortfolio).where(CryptoPortfolio.is_active == True)
+        select(CryptoPortfolio).where(CryptoPortfolio.is_active)
     ).scalars().all()
 
     if not portfolios:
@@ -503,7 +477,7 @@ def await_calculate_global_crypto_metrics(db) -> dict:
 
     # Aggregate across all portfolios
     for portfolio in portfolios:
-        portfolio_metrics = await_calculate_crypto_portfolio_metrics(db, portfolio.id)
+        portfolio_metrics = calculate_crypto_portfolio_metrics(db, portfolio.id)
         if portfolio_metrics:
             total_value_eur += Decimal(str(portfolio_metrics["total_value_eur"]))
             total_value_usd += Decimal(str(portfolio_metrics["total_value_usd"]))

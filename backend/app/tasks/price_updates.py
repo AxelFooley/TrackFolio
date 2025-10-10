@@ -65,6 +65,9 @@ def update_daily_prices(self):
 
         # Get yesterday's date (since we run at 23:00, we want previous trading day's close)
         price_date = date.today() - timedelta(days=1)
+        # Back off weekends (Saturday=5, Sunday=6)
+        while price_date.weekday() >= 5:
+            price_date -= timedelta(days=1)
 
         # Track results
         updated = 0
@@ -129,9 +132,9 @@ def update_daily_prices(self):
                 logger.debug(f"Price already exists for {ticker} (race condition)")
                 skipped += 1
 
-            except Exception as e:
+            except Exception:
                 db.rollback()
-                logger.error(f"Error fetching price for {ticker}: {str(e)}")
+                logger.exception(f"Error fetching price for {ticker}")
                 failed += 1
                 failed_tickers.append(ticker)
 
@@ -155,8 +158,8 @@ def update_daily_prices(self):
 
         return summary
 
-    except Exception as e:
-        logger.error(f"Fatal error in price update task: {str(e)}")
+    except Exception:
+        logger.exception("Fatal error in price update task")
         raise
 
     finally:
@@ -260,9 +263,9 @@ def update_price_for_ticker(self, ticker: str, price_date: str = None):
             "reason": "Price already exists"
         }
 
-    except Exception as e:
+    except Exception:
         db.rollback()
-        logger.error(f"Error updating price for {ticker}: {str(e)}")
+        logger.exception(f"Error updating price for {ticker}")
         raise
 
     finally:
@@ -385,9 +388,9 @@ def fetch_prices_for_ticker(self, ticker: str, isin: str = None, start_date: str
 
         return summary
 
-    except Exception as e:
+    except Exception:
         db.rollback()
-        logger.error(f"Error fetching historical prices for {ticker}: {str(e)}")
+        logger.exception(f"Error fetching historical prices for {ticker}")
         raise
 
     finally:

@@ -1,4 +1,3 @@
-chmod +x backend/generate_mock_data.py
 """
 Generate comprehensive mock portfolio data for testing TrackFolio application.
 
@@ -10,7 +9,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import random
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import yfinance as yf
 import logging
 
@@ -45,14 +44,14 @@ class MockDataGenerator:
         self.transactions = []
         self.order_ref_counter = 1000
 
-    def get_historical_prices(self, ticker: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+    def get_historical_prices(self, ticker: str, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
         """Fetch historical prices for a ticker."""
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(start=start_date, end=end_date)
             return hist
-        except Exception as e:
-            logger.warning(f"Could not fetch prices for {ticker}: {e}")
+        except Exception:
+            logger.exception(f"Could not fetch prices for {ticker}")
             return None
 
     def generate_realistic_prices(self, base_price: float, start_date: datetime, end_date: datetime) -> List[Tuple[datetime, float]]:
@@ -100,6 +99,7 @@ class MockDataGenerator:
                     # Fallback to realistic base price
                     base_prices[position["ticker"]] = random.uniform(50, 300)
             except Exception:
+                logger.exception("Base price fetch failed for %s; using fallback", position["ticker"])
                 base_prices[position["ticker"]] = random.uniform(50, 300)
 
         # Generate transaction schedule for each position
