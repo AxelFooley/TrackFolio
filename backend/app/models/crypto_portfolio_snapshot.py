@@ -91,6 +91,12 @@ class CryptoPortfolioSnapshot(Base):
     )
 
     def __repr__(self) -> str:
+        """
+        Return a concise string representation of the crypto portfolio snapshot for debugging.
+        
+        Returns:
+            str: String containing the snapshot's `id`, `portfolio_id`, `snapshot_date`, `total_value_eur`, and `total_value_usd`.
+        """
         return (
             f"CryptoPortfolioSnapshot(id={self.id!r}, "
             f"portfolio_id={self.portfolio_id!r}, "

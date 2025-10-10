@@ -96,21 +96,16 @@ class CryptoPortfolio(Base):
     @validates("wallet_address")
     def validate_wallet_address(self, key, wallet_address):
         """
-        Validate Bitcoin address format.
-
-        Supports:
-        - Legacy addresses (starting with '1')
-        - P2SH addresses (starting with '3')
-        - Bech32 addresses (starting with 'bc1')
-
-        Args:
-            wallet_address: The Bitcoin address to validate
-
+        Validate a Bitcoin wallet address and return it if it conforms to common address formats.
+        
+        Parameters:
+            wallet_address (str | None): Bitcoin address string to validate; may be None or empty.
+        
         Returns:
-            The validated wallet address
-
+            str | None: The original address string when valid, or `None` if the input is `None` or empty.
+        
         Raises:
-            ValueError: If the address format is invalid
+            ValueError: If the address is non-empty and does not match legacy (P2PKH), P2SH, or Bech32 Bitcoin address formats.
         """
         if wallet_address is None:
             return None
@@ -139,6 +134,12 @@ class CryptoPortfolio(Base):
         )
 
     def __repr__(self) -> str:
+        """
+        Provide a developer-friendly string representation of the CryptoPortfolio.
+        
+        Returns:
+            A string containing the portfolio's `id`, `name`, base currency value (`base_currency.value`), `is_active` flag, and `wallet_address`.
+        """
         return (
             f"CryptoPortfolio(id={self.id!r}, "
             f"name={self.name!r}, "
@@ -276,6 +277,12 @@ class CryptoTransaction(Base):
     )
 
     def __repr__(self) -> str:
+        """
+        Return a concise developer-friendly representation of the CryptoTransaction instance.
+        
+        Returns:
+            A string containing the instance's `id`, `portfolio_id`, `symbol`, `transaction_type` value, `quantity`, and `timestamp`.
+        """
         return (
             f"CryptoTransaction(id={self.id!r}, "
             f"portfolio_id={self.portfolio_id!r}, "

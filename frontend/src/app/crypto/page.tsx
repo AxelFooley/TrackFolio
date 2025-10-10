@@ -14,6 +14,13 @@ import { Plus, Search, Bitcoin, TrendingUp, TrendingDown, Edit, Trash2, Wallet, 
 import { useToast } from '@/hooks/use-toast';
 import type { CryptoPortfolio } from '@/lib/types';
 
+/**
+ * Render the Crypto Portfolios management page with listing, search, create/edit/delete dialogs, and real-time Bitcoin wallet validation.
+ *
+ * Renders a responsive UI that fetches and displays crypto portfolios, supports filtering by name, creating new portfolios, editing existing ones, deleting portfolios with confirmation, and shows portfolio metrics and wallet status. Form submissions and wallet-address validation surface success and error feedback via toasts.
+ *
+ * @returns The rendered crypto portfolios page element
+ */
 export default function CryptoPortfoliosPage() {
   const router = useRouter();
   const { data: portfolios, isLoading } = useCryptoPortfolios();

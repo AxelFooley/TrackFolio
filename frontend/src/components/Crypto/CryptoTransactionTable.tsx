@@ -62,6 +62,15 @@ const transactionTypeConfig = {
   },
 };
 
+/**
+ * Render a sortable, filterable table of crypto transactions for a portfolio, including in-table edit and delete dialogs.
+ *
+ * @param portfolioId - The portfolio identifier used to fetch transactions.
+ * @param searchTerm - Optional case-insensitive substring filter applied to transaction symbols.
+ * @param symbolFilter - Optional exact symbol filter to limit displayed transactions to a single symbol.
+ * @param limit - Optional maximum number of transactions to display after filtering and sorting.
+ * @returns The transactions table UI containing the filtered, sorted rows and the edit/delete dialogs. 
+ */
 export function CryptoTransactionTable({
   portfolioId,
   searchTerm = '',

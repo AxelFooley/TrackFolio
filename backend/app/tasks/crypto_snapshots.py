@@ -32,13 +32,19 @@ logger = logging.getLogger(__name__)
 )
 def create_daily_crypto_snapshots(self):
     """
-    Create daily snapshots for all active crypto portfolios.
-
-    This task is idempotent - it will update existing snapshots or create new ones.
-    Scheduled to run daily at 23:30 CET (after crypto metrics calculation).
-
+    Create or update daily snapshots for all active crypto portfolios for today's date.
+    
+    Also deletes snapshots older than approximately two years. The task iterates active portfolios, computes snapshot data, updates an existing snapshot if present or creates a new one, and tolerates race conditions that result in an existing snapshot.
+    
     Returns:
-        dict: Summary of snapshots created/updated
+        dict: Summary of the operation with keys:
+            - status (str): Operation status, e.g., "success".
+            - created (int): Number of snapshots created.
+            - updated (int): Number of snapshots updated.
+            - failed (int): Number of portfolios that failed to process.
+            - total_portfolios (int): Total number of active portfolios processed.
+            - snapshot_date (str): ISO date string of the snapshot date.
+            - failed_portfolios (list, optional): Names of portfolios that failed (present only if any failures occurred).
     """
     logger.info("Starting daily crypto portfolio snapshot task")
 
@@ -193,16 +199,17 @@ def create_daily_crypto_snapshots(self):
 )
 def create_crypto_snapshot_for_portfolio(self, portfolio_id: int, snapshot_date: str = None):
     """
-    Create a snapshot for a specific crypto portfolio.
-
-    This is a utility task that can be called manually or from API endpoints.
-
-    Args:
-        portfolio_id: Crypto portfolio ID
-        snapshot_date: Date string (YYYY-MM-DD). If None, uses today's date.
-
+    Create or update a daily crypto portfolio snapshot for a single portfolio and date.
+    
+    Parameters:
+        snapshot_date (str | None): Date in `YYYY-MM-DD` format; if None, uses today's date.
+    
     Returns:
-        dict: Snapshot creation result
+        dict: Result payload with a `status` key (`"success"`, `"skipped"`, or `"failed"`) plus:
+            - `portfolio_id` (int): The target portfolio ID.
+            - `snapshot_date` (str): The snapshot date (ISO `YYYY-MM-DD`).
+            - On success: `portfolio_name` (str), `total_value_eur` (float), `total_value_usd` (float), `total_return_pct` (float).
+            - On skipped/failed: `reason` (str) describing why the snapshot was not created.
     """
     logger.info(f"Creating crypto snapshot for portfolio {portfolio_id}")
 
@@ -308,15 +315,23 @@ def create_crypto_snapshot_for_portfolio(self, portfolio_id: int, snapshot_date:
 
 def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: date) -> dict:
     """
-    Calculate snapshot data for a crypto portfolio.
-
-    Args:
-        db: Database session
-        portfolio_id: Crypto portfolio ID
-        snapshot_date: Date of the snapshot
-
+    Compute portfolio snapshot values and holdings breakdown for a given date.
+    
+    Retrieves transactions for the portfolio up to the end of snapshot_date, derives current holdings and cost basis, resolves prices (PriceHistory or realtime fallback) and FX rates as available, and produces aggregated values and a per-symbol holdings breakdown. Returns None if the portfolio does not exist.
+    
     Returns:
-        dict: Snapshot data
+        dict or None: Snapshot data dict when portfolio exists, otherwise `None`. The dict contains:
+            - total_value_eur (Decimal): Total portfolio market value in EUR as of snapshot_date.
+            - total_value_usd (Decimal): Total portfolio market value in USD as of snapshot_date (0 if unavailable).
+            - total_cost_basis (Decimal): Sum of cost bases for current holdings in portfolio base currency (EUR).
+            - base_currency (str): Portfolio base currency code (e.g., "EUR").
+            - holdings_breakdown (str): JSON-serialized mapping of symbol -> {
+                "quantity": float,
+                "value_eur": float,
+                "value_usd": float,
+                "percentage": float
+              } where `percentage` is the holding's percent of total_value_eur.
+            - total_return_pct (Decimal): Percentage return relative to total_cost_basis (0 if cost basis is 0).
     """
     # Get portfolio
     portfolio = db.execute(
@@ -482,15 +497,26 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
 )
 def backfill_crypto_snapshots(self, portfolio_id: int, start_date: str, end_date: str = None):
     """
-    Backfill historical snapshots for a crypto portfolio.
-
-    Args:
-        portfolio_id: Crypto portfolio ID
-        start_date: Start date string (YYYY-MM-DD)
-        end_date: End date string (YYYY-MM-DD). If None, uses today's date.
-
+    Backfill daily crypto portfolio snapshots for each date in a given range.
+    
+    Creates missing CryptoPortfolioSnapshot records (or counts existing ones) for the portfolio between start_date and end_date inclusive, committing in batches to limit transaction size.
+    
+    Parameters:
+        portfolio_id (int): ID of the crypto portfolio to backfill.
+        start_date (str): Start date in ISO format 'YYYY-MM-DD'.
+        end_date (str, optional): End date in ISO format 'YYYY-MM-DD'. If omitted, uses today's date.
+    
     Returns:
-        dict: Summary of snapshots backfilled
+        dict: Summary with keys:
+            - status: "success" or "failed"
+            - portfolio_id: the given portfolio ID
+            - portfolio_name: portfolio name when successful
+            - start_date: ISO string of the start date
+            - end_date: ISO string of the end date
+            - created: number of snapshots created
+            - updated: number of dates skipped because a snapshot already existed
+            - failed: number of dates that could not be processed
+            - total_days: total number of days processed (inclusive)
     """
     logger.info(f"Starting crypto snapshot backfill for portfolio {portfolio_id}")
 

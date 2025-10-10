@@ -37,6 +37,20 @@ class WalletSyncRequest(BaseModel):
 
     @validator('wallet_address')
     def validate_wallet_address(cls, v):
+        """
+        Validate and normalize a wallet address string.
+        
+        Strips surrounding whitespace and ensures the resulting address is not empty.
+        
+        Parameters:
+            v (str): Wallet address input to validate.
+        
+        Returns:
+            str: The wallet address with surrounding whitespace removed.
+        
+        Raises:
+            ValueError: If the wallet address is empty or contains only whitespace.
+        """
         if not v or not v.strip():
             raise ValueError('Wallet address cannot be empty')
         return v.strip()
@@ -49,6 +63,20 @@ class WalletConfigRequest(BaseModel):
 
     @validator('wallet_address')
     def validate_wallet_address(cls, v):
+        """
+        Validate and normalize a wallet address string.
+        
+        Strips surrounding whitespace and ensures the resulting address is not empty.
+        
+        Parameters:
+            v (str): Wallet address input to validate.
+        
+        Returns:
+            str: The wallet address with surrounding whitespace removed.
+        
+        Raises:
+            ValueError: If the wallet address is empty or contains only whitespace.
+        """
         if not v or not v.strip():
             raise ValueError('Wallet address cannot be empty')
         return v.strip()
@@ -106,7 +134,12 @@ class WalletTransactionsResponse(BaseModel):
 
 
 def get_db():
-    """Dependency to get database session."""
+    """
+    Provide a database session for a request and ensure it is closed when the request completes.
+    
+    Returns:
+        db (Session): A SQLAlchemy session connected to the application's database.
+    """
     db = SyncSessionLocal()
     try:
         yield db
@@ -120,19 +153,17 @@ async def sync_wallet(
     db: Session = Depends(get_db)
 ):
     """
-    Manually trigger synchronization for a Bitcoin wallet.
-
-    This endpoint:
-    1. Validates the portfolio and wallet address
-    2. Starts a Celery background task to fetch transactions
-    3. Returns immediate response with task status
-
-    Args:
-        request: Wallet sync request parameters
-        db: Database session
-
+    Manually trigger synchronization for a Bitcoin wallet and start a background task to fetch transactions.
+    
+    Parameters:
+        request (WalletSyncRequest): Sync parameters including portfolio_id, wallet_address, max_transactions, and days_back.
+        db (Session): Database session dependency.
+    
     Returns:
-        Sync response with status information
+        WalletSyncResponse: Status and metadata indicating the sync task was started, with initial transaction counts and a timestamp.
+    
+    Raises:
+        HTTPException: 404 if the portfolio does not exist; 400 if the provided wallet address does not match the portfolio; 500 on unexpected errors when starting the sync.
     """
     try:
         # Verify portfolio exists
@@ -194,14 +225,13 @@ async def configure_wallet(
     db: Session = Depends(get_db)
 ):
     """
-    Configure or update a Bitcoin wallet address for a portfolio.
-
-    Args:
-        request: Wallet configuration request
-        db: Database session
-
+    Configure or update the Bitcoin wallet address for a portfolio.
+    
+    Parameters:
+        request (WalletConfigRequest): Contains `portfolio_id` and the `wallet_address` to set.
+    
     Returns:
-        Configuration status response
+        dict: Response with keys `status` ("success"), `message`, `portfolio_id`, `wallet_address`, and `timestamp` (UTC).
     """
     try:
         # Verify portfolio exists
@@ -261,20 +291,18 @@ async def get_wallet_transactions(
     db: Session = Depends(get_db)
 ):
     """
-    Fetch transactions for a Bitcoin wallet without storing them.
-
-    This endpoint only fetches and returns transaction data without
-    adding it to the database. Useful for preview purposes.
-
-    Args:
-        wallet_address: Bitcoin wallet address
-        portfolio_id: Portfolio ID for context
-        max_transactions: Maximum number of transactions to fetch
-        days_back: Number of days to look back
-        db: Database session
-
+    Fetches transactions for the given Bitcoin wallet for preview and does not persist them.
+    
+    Filters out transactions already present for the portfolio and returns the new unique transactions along with counts and a timestamp.
+    
     Returns:
-        Wallet transactions response
+        WalletTransactionsResponse: Response containing the wallet_address, list of unique transactions, `count` of new transactions, `total_fetched` from the fetch result, `status`, `message`, and `timestamp`.
+    
+    Raises:
+        HTTPException: 404 if the portfolio is not found.
+        HTTPException: 400 if the blockchain fetch returns an error or no transactions.
+        HTTPException: 503 if all blockchain APIs are unavailable.
+        HTTPException: 500 for other unexpected errors.
     """
     try:
         # Verify portfolio exists
@@ -344,10 +372,12 @@ async def get_wallet_transactions(
 @router.get("/status", response_model=BlockchainStatusResponse)
 async def get_blockchain_status():
     """
-    Get the status of blockchain services and APIs.
-
+    Report overall blockchain API connectivity and deduplication cache statistics.
+    
+    Computes an overall status of "error", "warning", or "success" based on how many configured blockchain APIs are reachable and includes cache statistics from the deduplication layer. If an internal error occurs while gathering results, returns a response indicating an error with empty api_results and cache_stats and an explanatory message.
+    
     Returns:
-        Blockchain service status including API connectivity and cache stats
+        BlockchainStatusResponse: Object containing `status` ("error", "warning", or "success"), a human-readable `message`, `api_results` mapping each API to a boolean connectivity result, `cache_stats` from the deduplication store, and a `timestamp`.
     """
     try:
         # Test API connections
@@ -392,12 +422,17 @@ async def get_blockchain_status():
 @router.post("/test-connection")
 async def test_blockchain_apis():
     """
-    Test connectivity to all blockchain APIs.
-
-    This endpoint can be used to diagnose API connectivity issues.
-
+    Start a background task to test connectivity to all configured blockchain APIs.
+    
     Returns:
-        API connection test results
+        result (dict): Dictionary with keys:
+            - status (str): "started" when the task was scheduled.
+            - message (str): Human-readable message about task start.
+            - task_id (str): Identifier of the scheduled Celery task.
+            - timestamp (datetime): UTC timestamp when the task was scheduled.
+    
+    Raises:
+        HTTPException: If the background task cannot be started (HTTP 500).
     """
     try:
         # Start background task for connection testing
@@ -426,16 +461,17 @@ async def get_portfolio_blockchain_transactions(
     db: Session = Depends(get_db)
 ):
     """
-    Get blockchain transactions for a portfolio.
-
-    Args:
-        portfolio_id: Portfolio ID
-        limit: Maximum number of transactions to return
-        offset: Number of transactions to skip
-        db: Database session
-
+    Retrieve blockchain transactions (exchange == "Bitcoin Blockchain") for the given portfolio, applying limit/offset paging.
+    
     Returns:
-        List of blockchain transactions for the portfolio
+        A dictionary containing:
+        - portfolio_id (int): The requested portfolio ID.
+        - wallet_address (str | None): The portfolio's configured wallet address.
+        - transactions (list[TransactionResponse]): List of transactions converted to TransactionResponse.
+        - total_count (int): Total number of matching blockchain transactions for the portfolio.
+        - limit (int): The limit applied to this query.
+        - offset (int): The offset applied to this query.
+        - timestamp (datetime): UTC timestamp when the response was generated.
     """
     try:
         # Verify portfolio exists
@@ -499,16 +535,13 @@ async def get_portfolio_blockchain_transactions(
 @router.delete("/portfolio/{portfolio_id}/cache")
 async def clear_portfolio_cache(portfolio_id: int, db: Session = Depends(get_db)):
     """
-    Clear deduplication cache for a portfolio.
-
-    This can be useful if you suspect duplicate detection is not working correctly.
-
-    Args:
-        portfolio_id: Portfolio ID
-        db: Database session
-
+    Clear the deduplication cache for a given portfolio.
+    
+    Parameters:
+        portfolio_id (int): ID of the portfolio whose deduplication cache should be cleared.
+    
     Returns:
-        Cache clearing status
+        dict: Result object containing `status` ("success"), `message`, `portfolio_id`, and `timestamp`.
     """
     try:
         # Verify portfolio exists
@@ -551,15 +584,32 @@ async def get_sync_history(
     db: Session = Depends(get_db)
 ):
     """
-    Get synchronization history for a portfolio.
-
-    Args:
-        portfolio_id: Portfolio ID
-        days: Number of days of history to fetch
-        db: Database session
-
+    Retrieve per-day synchronization summaries of blockchain transactions for a portfolio over a recent period.
+    
+    Returns a dictionary containing the portfolio id, configured wallet address, a list of daily sync summaries (each with date, transaction_count, total_amount, and transaction_types map), the number of days with activity, total transactions found, the requested period in days, and a timestamp of the response.
+    
+    Parameters:
+        portfolio_id (int): ID of the portfolio to query.
+        days (int): Number of days to include in the history (1–365).
+    
     Returns:
-        Sync history for the portfolio
+        dict: {
+            "portfolio_id": int,
+            "wallet_address": str | None,
+            "sync_history": List[{
+                "date": str,                    # ISO date (YYYY-MM-DD)
+                "transaction_count": int,
+                "total_amount": float,          # Sum of `total_amount` for that date
+                "transaction_types": {str: int} # counts per transaction type
+            }],
+            "total_days": int,                 # number of days returned (length of sync_history)
+            "total_transactions": int,         # total transactions across the period
+            "period_days": int,                # requested `days` value
+            "timestamp": datetime              # UTC timestamp when response was generated
+        }
+    
+    Raises:
+        HTTPException: 404 if the portfolio is not found; 500 if an unexpected error occurs.
     """
     try:
         # Verify portfolio exists

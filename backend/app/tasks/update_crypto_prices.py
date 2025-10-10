@@ -32,13 +32,19 @@ logger = logging.getLogger(__name__)
 )
 def update_crypto_prices(self):
     """
-    Fetch and store latest prices for all crypto assets.
-
-    This task is idempotent - it will not duplicate prices for the same date.
-    Scheduled to run every 5 minutes.
-
+    Fetch and store the latest EUR prices for all crypto assets referenced in transactions.
+    
+    This task is idempotent for a given date: it will not create duplicate PriceHistory entries for the same ticker and date. For each active crypto symbol it fetches a real-time USD price, converts it to EUR (using a dynamic USD→EUR rate with a fallback), and inserts a PriceHistory record. Records created use the same value for open/high/low/close and volume 0; symbols that already have a price for the target date are skipped.
+    
     Returns:
-        dict: Summary of prices updated, skipped, and failed
+        dict: Summary of the operation with keys:
+            - status (str): "success" on normal completion.
+            - updated (int): number of symbols for which a price record was added.
+            - skipped (int): number of symbols skipped because a record already existed.
+            - failed (int): number of symbols that failed to update.
+            - total_symbols (int): total number of symbols processed.
+            - price_date (str): ISO date string for the price entries.
+            - failed_symbols (list, optional): list of symbol strings that failed (present only if any failed).
     """
     logger.info("Starting crypto price update task")
 
@@ -190,16 +196,24 @@ def update_crypto_prices(self):
 )
 def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
     """
-    Update price for a single crypto symbol.
-
-    This is a utility task that can be called manually or from API endpoints.
-
-    Args:
-        symbol: Crypto symbol (e.g., 'BTC', 'ETH')
-        price_date: Date string (YYYY-MM-DD). If None, uses today's date.
-
+    Update and store the price for a single cryptocurrency symbol for a given date.
+    
+    If a PriceHistory entry for the symbol and date already exists, the operation is skipped.
+    Otherwise the function fetches the current price (USD), converts it to EUR using a fallback rate,
+    creates a PriceHistory record, and returns a result describing the outcome.
+    
+    Parameters:
+        symbol (str): Crypto symbol (e.g., "BTC", "ETH").
+        price_date (str | None): ISO date string "YYYY-MM-DD". If None, uses today's date.
+    
     Returns:
-        dict: Price update result
+        dict: Result payload with keys:
+            - status (str): "success", "skipped", or "failed".
+            - symbol (str): The provided symbol.
+            - price_date (str): The target date as "YYYY-MM-DD".
+            - price (float, optional): EUR price when status is "success".
+            - currency (str, optional): "EUR" when status is "success".
+            - reason (str, optional): Explanation when status is "skipped" or "failed".
     """
     logger.info(f"Updating crypto price for {symbol}")
 
@@ -299,15 +313,25 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
 )
 def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = None):
     """
-    Backfill historical prices for a crypto symbol.
-
-    Args:
-        symbol: Crypto symbol to backfill
-        start_date: Start date string (YYYY-MM-DD)
-        end_date: End date string (YYYY-MM-DD). If None, uses today's date.
-
+    Backfill historical EUR-denominated prices for a crypto symbol over a date range.
+    
+    Fetches historical USD prices for `symbol` from Yahoo Finance, converts close prices to EUR using a fallback rate, and creates or updates PriceHistory records for each date in the range.
+    
+    Parameters:
+        symbol (str): Crypto symbol (e.g., "BTC") to backfill.
+        start_date (str): Inclusive start date in "YYYY-MM-DD" format.
+        end_date (str, optional): Inclusive end date in "YYYY-MM-DD" format; if None, uses today's date.
+    
     Returns:
-        dict: Summary of prices backfilled
+        dict: Summary of the backfill operation containing:
+            - status (str): "success" or "no_data".
+            - symbol (str): The input symbol.
+            - start_date (str): Start date used.
+            - end_date (str): End date used.
+            - prices_added (int): Number of new records created.
+            - prices_updated (int): Number of existing records updated.
+            - prices_skipped (int): Number of records skipped (unchanged or due to race conditions).
+            - total_fetched (int): Number of price points fetched from the provider.
     """
     logger.info(f"Starting crypto price backfill for {symbol}")
 

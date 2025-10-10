@@ -8,6 +8,13 @@ import { useRealtimePrices } from '@/hooks/useRealtimePrices';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { TrendingUp, TrendingDown, DollarSign, Target, Activity } from 'lucide-react';
 
+/**
+ * Renders a portfolio overview panel showing current value, total profit, average annual return, and today's change, and displays a live-price update indicator when real-time data is available.
+ *
+ * Shows loading skeletons while data is loading and an error message when the overview cannot be loaded.
+ *
+ * @returns The React element containing the portfolio overview UI.
+ */
 export function PortfolioOverview() {
   const { data: overview, isLoading, error } = usePortfolioOverview();
   const { data: holdings } = useHoldings();

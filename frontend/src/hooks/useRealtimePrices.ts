@@ -12,6 +12,16 @@ interface UseRealtimePricesReturn {
   lastUpdate: Date | null;
 }
 
+/**
+ * Subscribes to and polls real-time prices for the provided symbols, exposing the latest prices and status.
+ *
+ * @param symbols - Array of asset symbols to fetch and poll; pass an empty array to disable polling.
+ * @returns An object containing:
+ *  - `realtimePrices`: Map<string, RealtimePrice> mapping symbol to the latest price data,
+ *  - `isLoading`: `true` while the initial fetch is pending, `false` otherwise,
+ *  - `error`: the most recent fetch `Error` or `null` if none,
+ *  - `lastUpdate`: `Date` of the most recent successful update or `null` if no update has occurred.
+ */
 export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesReturn {
   const [realtimePrices, setRealtimePrices] = useState<Map<string, RealtimePrice>>(new Map());
   const [isLoading, setIsLoading] = useState<boolean>(true);

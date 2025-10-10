@@ -16,6 +16,17 @@ interface TransactionHistoryProps {
   ticker: string;
 }
 
+/**
+ * Render a transaction history card for the provided asset ticker.
+ *
+ * Shows loading skeletons while transactions are being fetched, displays a "No transactions found"
+ * message when there are no entries, and otherwise presents a horizontally scrollable table of
+ * transactions with columns: Date, Type, Quantity, Price, Amount, Fees, and Currency.
+ * Numeric cells are right-aligned and use a monospaced font; dates and monetary values are formatted.
+ *
+ * @param ticker - The asset ticker symbol whose transactions should be displayed.
+ * @returns A React element containing the transaction history card with loading, empty, and populated states.
+ */
 export function TransactionHistory({ ticker }: TransactionHistoryProps) {
   const { data: transactions, isLoading } = useAssetTransactions(ticker);
 

@@ -34,18 +34,28 @@ class CryptoCalculationService:
     """Service for calculating crypto portfolio metrics."""
 
     def __init__(self, db: AsyncSession):
-        """Initialize with database session."""
+        """
+        Create a CryptoCalculationService bound to a database session.
+        
+        Parameters:
+            db (AsyncSession): Async SQLAlchemy session used for database queries and mutations by the service.
+        """
         self.db = db
 
     async def calculate_portfolio_metrics(self, portfolio_id: int) -> Optional[CryptoPortfolioMetrics]:
         """
-        Calculate comprehensive portfolio metrics for a crypto portfolio.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-
+        Compute comprehensive metrics for a crypto portfolio identified by portfolio_id.
+        
+        Calculates current holdings using FIFO, fetches current prices, computes total value, cost basis,
+        realized and unrealized gains/losses, deposits and withdrawals, asset allocation, currency breakdown,
+        and internal rate of return. Returns None if the portfolio does not exist or if an error occurs during calculation.
+        
+        Parameters:
+            portfolio_id (int): Database identifier of the crypto portfolio to analyze.
+        
         Returns:
-            CryptoPortfolioMetrics object or None if portfolio not found
+            CryptoPortfolioMetrics or None: Aggregated portfolio metrics when successful, or `None` if the portfolio
+            is not found or a processing error occurred.
         """
         try:
             # Get portfolio
@@ -206,13 +216,15 @@ class CryptoCalculationService:
 
     async def calculate_holdings(self, portfolio_id: int) -> List[CryptoHolding]:
         """
-        Calculate current holdings for a crypto portfolio.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-
+        Build current crypto holdings for a portfolio and enrich each holding with current price and unrealized P/L.
+        
+        Parameters:
+            portfolio_id (int): ID of the portfolio to compute holdings for.
+        
         Returns:
-            List of CryptoHolding objects
+            List[CryptoHolding]: A list of holdings where each entry includes symbol, quantity, average cost, cost basis,
+            current price (if available), current value (if price available), unrealized gain/loss and unrealized gain/loss
+            percentage (if calculable), first purchase date, and last transaction date. 
         """
         try:
             # Get all transactions
@@ -268,15 +280,15 @@ class CryptoCalculationService:
         end_date: date
     ) -> List[CryptoPerformanceData]:
         """
-        Calculate portfolio performance history over a date range.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-            start_date: Start date for performance data
-            end_date: End date for performance data
-
+        Compute daily portfolio performance between start_date and end_date inclusive.
+        
+        Parameters:
+            portfolio_id (int): ID of the crypto portfolio to evaluate.
+            start_date (date): Inclusive start date for the performance series.
+            end_date (date): Inclusive end date for the performance series.
+        
         Returns:
-            List of CryptoPerformanceData objects
+            List[CryptoPerformanceData]: One entry per calendar date from start_date to end_date containing portfolio value, cost basis, profit/loss, and profit/loss percentage for that date. 
         """
         try:
             # Get all transactions up to end_date
@@ -352,13 +364,20 @@ class CryptoCalculationService:
 
     async def _calculate_holdings(self, transactions: List[CryptoTransaction]) -> Dict[str, Dict]:
         """
-        Calculate holdings from transactions using FIFO method.
-
-        Args:
-            transactions: List of crypto transactions
-
+        Build current holdings per symbol by applying FIFO to the provided transactions.
+        
+        Parameters:
+            transactions: Ordered list of portfolio crypto transactions (chronological) used to derive remaining lots.
+        
         Returns:
-            Dictionary of holdings data by symbol
+            Dict mapping symbol (str) to a holding dict containing:
+                - quantity (Decimal): total remaining quantity for the symbol.
+                - cost_basis (Decimal): sum of remaining lots' cost.
+                - average_cost (Decimal): cost_basis divided by quantity.
+                - first_purchase_date (date|None): date of the earliest purchase/transfer-in for the symbol, or None if unknown.
+                - last_transaction_date (date|None): date of the most recent transaction processed for the symbol, or None if unknown.
+                - realized_gain_loss (Decimal): initialized to Decimal('0') for remaining holdings.
+                - transactions (List): placeholder list for related transaction entries (may be empty).
         """
         # FIFO lots per symbol: list[(qty, price, ts)]
         lots: Dict[str, list[Tuple[Decimal, Decimal, datetime]]] = defaultdict(list)
@@ -415,14 +434,23 @@ class CryptoCalculationService:
 
     async def _get_current_prices(self, symbols: List[str], currency: str) -> Dict[str, Dict]:
         """
-        Get current prices for multiple symbols using Yahoo Finance.
-
-        Args:
-            symbols: List of crypto symbols
-            currency: Target currency
-
+        Fetch current market prices for the provided crypto symbols and return per-symbol price metadata converted to the requested currency.
+        
+        Parameters:
+            symbols (List[str]): Crypto symbols to query (e.g., "BTC", "ETH").
+            currency (str): Target currency code for returned prices (e.g., "EUR" or "USD").
+        
         Returns:
-            Dictionary of price data by symbol
+            Dict[str, Dict]: Mapping from symbol to a metadata dictionary containing:
+                - `symbol`: the queried symbol
+                - `price`: current price expressed in `currency`
+                - `currency`: the `currency` code used
+                - `price_usd`: source price in USD as returned by the provider
+                - `timestamp`: UTC timestamp when the price was recorded
+                - `source`: price data source identifier
+        
+        Notes:
+            Symbols for which no price could be obtained are omitted from the returned dictionary.
         """
         prices = {}
         price_fetcher = PriceFetcher()
@@ -471,16 +499,26 @@ class CryptoCalculationService:
         currency: str
     ) -> Dict[str, List[Dict]]:
         """
-        Get historical prices for multiple symbols using Yahoo Finance.
-
-        Args:
-            symbols: List of crypto symbols
-            start_date: Start date
-            end_date: End date
-            currency: Target currency
-
+        Fetch historical price series for multiple symbols from Yahoo Finance and convert prices to the requested currency.
+        
+        Parameters:
+            symbols (List[str]): Crypto symbols to fetch (e.g., "BTC", "ETH").
+            start_date (date): Inclusive start date for historical data.
+            end_date (date): Inclusive end date for historical data.
+            currency (str): Target currency for returned prices; case-insensitive. If 'EUR', USD prices are converted to EUR using the service's USD→EUR rate; otherwise prices are returned in USD.
+        
         Returns:
-            Dictionary of historical price data by symbol
+            Dict[str, List[Dict]]: Mapping from symbol to a list of price records. Each record contains:
+                - 'date' (date): The date of the price point.
+                - 'symbol' (str): The original symbol.
+                - 'price' (Decimal/float): Price in the requested currency.
+                - 'currency' (str): Currency code of 'price' ('EUR' or 'USD').
+                - 'price_usd' (Decimal/float): The original USD close price from the source.
+                - 'timestamp' (datetime): Retrieval timestamp (UTC).
+                - 'source' (str): Data source identifier ('yahoo').
+        
+        Notes:
+            Symbols for which no historical data is available are omitted from the returned dictionary.
         """
         prices = {}
         price_fetcher = PriceFetcher()
@@ -537,10 +575,12 @@ class CryptoCalculationService:
 
     async def _get_usd_to_eur_rate(self) -> Optional[Decimal]:
         """
-        Get USD to EUR conversion rate using Yahoo Finance.
-
+        Retrieve the USD to EUR conversion rate from Yahoo Finance.
+        
+        Attempts to fetch the FX rate and returns it; if no rate is available or an error occurs, returns a fallback Decimal("0.92").
+        
         Returns:
-            USD to EUR conversion rate or None if failed
+            Decimal: USD→EUR conversion rate, or Decimal("0.92") as a fallback when the fetched rate is unavailable or an error occurs.
         """
         try:
             price_fetcher = PriceFetcher()
@@ -558,14 +598,16 @@ class CryptoCalculationService:
 
     async def _calculate_irr(self, transactions: List[CryptoTransaction], current_value: Decimal) -> Optional[float]:
         """
-        Calculate Internal Rate of Return for the portfolio.
-
-        Args:
-            transactions: List of transactions
-            current_value: Current portfolio value
-
+        Compute the portfolio's internal rate of return (IRR) from transaction cash flows and current value.
+        
+        Builds cash flows from transactions (treats BUY as cash outflow, SELL as cash inflow, skips transfers), appends the provided current_value as the final cash inflow dated today, and computes the IRR on the resulting ordered cash flows.
+        
+        Parameters:
+            transactions (List[CryptoTransaction]): Chronological list of portfolio transactions used to build cash flows.
+            current_value (Decimal): Current total portfolio value included as the final cash inflow.
+        
         Returns:
-            IRR as a percentage or None if calculation fails
+            Optional[float]: IRR expressed as a percentage (e.g., 12.5 for 12.5%), or `None` if there are no cash flows or the IRR cannot be computed.
         """
         try:
             # Prepare cash flows
@@ -610,13 +652,15 @@ class CryptoCalculationService:
 
     async def calculate_portfolio_summary(self, portfolio_id: int) -> Dict[str, Any]:
         """
-        Get a comprehensive summary of a crypto portfolio.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-
+        Produce a consolidated view of a crypto portfolio including its metadata, computed metrics, current holdings, and the most recent transactions.
+        
         Returns:
-            Dictionary with portfolio summary data
+            A dictionary with keys:
+              - 'portfolio': the CryptoPortfolio instance for the requested ID.
+              - 'metrics': computed CryptoPortfolioMetrics or None if metrics could not be calculated.
+              - 'holdings': list of CryptoHolding objects representing current holdings.
+              - 'recent_transactions': list of up to 10 most recent CryptoTransaction objects.
+            Returns an empty dictionary if the portfolio is not found or an error occurs.
         """
         try:
             # Get portfolio

@@ -44,7 +44,15 @@ class BlockchainFetcherService:
     """
 
     def __init__(self):
-        """Initialize blockchain fetcher with Redis caching and configuration."""
+        """
+        Create and configure a BlockchainFetcherService instance.
+        
+        Initializes per-API configuration (base URLs, timeouts, rate limits, retries), attempts to connect to Redis for optional caching, and creates dedicated HTTP sessions and rate-tracking state for each supported API. Sets instance attributes:
+        - APIS: per-API configuration mapping.
+        - _redis_client: Redis client if connected, otherwise None (caching disabled).
+        - _sessions: requests.Session objects keyed by API name.
+        - _last_request_time: timestamp of last request per API for rate limiting.
+        """
         self._sessions = {}
         self._last_request_time = {}
         self._redis_client = None
@@ -95,11 +103,32 @@ class BlockchainFetcherService:
     MAX_HISTORY_DAYS = 365  # Don't fetch more than 1 year of history by default
 
     def _get_cache_key(self, prefix: str, *args) -> str:
-        """Generate cache key for Redis."""
+        """
+        Builds a Redis cache key namespaced for the blockchain fetcher.
+        
+        Constructs a colon-delimited key that starts with the "blockchain" namespace, followed by the provided prefix and any additional components.
+        
+        Parameters:
+        	prefix (str): A namespace segment describing the cached item (e.g., "tx", "address").
+        	*args: Additional key components that will be appended in order.
+        
+        Returns:
+        	cache_key (str): A string in the format "blockchain:{prefix}:{arg1}:{arg2}:...".
+        """
         return f"blockchain:{prefix}:{':'.join(str(arg) for arg in args)}"
 
     def _cache_get(self, key: str) -> Optional[Any]:
-        """Get data from Redis cache."""
+        """
+        Retrieve and return the JSON-deserialized value stored in Redis for the given key.
+        
+        Attempts to read and parse the value associated with key from Redis. If Redis is unavailable, the key does not exist, or parsing/Redis errors occur, returns None.
+        
+        Parameters:
+            key (str): Redis key to read.
+        
+        Returns:
+            Optional[Any]: The deserialized Python object stored at key, or None if not found or on error.
+        """
         if not self._redis_client:
             return None
 
@@ -114,7 +143,16 @@ class BlockchainFetcherService:
         return None
 
     def _cache_set(self, key: str, data: Any, ttl: int) -> None:
-        """Set data in Redis cache."""
+        """
+        Store a Python object in Redis under the given key with a time-to-live, converting it to JSON-serializable form.
+        
+        If Redis is not available this is a no-op. The value is converted to JSON-safe types and stored with the provided TTL (seconds). Serialization or Redis errors are logged and suppressed; this method does not raise on failure.
+        
+        Parameters:
+            key (str): Redis key under which to store the data.
+            data (Any): Python object to serialize and cache.
+            ttl (int): Time-to-live for the cached entry, in seconds.
+        """
         if not self._redis_client:
             return
 
@@ -129,7 +167,14 @@ class BlockchainFetcherService:
             logger.warning(f"Redis error setting data in cache: {e}")
 
     def _make_json_serializable(self, obj: Any) -> Any:
-        """Convert objects to JSON-serializable format."""
+        """
+        Convert an arbitrary object into a JSON-serializable representation.
+        
+        Recursively converts dicts and lists; converts Decimal to a string, datetime to an ISO 8601 string, preserves str/int/float/bool/None, and coerces any other type to its string representation.
+        
+        Returns:
+            A JSON-serializable representation of the input object.
+        """
         if isinstance(obj, dict):
             return {k: self._make_json_serializable(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -144,7 +189,14 @@ class BlockchainFetcherService:
             return str(obj)
 
     def _rate_limit(self, api_name: str) -> None:
-        """Implement rate limiting for specific API."""
+        """
+        Enforces per-API rate limiting based on the configured requests-per-second.
+        
+        Ensures at least 1 / rate_limit seconds elapse between consecutive requests for the given API by sleeping when needed, and updates the API's last-request timestamp stored on the instance.
+        
+        Parameters:
+            api_name (str): Key name of the API as present in self.APIS.
+        """
         current_time = time.time()
         api_config = self.APIS[api_name]
 
@@ -208,13 +260,13 @@ class BlockchainFetcherService:
 
     def _validate_bitcoin_address(self, address: str) -> bool:
         """
-        Validate Bitcoin address format.
-
-        Args:
-            address: Bitcoin address to validate
-
+        Validate whether a string is a syntactically valid Bitcoin address (legacy, P2SH, or Bech32).
+        
+        Parameters:
+            address (str): Bitcoin address to validate.
+        
         Returns:
-            True if valid, False otherwise
+            True if the address is a valid Bitcoin address, False otherwise.
         """
         # Basic validation for Bitcoin addresses
         # This is a simplified validation - in production, you might want more sophisticated validation
@@ -247,13 +299,13 @@ class BlockchainFetcherService:
 
     def _generate_transaction_hash(self, tx_data: Dict) -> str:
         """
-        Generate a unique hash for transaction deduplication.
-
-        Args:
-            tx_data: Transaction data dictionary
-
+        Generate a deterministic fingerprint for a transaction for deduplication.
+        
+        Parameters:
+            tx_data (Dict): Transaction dictionary; uses the values of the keys 'txid', 'timestamp', 'value', and 'address' when present.
+        
         Returns:
-            SHA256 hash of key transaction fields
+            str: SHA-256 hex digest of the concatenation of the transaction's key fields.
         """
         # Create a string with key fields for hashing
         hash_string = f"{tx_data.get('txid', '')}{tx_data.get('timestamp', '')}{tx_data.get('value', '')}{tx_data.get('address', '')}"
@@ -290,14 +342,28 @@ class BlockchainFetcherService:
 
     def _convert_blockstream_transaction(self, tx_data: Dict, wallet_address: str) -> Optional[Dict]:
         """
-        Convert Blockstream transaction format to internal format.
-
-        Args:
-            tx_data: Transaction data from Blockstream API
-            wallet_address: The wallet address being tracked
-
+        Convert a Blockstream-format transaction into the internal transaction dictionary.
+        
+        Parameters:
+            tx_data (Dict): Transaction object returned by the Blockstream API.
+            wallet_address (str): Wallet address being tracked; used to infer transaction direction.
+        
         Returns:
-            Formatted transaction data or None if conversion failed
+            result (Optional[Dict]): A dict with the unified transaction fields or `None` if required data is missing or conversion fails.
+            When present, the dict contains:
+                - transaction_hash: original transaction id (txid)
+                - timestamp: Python datetime of the transaction/block time
+                - transaction_type: Enum value indicating IN/OUT (from _detect_transaction_type)
+                - symbol: 'BTC'
+                - quantity: Decimal BTC amount related to the tracked address
+                - price_at_execution: Decimal estimated price (placeholder)
+                - total_amount: Decimal total in fiat (quantity * price_at_execution)
+                - currency: fiat currency enum (e.g., USD)
+                - fee: Decimal fee amount (BTC)
+                - fee_currency: currency for fee or None
+                - exchange: source label (e.g., 'Bitcoin Blockchain')
+                - notes: short human-readable note
+                - raw_data: original `tx_data` for debugging
         """
         try:
             # Extract relevant data
@@ -356,14 +422,14 @@ class BlockchainFetcherService:
 
     def _convert_blockchaincom_transaction(self, tx_data: Dict, wallet_address: str) -> Optional[Dict]:
         """
-        Convert Blockchain.com transaction format to internal format.
-
-        Args:
-            tx_data: Transaction data from Blockchain.com API
-            wallet_address: The wallet address being tracked
-
+        Converts a Blockchain.com transaction payload into the service's internal transaction representation.
+        
+        Parameters:
+            tx_data: Raw transaction object returned by the Blockchain.com API.
+            wallet_address: The Bitcoin address being tracked; used to compute the wallet-specific amount.
+        
         Returns:
-            Formatted transaction data or None if conversion failed
+            A dictionary with normalized transaction fields (including `transaction_hash`, `timestamp`, `transaction_type`, `symbol`, `quantity`, `price_at_execution`, `total_amount`, `currency`, `fee`, `fee_currency`, `exchange`, `notes`, and `raw_data`) if conversion succeeds, `None` otherwise.
         """
         try:
             # Extract relevant data
@@ -426,14 +492,17 @@ class BlockchainFetcherService:
 
     def _convert_blockcypher_transaction(self, tx_data: Dict, wallet_address: str) -> Optional[Dict]:
         """
-        Convert BlockCypher transaction format to internal format.
-
-        Args:
-            tx_data: Transaction data from BlockCypher API
-            wallet_address: The wallet address being tracked
-
+        Convert a BlockCypher transaction payload into the service's internal transaction dictionary.
+        
+        Parameters:
+            tx_data (dict): Raw transaction object returned by the BlockCypher API.
+            wallet_address (str): The wallet address being evaluated for this transaction.
+        
         Returns:
-            Formatted transaction data or None if conversion failed
+            dict: A normalized transaction containing keys such as `transaction_hash`, `timestamp`, `transaction_type`,
+            `symbol`, `quantity` (BTC), `price_at_execution`, `total_amount`, `currency`, `fee`, `fee_currency`,
+            `exchange`, `notes`, and `raw_data`.
+            `None` if required fields are missing or conversion cannot be performed.
         """
         try:
             # Extract relevant data
@@ -777,15 +846,20 @@ class BlockchainFetcherService:
         message: str
     ) -> Dict[str, Any]:
         """
-        Build result dictionary for API responses.
-
-        Args:
-            transactions: List of transaction dictionaries
-            status: Status of the operation
-            message: Message describing the result
-
+        Construct a standardized result dictionary for transaction fetch operations.
+        
+        Parameters:
+            transactions (List[Dict]): List of transaction records to include in the result.
+            status (str): Operation status label (e.g., "success", "error").
+            message (str): Human-readable message describing the result.
+        
         Returns:
-            Result dictionary
+            Dict[str, Any]: Dictionary with keys:
+                - 'status': the provided status string,
+                - 'message': the provided message string,
+                - 'transactions': the provided list of transactions,
+                - 'count': number of transactions,
+                - 'timestamp': UTC timestamp (datetime) when the result was built.
         """
         return {
             'status': status,
@@ -797,10 +871,10 @@ class BlockchainFetcherService:
 
     def test_api_connection(self) -> Dict[str, bool]:
         """
-        Test connection to all blockchain APIs.
-
+        Verify connectivity to each configured blockchain API by issuing a lightweight request.
+        
         Returns:
-            Dictionary with API names as keys and connection status as values
+            dict: Mapping of API name to `True` if a valid response was received, `False` otherwise.
         """
         results = {}
 

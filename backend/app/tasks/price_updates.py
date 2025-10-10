@@ -176,16 +176,22 @@ def update_daily_prices(self):
 )
 def update_price_for_ticker(self, ticker: str, price_date: str = None):
     """
-    Update price for a single ticker.
-
-    This is a utility task that can be called manually or from API endpoints.
-
-    Args:
-        ticker: Ticker symbol
-        price_date: Date string (YYYY-MM-DD). If None, uses yesterday's date.
-
+    Update the historical price for a single ticker on the specified date.
+    
+    If a price record for the target date already exists the task returns a skipped status.
+    On success a new PriceHistory record is created and the returned dict includes the recorded price.
+    
+    Parameters:
+        ticker (str): Ticker symbol to update.
+        price_date (str, optional): Date string in `YYYY-MM-DD` format. If omitted, defaults to yesterday.
+    
     Returns:
-        dict: Price update result
+        dict: Result object with keys:
+            - `status`: `"success"`, `"skipped"`, or `"failed"`.
+            - `ticker`: the ticker symbol.
+            - `price_date`: the target date as `YYYY-MM-DD`.
+            - On success: `price` (float) with the recorded close price.
+            - On skip or failure: `reason` (str) describing why the update was skipped or failed.
     """
     logger.info(f"Updating price for {ticker}")
 
@@ -279,18 +285,27 @@ def update_price_for_ticker(self, ticker: str, price_date: str = None):
 )
 def fetch_prices_for_ticker(self, ticker: str, isin: str = None, start_date: str = None, end_date: str = None):
     """
-    Fetch historical prices for a specific ticker.
-
-    Used for benchmark price fetching.
-
-    Args:
-        ticker: Ticker symbol
-        isin: Optional ISIN code
-        start_date: Start date string (YYYY-MM-DD)
-        end_date: End date string (YYYY-MM-DD)
-
+    Fetches historical daily prices for a ticker, upserts them into PriceHistory, and returns a summary of changes.
+    
+    Parameters:
+        ticker (str): Ticker symbol to fetch.
+        isin (str, optional): ISIN code to assist fetching when available.
+        start_date (str, optional): Inclusive start date in YYYY-MM-DD format. Defaults to 365 days before today.
+        end_date (str, optional): Inclusive end date in YYYY-MM-DD format. Defaults to today.
+    
     Returns:
-        dict: Summary of prices fetched
+        dict: Summary with keys:
+            - "status": "success" or "no_data".
+            - "ticker": the ticker provided.
+            - "start_date": string start date used.
+            - "end_date": string end date used.
+            - "prices_added": number of new records inserted.
+            - "prices_updated": number of existing records updated when values differed.
+            - "prices_skipped": number of records skipped (identical or due to race condition).
+            - "total_fetched": number of price entries retrieved from the fetcher.
+    
+    Raises:
+        Exception: Rolls back the transaction and re-raises on any unexpected error during fetch or persistence.
     """
     logger.info(f"Starting historical price fetch for {ticker}")
 
