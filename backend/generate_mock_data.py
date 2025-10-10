@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+chmod +x backend/generate_mock_data.py
 """
 Generate comprehensive mock portfolio data for testing TrackFolio application.
 
