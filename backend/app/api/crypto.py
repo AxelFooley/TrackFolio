@@ -37,11 +37,33 @@ from app.schemas.crypto import (
     CryptoError
 )
 from app.services.crypto_calculations import CryptoCalculationService
-from app.services.coincap import coincap_service
+from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/crypto", tags=["crypto"])
+
+
+async def _get_usd_to_eur_rate() -> Optional[Decimal]:
+    """
+    Get USD to EUR conversion rate using Yahoo Finance.
+
+    Returns:
+        USD to EUR conversion rate or None if failed
+    """
+    try:
+        price_fetcher = PriceFetcher()
+        import asyncio
+        rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
+        if rate:
+            return rate
+        else:
+            # Fallback to a reasonable approximation
+            logger.warning("Using fallback USD to EUR rate (0.92)")
+            return Decimal("0.92")
+    except Exception as e:
+        logger.error(f"Error getting USD to EUR rate: {e}")
+        return Decimal("0.92")  # Fallback rate
 
 
 # Portfolio Management Endpoints
@@ -742,7 +764,7 @@ async def get_crypto_prices(
     currency: str = Query("eur", regex="^(eur|usd)$", description="Target currency"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get current prices for multiple cryptocurrencies."""
+    """Get current prices for multiple cryptocurrencies using Yahoo Finance."""
     try:
         # Parse symbols
         symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
@@ -753,22 +775,40 @@ async def get_crypto_prices(
         if len(symbol_list) > 50:
             raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed per request")
 
-        # Get prices from CoinCap
+        # Get prices from Yahoo Finance
+        price_fetcher = PriceFetcher()
         prices = []
+
         for symbol in symbol_list:
             try:
-                price_data = coincap_service.get_current_price(symbol, currency)
-                if price_data:
+                # Add appropriate suffix for crypto symbols on Yahoo Finance
+                yahoo_symbol = f"{symbol}-USD"
+
+                # Use Yahoo Finance to fetch current price
+                price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
+
+                if price_data and price_data.get('current_price'):
+                    price = price_data['current_price']
+
+                    # Convert to target currency if needed (Yahoo returns USD)
+                    if currency.lower() == 'eur':
+                        # Get USD to EUR conversion rate
+                        eur_rate = await _get_usd_to_eur_rate()
+                        if eur_rate:
+                            price = price * eur_rate
+                        else:
+                            logger.warning(f"Could not convert {symbol} price to EUR, using USD")
+
                     prices.append(CryptoPriceData(
-                        symbol=price_data['symbol'],
-                        price=price_data['price'],
-                        currency=price_data['currency'],
-                        price_usd=price_data.get('price_usd'),
-                        market_cap_usd=price_data.get('market_cap_usd'),
-                        volume_24h_usd=price_data.get('volume_24h_usd'),
-                        change_percent_24h=price_data.get('change_percent_24h'),
-                        timestamp=price_data['timestamp'],
-                        source=price_data['source']
+                        symbol=symbol,
+                        price=price,
+                        currency=currency.upper(),
+                        price_usd=price_data['current_price'],
+                        market_cap_usd=None,  # Yahoo Finance may not provide this in real-time endpoint
+                        volume_24h_usd=None,  # Yahoo Finance may not provide this in real-time endpoint
+                        change_percent_24h=float(price_data.get('change_percent', 0)) if price_data.get('change_percent') else None,
+                        timestamp=price_data.get('timestamp', datetime.utcnow()),
+                        source='yahoo'
                     ))
             except Exception as e:
                 logger.warning(f"Failed to get price for {symbol}: {e}")
@@ -795,7 +835,7 @@ async def get_crypto_price_history(
     currency: str = Query("eur", regex="^(eur|usd)$", description="Target currency"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get historical price data for a cryptocurrency."""
+    """Get historical price data for a cryptocurrency using Yahoo Finance."""
     try:
         # Validate inputs
         if not symbol or len(symbol) > 20:
@@ -811,9 +851,14 @@ async def get_crypto_price_history(
 
         symbol = symbol.upper().strip()
 
-        # Get historical prices from CoinCap
-        historical_prices = coincap_service.get_historical_prices(
-            symbol, start_date, end_date, currency
+        # Get historical prices from Yahoo Finance
+        price_fetcher = PriceFetcher()
+        yahoo_symbol = f"{symbol}-USD"
+
+        historical_prices = price_fetcher.fetch_historical_prices_sync(
+            yahoo_symbol,
+            start_date=start_date,
+            end_date=end_date
         )
 
         if not historical_prices:
@@ -822,18 +867,34 @@ async def get_crypto_price_history(
                 detail=f"No historical price data found for {symbol} in the specified date range"
             )
 
+        # Convert to target currency if needed (Yahoo returns USD)
+        if currency.lower() == 'eur':
+            eur_rate = await _get_usd_to_eur_rate()
+            if eur_rate:
+                for data_point in historical_prices:
+                    data_point['price'] = data_point['close'] * eur_rate
+                    data_point['currency'] = 'EUR'
+            else:
+                for data_point in historical_prices:
+                    data_point['price'] = data_point['close']
+                    data_point['currency'] = 'USD'
+        else:
+            for data_point in historical_prices:
+                data_point['price'] = data_point['close']
+                data_point['currency'] = 'USD'
+
         # Convert to response format
         prices = [
             CryptoHistoricalPrice(
-                date=item['date'],
-                symbol=item['symbol'],
-                price=item['price'],
-                currency=item['currency'],
-                price_usd=item.get('price_usd'),
-                timestamp=item['timestamp'],
-                source=item['source']
+                date=data_point['date'],
+                symbol=symbol,
+                price=data_point['price'],
+                currency=data_point['currency'],
+                price_usd=data_point['close'],
+                timestamp=datetime.utcnow(),
+                source='yahoo'
             )
-            for item in historical_prices
+            for data_point in historical_prices
         ]
 
         return CryptoPriceHistoryResponse(
@@ -920,17 +981,82 @@ async def refresh_crypto_prices(
 async def get_supported_crypto_symbols():
     """Get list of supported cryptocurrency symbols."""
     try:
-        supported_assets = coincap_service.get_supported_symbols()
+        # Return a curated list of popular cryptocurrencies supported by Yahoo Finance
+        # This is a reasonable approach since Yahoo Finance supports most major cryptos
+        supported_assets = [
+            {"symbol": "BTC", "name": "Bitcoin", "yahoo_symbol": "BTC-USD"},
+            {"symbol": "ETH", "name": "Ethereum", "yahoo_symbol": "ETH-USD"},
+            {"symbol": "BNB", "name": "Binance Coin", "yahoo_symbol": "BNB-USD"},
+            {"symbol": "XRP", "name": "Ripple", "yahoo_symbol": "XRP-USD"},
+            {"symbol": "ADA", "name": "Cardano", "yahoo_symbol": "ADA-USD"},
+            {"symbol": "SOL", "name": "Solana", "yahoo_symbol": "SOL-USD"},
+            {"symbol": "DOGE", "name": "Dogecoin", "yahoo_symbol": "DOGE-USD"},
+            {"symbol": "DOT", "name": "Polkadot", "yahoo_symbol": "DOT-USD"},
+            {"symbol": "MATIC", "name": "Polygon", "yahoo_symbol": "MATIC-USD"},
+            {"symbol": "SHIB", "name": "Shiba Inu", "yahoo_symbol": "SHIB-USD"},
+            {"symbol": "AVAX", "name": "Avalanche", "yahoo_symbol": "AVAX-USD"},
+            {"symbol": "LINK", "name": "Chainlink", "yahoo_symbol": "LINK-USD"},
+            {"symbol": "UNI", "name": "Uniswap", "yahoo_symbol": "UNI-USD"},
+            {"symbol": "LTC", "name": "Litecoin", "yahoo_symbol": "LTC-USD"},
+            {"symbol": "ATOM", "name": "Cosmos", "yahoo_symbol": "ATOM-USD"},
+            {"symbol": "XLM", "name": "Stellar", "yahoo_symbol": "XLM-USD"},
+            {"symbol": "BCH", "name": "Bitcoin Cash", "yahoo_symbol": "BCH-USD"},
+            {"symbol": "FIL", "name": "Filecoin", "yahoo_symbol": "FIL-USD"},
+            {"symbol": "TRX", "name": "TRON", "yahoo_symbol": "TRX-USD"},
+            {"symbol": "ETC", "name": "Ethereum Classic", "yahoo_symbol": "ETC-USD"},
+            {"symbol": "XMR", "name": "Monero", "yahoo_symbol": "XMR-USD"},
+            {"symbol": "USDT", "name": "Tether", "yahoo_symbol": "USDT-USD"},
+            {"symbol": "USDC", "name": "USD Coin", "yahoo_symbol": "USDC-USD"},
+            {"symbol": "AAVE", "name": "Aave", "yahoo_symbol": "AAVE-USD"},
+            {"symbol": "MKR", "name": "Maker", "yahoo_symbol": "MKR-USD"},
+            {"symbol": "COMP", "name": "Compound", "yahoo_symbol": "COMP-USD"},
+            {"symbol": "SUSHI", "name": "Sushi", "yahoo_symbol": "SUSHI-USD"},
+            {"symbol": "ICP", "name": "Internet Computer", "yahoo_symbol": "ICP-USD"},
+            {"symbol": "HBAR", "name": "Hedera", "yahoo_symbol": "HBAR-USD"},
+            {"symbol": "VET", "name": "VeChain", "yahoo_symbol": "VET-USD"},
+            {"symbol": "THETA", "name": "Theta", "yahoo_symbol": "THETA-USD"},
+            {"symbol": "ALGO", "name": "Algorand", "yahoo_symbol": "ALGO-USD"},
+            {"symbol": "LRC", "name": "Loopring", "yahoo_symbol": "LRC-USD"},
+            {"symbol": "ENJ", "name": "Enjin Coin", "yahoo_symbol": "ENJ-USD"},
+            {"symbol": "CRO", "name": "Cronos", "yahoo_symbol": "CRO-USD"},
+            {"symbol": "MANA", "name": "Decentraland", "yahoo_symbol": "MANA-USD"},
+            {"symbol": "SAND", "name": "The Sandbox", "yahoo_symbol": "SAND-USD"},
+            {"symbol": "AXS", "name": "Axie Infinity", "yahoo_symbol": "AXS-USD"},
+            {"symbol": "GALA", "name": "Gala", "yahoo_symbol": "GALA-USD"},
+            {"symbol": "CHZ", "name": "Chiliz", "yahoo_symbol": "CHZ-USD"},
+            {"symbol": "NEAR", "name": "NEAR Protocol", "yahoo_symbol": "NEAR-USD"},
+            {"symbol": "EGLD", "name": "MultiversX", "yahoo_symbol": "EGLD-USD"},
+            {"symbol": "FTT", "name": "FTX Token", "yahoo_symbol": "FTT-USD"},
+            {"symbol": "HOT", "name": "Holo", "yahoo_symbol": "HOT-USD"},
+            {"symbol": "AR", "name": "Arweave", "yahoo_symbol": "AR-USD"},
+            {"symbol": "STX", "name": "Stacks", "yahoo_symbol": "STX-USD"},
+            {"symbol": "RUNE", "name": "THORChain", "yahoo_symbol": "RUNE-USD"},
+            {"symbol": "ZEC", "name": "Zcash", "yahoo_symbol": "ZEC-USD"},
+            {"symbol": "KSM", "name": "Kusama", "yahoo_symbol": "KSM-USD"},
+            {"symbol": "KAVA", "name": "Kava", "yahoo_symbol": "KAVA-USD"},
+            {"symbol": "WAVES", "name": "Waves", "yahoo_symbol": "WAVES-USD"},
+            {"symbol": "QTUM", "name": "Qtum", "yahoo_symbol": "QTUM-USD"},
+            {"symbol": "XTZ", "name": "Tezos", "yahoo_symbol": "XTZ-USD"},
+            {"symbol": "EOS", "name": "EOS", "yahoo_symbol": "EOS-USD"},
+            {"symbol": "BTG", "name": "Bitcoin Gold", "yahoo_symbol": "BTG-USD"},
+            {"symbol": "BSV", "name": "Bitcoin SV", "yahoo_symbol": "BSV-USD"},
+            {"symbol": "NEO", "name": "NEO", "yahoo_symbol": "NEO-USD"},
+            {"symbol": "MIOTA", "name": "IOTA", "yahoo_symbol": "MIOTA-USD"},
+            {"symbol": "ZIL", "name": "Zilliqa", "yahoo_symbol": "ZIL-USD"},
+            {"symbol": "BAT", "name": "Basic Attention Token", "yahoo_symbol": "BAT-USD"},
+            {"symbol": "GRT", "name": "The Graph", "yahoo_symbol": "GRT-USD"},
+            {"symbol": "OCEAN", "name": "Ocean Protocol", "yahoo_symbol": "OCEAN-USD"},
+            {"symbol": "KNC", "name": "Kyber Network", "yahoo_symbol": "KNC-USD"},
+            {"symbol": "ZRX", "name": "0x", "yahoo_symbol": "ZRX-USD"},
+            {"symbol": "BAND", "name": "Band Protocol", "yahoo_symbol": "BAND-USD"},
+            {"symbol": "RLC", "name": "iExec RLC", "yahoo_symbol": "RLC-USD"},
+            {"symbol": "LPT", "name": "Livepeer", "yahoo_symbol": "LPT-USD"},
+            {"symbol": "STORJ", "name": "Storj", "yahoo_symbol": "STORJ-USD"},
+            {"symbol": "COTI", "name": "COTI", "yahoo_symbol": "COTI-USD"}
+        ]
 
         return {
-            "symbols": [
-                {
-                    "symbol": asset["symbol"],
-                    "name": asset["name"],
-                    "coincapec_id": asset["coincapec_id"]
-                }
-                for asset in supported_assets[:100]  # Limit to top 100 for performance
-            ],
+            "symbols": supported_assets,
             "total_count": len(supported_assets),
             "timestamp": datetime.utcnow()
         }
@@ -943,13 +1069,15 @@ async def get_supported_crypto_symbols():
 async def crypto_health_check():
     """Health check for crypto services."""
     try:
-        # Test CoinCap connection
-        coincap_healthy = coincap_service.test_connection()
+        # Test Yahoo Finance connection
+        price_fetcher = PriceFetcher()
+        test_price = price_fetcher.fetch_realtime_price("BTC-USD")
+        yahoo_healthy = test_price is not None
 
         return {
-            "status": "healthy" if coincap_healthy else "degraded",
+            "status": "healthy" if yahoo_healthy else "degraded",
             "services": {
-                "coincap": "healthy" if coincap_healthy else "unhealthy"
+                "yahoo_finance": "healthy" if yahoo_healthy else "unhealthy"
             },
             "timestamp": datetime.utcnow()
         }
@@ -960,3 +1088,26 @@ async def crypto_health_check():
             "error": str(e),
             "timestamp": datetime.utcnow()
         }
+
+# Helper function for currency conversion
+async def _get_usd_to_eur_rate() -> Optional[Decimal]:
+    """
+    Get USD to EUR conversion rate using Yahoo Finance.
+
+    Returns:
+        USD to EUR conversion rate or None if failed
+    """
+    try:
+        price_fetcher = PriceFetcher()
+        import asyncio
+        rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
+        if rate:
+            return rate
+        else:
+            # Fallback to a reasonable approximation
+            logger.warning("Using fallback USD to EUR rate (0.92)")
+            return Decimal("0.92")
+    except Exception as e:
+        logger.error(f"Error getting USD to EUR rate: {e}")
+        return Decimal("0.92")  # Fallback rate
+

@@ -1,7 +1,7 @@
 """
 Crypto price update tasks.
 
-Fetches latest crypto prices from CoinCap API for all active crypto positions.
+Fetches latest crypto prices from Yahoo Finance API for all active crypto positions.
 Runs every 5 minutes to keep crypto prices current.
 """
 from celery import shared_task
@@ -16,7 +16,7 @@ import json
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import PriceHistory, CryptoTransaction, CryptoTransactionType
-from app.services.coincap import coincap_service
+from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -95,35 +95,41 @@ def update_crypto_prices(self):
                     skipped += 1
                     continue
 
-                # Rate limiting: sleep 0.2s between requests to avoid CoinCap rate limits
-                time.sleep(0.2)
+                # Rate limiting: sleep 0.15s between requests to avoid Yahoo Finance rate limits
+                time.sleep(0.15)
 
-                # Fetch current price from CoinCap (in EUR)
-                price_data = coincap_service.get_current_price(symbol, "eur")
+                # Fetch current price from Yahoo Finance
+                price_fetcher = PriceFetcher()
+                yahoo_symbol = f"{symbol}-USD"
+                price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
-                if not price_data or not price_data.get("price"):
+                if not price_data or not price_data.get("current_price"):
                     logger.warning(f"No price data returned for {symbol}")
                     failed += 1
                     failed_symbols.append(symbol)
                     continue
 
+                # Convert to EUR if needed (Yahoo returns USD)
+                price_usd = price_data["current_price"]
+                price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
+
                 # Create price record
                 price_record = PriceHistory(
                     ticker=symbol,
                     date=price_date,
-                    open=price_data["price"],  # Use same price for open/high/low for intraday
-                    high=price_data["price"],
-                    low=price_data["price"],
-                    close=price_data["price"],
-                    volume=price_data.get("volume_24h_usd", Decimal("0")),
-                    source="coincap"
+                    open=price_eur,  # Use same price for open/high/low for intraday
+                    high=price_eur,
+                    low=price_eur,
+                    close=price_eur,
+                    volume=Decimal("0"),  # Yahoo Finance real-time endpoint doesn't provide volume
+                    source="yahoo"
                 )
 
                 db.add(price_record)
                 db.commit()
 
                 logger.info(
-                    f"Updated crypto price for {symbol}: {price_data['price']} EUR on {price_date}"
+                    f"Updated crypto price for {symbol}: {price_eur} EUR on {price_date}"
                 )
                 updated += 1
 
@@ -217,10 +223,12 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
                 "reason": "Price already exists"
             }
 
-        # Fetch price from CoinCap
-        price_data = coincap_service.get_current_price(symbol, "eur")
+        # Fetch price from Yahoo Finance
+        price_fetcher = PriceFetcher()
+        yahoo_symbol = f"{symbol}-USD"
+        price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
-        if not price_data or not price_data.get("price"):
+        if not price_data or not price_data.get("current_price"):
             logger.warning(f"No price data returned for {symbol}")
             return {
                 "status": "failed",
@@ -229,28 +237,32 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
                 "reason": "No price data available"
             }
 
+        # Convert to EUR if needed (Yahoo returns USD)
+        price_usd = price_data["current_price"]
+        price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
+
         # Create price record
         price_record = PriceHistory(
             ticker=symbol,
             date=target_date,
-            open=price_data["price"],
-            high=price_data["price"],
-            low=price_data["price"],
-            close=price_data["price"],
-            volume=price_data.get("volume_24h_usd", Decimal("0")),
-            source="coincap"
+            open=price_eur,
+            high=price_eur,
+            low=price_eur,
+            close=price_eur,
+            volume=Decimal("0"),  # Yahoo Finance real-time endpoint doesn't provide volume
+            source="yahoo"
         )
 
         db.add(price_record)
         db.commit()
 
-        logger.info(f"Updated crypto price for {symbol}: {price_data['price']} EUR")
+        logger.info(f"Updated crypto price for {symbol}: {price_eur} EUR")
 
         return {
             "status": "success",
             "symbol": symbol,
             "price_date": str(target_date),
-            "price": float(price_data["price"]),
+            "price": float(price_eur),
             "currency": "EUR"
         }
 
@@ -301,12 +313,13 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
 
         logger.info(f"Backfilling crypto prices for {symbol} from {start} to {end}")
 
-        # Fetch historical prices from CoinCap
-        historical_prices = coincap_service.get_historical_prices(
-            symbol=symbol,
+        # Fetch historical prices from Yahoo Finance
+        price_fetcher = PriceFetcher()
+        yahoo_symbol = f"{symbol}-USD"
+        historical_prices = price_fetcher.fetch_historical_prices_sync(
+            ticker=yahoo_symbol,
             start_date=start,
-            end_date=end,
-            currency="eur"
+            end_date=end
         )
 
         if not historical_prices:
@@ -320,6 +333,10 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
 
         for price_data in historical_prices:
             try:
+                # Convert to EUR if needed (Yahoo returns USD)
+                price_usd = price_data["close"]
+                price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
+
                 # Check if price already exists
                 existing = db.execute(
                     select(PriceHistory).where(
@@ -330,13 +347,13 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
 
                 if existing:
                     # Update existing price if values differ
-                    if existing.close != price_data["price"]:
-                        existing.open = price_data["price"]
-                        existing.high = price_data["price"]
-                        existing.low = price_data["price"]
-                        existing.close = price_data["price"]
-                        existing.volume = price_data.get("volume_24h_usd", Decimal("0"))
-                        existing.source = "coincap"
+                    if existing.close != price_eur:
+                        existing.open = price_eur
+                        existing.high = price_eur
+                        existing.low = price_eur
+                        existing.close = price_eur
+                        existing.volume = Decimal("0")  # Yahoo Finance historical data doesn't include volume in this endpoint
+                        existing.source = "yahoo"
                         prices_updated += 1
                     else:
                         prices_skipped += 1
@@ -345,12 +362,12 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
                     price_record = PriceHistory(
                         ticker=symbol,
                         date=price_data["date"],
-                        open=price_data["price"],
-                        high=price_data["price"],
-                        low=price_data["price"],
-                        close=price_data["price"],
-                        volume=price_data.get("volume_24h_usd", Decimal("0")),
-                        source="coincap"
+                        open=price_eur,
+                        high=price_eur,
+                        low=price_eur,
+                        close=price_eur,
+                        volume=Decimal("0"),  # Yahoo Finance historical data doesn't include volume in this endpoint
+                        source="yahoo"
                     )
                     db.add(price_record)
                     prices_added += 1

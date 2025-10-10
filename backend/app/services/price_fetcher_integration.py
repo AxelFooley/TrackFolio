@@ -1,8 +1,9 @@
 """
-Integration example for CoinCap service with existing PriceFetcher.
+Enhanced PriceFetcher with crypto support using Yahoo Finance.
 
-This module shows how to integrate CoinCap cryptocurrency data
-with the existing price fetching infrastructure.
+This module extends the existing price fetching capabilities to include
+cryptocurrency data from Yahoo Finance while maintaining compatibility with
+the existing portfolio tracking system.
 """
 from decimal import Decimal
 from datetime import date, datetime
@@ -10,24 +11,22 @@ from typing import Dict, List, Optional
 import logging
 
 from .price_fetcher import PriceFetcher
-from .coincap import coincap_service
 
 logger = logging.getLogger(__name__)
 
 
 class UnifiedPriceFetcher:
     """
-    Unified price fetcher that combines Yahoo Finance and CoinCap APIs.
+    Unified price fetcher that handles both traditional assets and cryptocurrencies.
 
     This class extends the existing price fetching capabilities to include
-    cryptocurrency data from CoinCap while maintaining compatibility with
+    cryptocurrency data from Yahoo Finance while maintaining compatibility with
     the existing portfolio tracking system.
     """
 
     def __init__(self):
         """Initialize unified price fetcher."""
         self.yahoo_fetcher = PriceFetcher()
-        self.coincap_service = coincap_service
 
     def fetch_current_price(self, ticker: str, asset_type: str = "stock", currency: str = "eur") -> Optional[Dict]:
         """
@@ -43,10 +42,34 @@ class UnifiedPriceFetcher:
         """
         try:
             if asset_type.lower() == "crypto":
-                # Use CoinCap for cryptocurrencies
-                result = self.coincap_service.get_current_price(ticker, currency)
-                if result:
-                    logger.info(f"Fetched crypto price for {ticker}: {result['price']} {result['currency']}")
+                # Use Yahoo Finance for cryptocurrencies with -USD suffix
+                yahoo_symbol = f"{ticker}-USD"
+                result = self.yahoo_fetcher.fetch_realtime_price(yahoo_symbol)
+                if result and result.get("current_price"):
+                    price_usd = result["current_price"]
+
+                    # Convert to target currency if needed
+                    if currency.lower() == "eur":
+                        # Get USD to EUR conversion rate
+                        import asyncio
+                        try:
+                            eur_rate = asyncio.run(self.yahoo_fetcher.fetch_fx_rate("USD", "EUR"))
+                            if eur_rate:
+                                price_eur = price_usd * eur_rate
+                                result["current_price"] = price_eur
+                                result["currency"] = "EUR"
+                            else:
+                                # Fallback conversion
+                                price_eur = price_usd * Decimal("0.92")
+                                result["current_price"] = price_eur
+                                result["currency"] = "EUR"
+                        except:
+                            # Fallback conversion
+                            price_eur = price_usd * Decimal("0.92")
+                            result["current_price"] = price_eur
+                            result["currency"] = "EUR"
+
+                    logger.info(f"Fetched crypto price for {ticker}: {result['current_price']} {result.get('currency', 'USD')}")
                     return result
                 else:
                     logger.warning(f"Failed to fetch crypto price for {ticker}")
@@ -59,12 +82,19 @@ class UnifiedPriceFetcher:
 
                     # Convert to target currency if needed
                     if currency.lower() == "eur":
-                        eur_rate = self.yahoo_fetcher.fetch_fx_rate("USD", "EUR")
-                        if eur_rate:
-                            price_eur = result['close'] * eur_rate
+                        import asyncio
+                        try:
+                            eur_rate = asyncio.run(self.yahoo_fetcher.fetch_fx_rate("USD", "EUR"))
+                            if eur_rate:
+                                price_eur = result['close'] * eur_rate
+                                result['close'] = price_eur
+                                result['currency'] = 'EUR'
+                                logger.info(f"Converted to EUR: {price_eur}")
+                        except:
+                            # Fallback conversion
+                            price_eur = result['close'] * Decimal("0.92")
                             result['close'] = price_eur
                             result['currency'] = 'EUR'
-                            logger.info(f"Converted to EUR: {price_eur}")
 
                     return result
                 else:
@@ -98,9 +128,33 @@ class UnifiedPriceFetcher:
         """
         try:
             if asset_type.lower() == "crypto":
-                # Use CoinCap for cryptocurrencies
-                result = self.coincap_service.get_historical_prices(ticker, start_date, end_date, currency)
+                # Use Yahoo Finance for cryptocurrencies with -USD suffix
+                yahoo_symbol = f"{ticker}-USD"
+                result = self.yahoo_fetcher.fetch_historical_prices_sync(yahoo_symbol, start_date=start_date, end_date=end_date)
                 logger.info(f"Fetched {len(result)} crypto price points for {ticker}")
+
+                # Convert to target currency if needed
+                if currency.lower() == "eur" and result:
+                    import asyncio
+                    try:
+                        eur_rate = asyncio.run(self.yahoo_fetcher.fetch_fx_rate("USD", "EUR"))
+                        if eur_rate:
+                            for price_point in result:
+                                price_point['close'] = price_point['close'] * eur_rate
+                                price_point['open'] = price_point['open'] * eur_rate
+                                price_point['high'] = price_point['high'] * eur_rate
+                                price_point['low'] = price_point['low'] * eur_rate
+                                price_point['currency'] = 'EUR'
+                            logger.info(f"Converted {len(result)} crypto price points to EUR")
+                    except:
+                        # Fallback conversion
+                        for price_point in result:
+                            price_point['close'] = price_point['close'] * Decimal("0.92")
+                            price_point['open'] = price_point['open'] * Decimal("0.92")
+                            price_point['high'] = price_point['high'] * Decimal("0.92")
+                            price_point['low'] = price_point['low'] * Decimal("0.92")
+                            price_point['currency'] = 'EUR'
+
                 return result
             else:
                 # Use Yahoo Finance for stocks, ETFs, etc.
@@ -109,15 +163,25 @@ class UnifiedPriceFetcher:
 
                 # Convert to target currency if needed
                 if currency.lower() == "eur" and result:
-                    eur_rate = self.yahoo_fetcher.fetch_fx_rate("USD", "EUR")
-                    if eur_rate:
+                    import asyncio
+                    try:
+                        eur_rate = asyncio.run(self.yahoo_fetcher.fetch_fx_rate("USD", "EUR"))
+                        if eur_rate:
+                            for price_point in result:
+                                price_point['close'] = price_point['close'] * eur_rate
+                                price_point['open'] = price_point['open'] * eur_rate
+                                price_point['high'] = price_point['high'] * eur_rate
+                                price_point['low'] = price_point['low'] * eur_rate
+                                price_point['currency'] = 'EUR'
+                            logger.info(f"Converted {len(result)} price points to EUR")
+                    except:
+                        # Fallback conversion
                         for price_point in result:
-                            price_point['close'] = price_point['close'] * eur_rate
-                            price_point['open'] = price_point['open'] * eur_rate
-                            price_point['high'] = price_point['high'] * eur_rate
-                            price_point['low'] = price_point['low'] * eur_rate
+                            price_point['close'] = price_point['close'] * Decimal("0.92")
+                            price_point['open'] = price_point['open'] * Decimal("0.92")
+                            price_point['high'] = price_point['high'] * Decimal("0.92")
+                            price_point['low'] = price_point['low'] * Decimal("0.92")
                             price_point['currency'] = 'EUR'
-                        logger.info(f"Converted {len(result)} price points to EUR")
 
                 return result
 
@@ -135,9 +199,19 @@ class UnifiedPriceFetcher:
         Returns:
             Detected asset type ('stock', 'crypto', 'etf', 'unknown')
         """
-        # Check if it's a known cryptocurrency
-        coincapec_id = self.coincap_service.map_symbol_to_coincec_id(ticker)
-        if coincapec_id:
+        # Common cryptocurrency symbols (list could be expanded)
+        crypto_symbols = {
+            'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'DOT', 'MATIC', 'SHIB',
+            'AVAX', 'LINK', 'UNI', 'LTC', 'ATOM', 'XLM', 'BCH', 'FIL', 'TRX', 'ETC',
+            'XMR', 'USDT', 'USDC', 'AAVE', 'MKR', 'COMP', 'SUSHI', 'ICP', 'HBAR',
+            'VET', 'THETA', 'ALGO', 'LRC', 'ENJ', 'CRO', 'MANA', 'SAND', 'AXS',
+            'GALA', 'CHZ', 'NEAR', 'EGLD', 'FTT', 'HOT', 'AR', 'STX', 'RUNE',
+            'ZEC', 'KSM', 'KAVA', 'WAVES', 'QTUM', 'XTZ', 'EOS', 'BTG', 'BSV',
+            'NEO', 'MIOTA', 'ZIL', 'BAT', 'GRT', 'OCEAN', 'KNC', 'ZRX', 'BAND',
+            'RLC', 'LPT', 'STORJ', 'COTI'
+        }
+
+        if ticker.upper() in crypto_symbols:
             return "crypto"
 
         # Check for common ETF patterns
@@ -165,13 +239,39 @@ class UnifiedPriceFetcher:
 
     def get_supported_cryptocurrencies(self) -> List[Dict]:
         """
-        Get list of supported cryptocurrencies from CoinCap.
+        Get list of supported cryptocurrencies.
 
         Returns:
             List of cryptocurrency assets
         """
         try:
-            return self.coincap_service.get_supported_symbols()
+            # Return curated list of popular cryptocurrencies supported by Yahoo Finance
+            crypto_symbols = [
+                {"symbol": "BTC", "name": "Bitcoin", "yahoo_symbol": "BTC-USD"},
+                {"symbol": "ETH", "name": "Ethereum", "yahoo_symbol": "ETH-USD"},
+                {"symbol": "BNB", "name": "Binance Coin", "yahoo_symbol": "BNB-USD"},
+                {"symbol": "XRP", "name": "Ripple", "yahoo_symbol": "XRP-USD"},
+                {"symbol": "ADA", "name": "Cardano", "yahoo_symbol": "ADA-USD"},
+                {"symbol": "SOL", "name": "Solana", "yahoo_symbol": "SOL-USD"},
+                {"symbol": "DOGE", "name": "Dogecoin", "yahoo_symbol": "DOGE-USD"},
+                {"symbol": "DOT", "name": "Polkadot", "yahoo_symbol": "DOT-USD"},
+                {"symbol": "MATIC", "name": "Polygon", "yahoo_symbol": "MATIC-USD"},
+                {"symbol": "SHIB", "name": "Shiba Inu", "yahoo_symbol": "SHIB-USD"},
+                {"symbol": "AVAX", "name": "Avalanche", "yahoo_symbol": "AVAX-USD"},
+                {"symbol": "LINK", "name": "Chainlink", "yahoo_symbol": "LINK-USD"},
+                {"symbol": "UNI", "name": "Uniswap", "yahoo_symbol": "UNI-USD"},
+                {"symbol": "LTC", "name": "Litecoin", "yahoo_symbol": "LTC-USD"},
+                {"symbol": "ATOM", "name": "Cosmos", "yahoo_symbol": "ATOM-USD"},
+                {"symbol": "XLM", "name": "Stellar", "yahoo_symbol": "XLM-USD"},
+                {"symbol": "BCH", "name": "Bitcoin Cash", "yahoo_symbol": "BCH-USD"},
+                {"symbol": "FIL", "name": "Filecoin", "yahoo_symbol": "FIL-USD"},
+                {"symbol": "TRX", "name": "TRON", "yahoo_symbol": "TRX-USD"},
+                {"symbol": "ETC", "name": "Ethereum Classic", "yahoo_symbol": "ETC-USD"},
+                {"symbol": "XMR", "name": "Monero", "yahoo_symbol": "XMR-USD"},
+                {"symbol": "USDT", "name": "Tether", "yahoo_symbol": "USDT-USD"},
+                {"symbol": "USDC", "name": "USD Coin", "yahoo_symbol": "USDC-USD"}
+            ]
+            return crypto_symbols
         except Exception as e:
             logger.error(f"Error getting supported cryptocurrencies: {e}")
             return []
@@ -193,13 +293,13 @@ class UnifiedPriceFetcher:
             logger.error(f"Yahoo Finance test failed: {e}")
             results['yahoo_finance'] = False
 
-        # Test CoinCap
+        # Test crypto via Yahoo Finance
         try:
-            coincap_result = self.coincap_service.test_connection()
-            results['coincap'] = coincap_result
+            crypto_result = self.yahoo_fetcher.fetch_realtime_price('BTC-USD')
+            results['yahoo_finance_crypto'] = crypto_result is not None
         except Exception as e:
-            logger.error(f"CoinCap test failed: {e}")
-            results['coincap'] = False
+            logger.error(f"Yahoo Finance crypto test failed: {e}")
+            results['yahoo_finance_crypto'] = False
 
         # Test mixed assets
         try:

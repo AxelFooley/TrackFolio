@@ -15,7 +15,7 @@ from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import PriceHistory, CachedMetrics
 from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
-from app.services.coincap import coincap_service
+from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -316,12 +316,14 @@ def await_calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
         if holding["quantity"] <= 0:
             continue
 
-        # Get current price
-        price_data = coincap_service.get_current_price(symbol, "eur")
+        # Get current price from Yahoo Finance
+        price_fetcher = PriceFetcher()
+        yahoo_symbol = f"{symbol}-USD"
+        price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
-        if price_data and price_data.get("price"):
-            price_eur = price_data["price"]
-            price_usd = price_data.get("price_usd", price_data["price"] / Decimal("0.92"))  # Fallback conversion
+        if price_data and price_data.get("current_price"):
+            price_usd = price_data["current_price"]
+            price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
 
             value_eur = holding["quantity"] * price_eur
             value_usd = holding["quantity"] * price_usd
@@ -434,11 +436,14 @@ def await_calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
         if holding["quantity"] <= 0:
             continue
 
-        # Get current price
-        price_data = coincap_service.get_current_price(symbol, "eur")
+        # Get current price from Yahoo Finance
+        price_fetcher = PriceFetcher()
+        yahoo_symbol = f"{symbol}-USD"
+        price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
-        if price_data and price_data.get("price"):
-            price_eur = price_data["price"]
+        if price_data and price_data.get("current_price"):
+            price_usd = price_data["current_price"]
+            price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
             current_value = holding["quantity"] * price_eur
 
             # Calculate simple return as IRR substitute for now

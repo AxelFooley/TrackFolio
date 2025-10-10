@@ -2,7 +2,7 @@
 Celery application configuration for background tasks.
 
 Scheduled tasks:
-- Every 5 minutes: update_crypto_prices - Fetch latest crypto prices from CoinCap API
+- Every 5 minutes: update_crypto_prices - Fetch latest crypto prices from Yahoo Finance API
 - 23:00 CET: update_daily_prices - Fetch latest prices from APIs
 - 23:15 CET: calculate_all_metrics - Calculate IRR and portfolio metrics
 - 23:15 CET: calculate_crypto_metrics - Calculate crypto portfolio metrics
