@@ -360,45 +360,56 @@ class CryptoCalculationService:
         Returns:
             Dictionary of holdings data by symbol
         """
-        holdings = {}
+        # FIFO lots per symbol: list[(qty, price, ts)]
+        lots: Dict[str, list[Tuple[Decimal, Decimal, datetime]]] = defaultdict(list)
+        meta: Dict[str, Dict] = {}
 
         for tx in transactions:
-            symbol = tx.symbol
-
-            if symbol not in holdings:
-                holdings[symbol] = {
-                    'quantity': Decimal("0"),
-                    'cost_basis': Decimal("0"),
-                    'average_cost': Decimal("0"),
+            s = tx.symbol
+            if s not in meta:
+                meta[s] = {
                     'first_purchase_date': None,
                     'last_transaction_date': None,
-                    'realized_gain_loss': Decimal("0"),
-                    'transactions': []
                 }
 
-            # Handle different transaction types
             if tx.transaction_type in [CryptoTransactionType.BUY, CryptoTransactionType.TRANSFER_IN]:
-                holdings[symbol]['quantity'] += tx.quantity
-                holdings[symbol]['cost_basis'] += tx.total_amount
-                holdings[symbol]['last_transaction_date'] = tx.timestamp.date()
-
-                if not holdings[symbol]['first_purchase_date']:
-                    holdings[symbol]['first_purchase_date'] = tx.timestamp.date()
+                lots[s].append((tx.quantity, tx.price_at_execution, tx.timestamp))
+                meta[s]['last_transaction_date'] = tx.timestamp.date()
+                if not meta[s]['first_purchase_date']:
+                    meta[s]['first_purchase_date'] = tx.timestamp.date()
 
             elif tx.transaction_type in [CryptoTransactionType.SELL, CryptoTransactionType.TRANSFER_OUT]:
-                holdings[symbol]['quantity'] -= tx.quantity
-                holdings[symbol]['last_transaction_date'] = tx.timestamp.date()
+                remaining = tx.quantity
+                q = lots.get(s, [])
+                while remaining > 0 and q:
+                    lot_qty, lot_price, lot_ts = q[0]
+                    if lot_qty <= remaining:
+                        remaining -= lot_qty
+                        q.pop(0)
+                    else:
+                        q[0] = (lot_qty - remaining, lot_price, lot_ts)
+                        remaining = Decimal("0")
+                lots[s] = q
+                meta[s]['last_transaction_date'] = tx.timestamp.date()
 
-                # Remove holding if quantity reaches zero
-                if holdings[symbol]['quantity'] <= 0:
-                    del holdings[symbol]
-                    continue
-
-            # Recalculate average cost
-            if holdings[symbol]['quantity'] > 0:
-                holdings[symbol]['average_cost'] = (
-                    holdings[symbol]['cost_basis'] / holdings[symbol]['quantity']
-                )
+        # Build holdings from remaining lots
+        holdings: Dict[str, Dict] = {}
+        for s, q in lots.items():
+            if not q:
+                continue
+            total_qty = sum(lq for lq, _, _ in q)
+            if total_qty <= 0:
+                continue
+            cost_basis = sum(lq * lp for lq, lp, _ in q)
+            holdings[s] = {
+                'quantity': total_qty,
+                'cost_basis': cost_basis,
+                'average_cost': cost_basis / total_qty,
+                'first_purchase_date': meta[s]['first_purchase_date'],
+                'last_transaction_date': meta[s]['last_transaction_date'],
+                'realized_gain_loss': Decimal("0"),
+                'transactions': []
+            }
 
         return holdings
 
