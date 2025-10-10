@@ -17,6 +17,7 @@ from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import PriceHistory, CryptoTransaction, CryptoTransactionType
 from app.services.price_fetcher import PriceFetcher
+from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,13 @@ def update_crypto_prices(self):
 
                 # Convert to EUR if needed (Yahoo returns USD)
                 price_usd = price_data["current_price"]
-                price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
+                # Convert to EUR using dynamic exchange rate
+                try:
+                    usd_to_eur_rate = get_exchange_rate("USD", "EUR")
+                    price_eur = price_usd * usd_to_eur_rate
+                except Exception as e:
+                    logger.warning(f"Failed to fetch USD→EUR rate for {symbol}: {e}. Using fallback rate.")
+                    price_eur = price_usd * Decimal("0.92")  # Fallback conversion rate
 
                 # Create price record
                 price_record = PriceHistory(
