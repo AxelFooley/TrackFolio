@@ -106,9 +106,11 @@ class BlockchainFetcherService:
         try:
             cached_data = self._redis_client.get(key)
             if cached_data:
-                return pickle.loads(cached_data)
-        except Exception as e:
-            logger.warning(f"Error getting data from cache: {e}")
+                return json.loads(cached_data)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Error decoding cached data for key {key}: {e}")
+        except redis.RedisError as e:
+            logger.warning(f"Redis error getting data from cache: {e}")
         return None
 
     def _cache_set(self, key: str, data: Any, ttl: int) -> None:
@@ -117,10 +119,29 @@ class BlockchainFetcherService:
             return
 
         try:
-            serialized_data = pickle.dumps(data)
+            # Convert data to JSON-serializable format
+            serializable_data = self._make_json_serializable(data)
+            serialized_data = json.dumps(serializable_data)
             self._redis_client.setex(key, ttl, serialized_data)
-        except Exception as e:
-            logger.warning(f"Error setting data in cache: {e}")
+        except (TypeError, ValueError) as e:
+            logger.warning(f"Error serializing data for cache: {e}")
+        except redis.RedisError as e:
+            logger.warning(f"Redis error setting data in cache: {e}")
+
+    def _make_json_serializable(self, obj: Any) -> Any:
+        """Convert objects to JSON-serializable format."""
+        if isinstance(obj, dict):
+            return {k: self._make_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_json_serializable(item) for item in obj]
+        elif isinstance(obj, Decimal):
+            return str(obj)
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, (str, int, float, bool, type(None))):
+            return obj
+        else:
+            return str(obj)
 
     def _rate_limit(self, api_name: str) -> None:
         """Implement rate limiting for specific API."""
