@@ -103,17 +103,17 @@ export function CryptoTransactionTable({
     e.preventDefault();
     if (!editingTransaction) return;
 
-    try {
+    try{
       await updateTransactionMutation.mutateAsync({
       portfolioId,
       transactionId: editingTransaction.id,
       data: {
         transaction_type: editingTransaction.transaction_type,
         quantity: editingTransaction.quantity,
-        price_at_execution: editingTransaction.price,
-        fee: editingTransaction.fees,
+        price: editingTransaction.price,
+        fees: editingTransaction.fees,
         currency: editingTransaction.currency,
-        timestamp: editingTransaction.date,
+        date: editingTransaction.date,
         exchange: editingTransaction.exchange,
         notes: editingTransaction.notes,
       },
@@ -182,17 +182,12 @@ export function CryptoTransactionTable({
     );
   }
 
-  let filteredTransactions = transactionsData.items.filter((transaction) => {
+  const filteredTransactions = transactionsData.items.filter((transaction) => {
     const matchesSearch = searchTerm === '' ||
       transaction.symbol.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesSymbol = symbolFilter === '' || transaction.symbol === symbolFilter;
     return matchesSearch && matchesSymbol;
   });
-
-  // Apply limit if specified
-  if (limit) {
-    filteredTransactions = filteredTransactions.slice(0, limit);
-  }
 
   const sortedTransactions = [...filteredTransactions].sort((a, b) => {
     const aValue = a[sortField];
@@ -210,6 +205,9 @@ export function CryptoTransactionTable({
 
     return 0;
   });
+
+  // Apply limit after sorting to get top N results
+  const displayTransactions = limit ? sortedTransactions.slice(0, limit) : sortedTransactions;
 
   return (
     <div className="space-y-4">
@@ -271,21 +269,21 @@ export function CryptoTransactionTable({
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
-                <TableHead
-                className="cursor-pointer text-right"
-                onClick={() => handleSort('total')}
-                >
-                <div className="flex items-center justify-end gap-2">
-                  Total
-                  <ArrowUpDown className="h-4 w-4" />
-                </div>
-                </TableHead>
+                <TableHead className="text-right">
+                Total
+              </TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedTransactions.map((transaction) => {
-              const typeConfig = transactionTypeConfig[transaction.transaction_type];
+            {displayTransactions.map((transaction) => {
+              const fallback = {
+                label: transaction.transaction_type,
+                icon: ArrowDownUp,
+                color: 'text-gray-600',
+                bgColor: 'bg-gray-50'
+              };
+              const typeConfig = transactionTypeConfig[transaction.transaction_type] ?? fallback;
               const TypeIcon = typeConfig.icon;
               const total = transaction.quantity * transaction.price;
 
@@ -382,7 +380,7 @@ export function CryptoTransactionTable({
                   <Label htmlFor="edit-type">Transaction Type</Label>
                   <Select
                     value={editingTransaction.transaction_type}
-                    onValueChange={(value: any) =>
+                    onValueChange={(value: 'BUY' | 'SELL' | 'TRANSFER_IN' | 'TRANSFER_OUT') =>
                       setEditingTransaction({ ...editingTransaction, transaction_type: value })
                     }
                   >

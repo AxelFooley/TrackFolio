@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { TrendingUp, Bitcoin } from 'lucide-react';
+import { TrendingUp } from 'lucide-react';
 
 const navLinks = [
   { href: '/', label: 'Dashboard' },

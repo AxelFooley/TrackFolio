@@ -81,7 +81,7 @@ export function AddTransactionModal({
       return;
     }
 
-    if (!formData.fees || formData.fees < 0) {
+    if (formData.fees < 0) {
       toast({
         title: 'Validation error',
         description: 'Fees must be 0 or greater',

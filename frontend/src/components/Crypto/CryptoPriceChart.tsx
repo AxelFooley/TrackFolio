@@ -19,9 +19,10 @@ interface CryptoPriceChartProps {
   portfolioId: number;
   timeRange: string;
   height?: number;
+  currency?: string;
 }
 
-export function CryptoPriceChart({ portfolioId, timeRange, height = 400 }: CryptoPriceChartProps) {
+export function CryptoPriceChart({ portfolioId, timeRange, height = 400, currency = 'USD' }: CryptoPriceChartProps) {
   const { data: performanceData, isLoading } = useCryptoPerformanceData(portfolioId, timeRange);
 
   const chartData = useMemo(() => {
@@ -52,7 +53,15 @@ export function CryptoPriceChart({ portfolioId, timeRange, height = 400 }: Crypt
 
   // Format currency for tooltip
   const formatTooltipValue = (value: number) => {
-    return formatCurrency(value, 'USD');
+    return formatCurrency(value, currency);
+  };
+
+  // Format Y-axis values
+  const formatYAxisValue = (value: number) => {
+    const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency;
+    if (value >= 1000000) return `${symbol}${(value / 1000000).toFixed(1)}M`;
+    if (value >= 1000) return `${symbol}${(value / 1000).toFixed(1)}K`;
+    return `${symbol}${value.toFixed(0)}`;
   };
 
   // X-axis uses preformatted displayDate strings directly
@@ -72,15 +81,10 @@ export function CryptoPriceChart({ portfolioId, timeRange, height = 400 }: Crypt
           <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
           <XAxis
             dataKey="displayDate"
-            tickFormatter={formatXAxisTick}
             className="text-xs"
           />
           <YAxis
-            tickFormatter={(value) => {
-              if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
-              if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`;
-              return `$${value.toFixed(0)}`;
-            }}
+            tickFormatter={formatYAxisValue}
             className="text-xs"
           />
           <Tooltip

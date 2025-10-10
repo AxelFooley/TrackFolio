@@ -137,6 +137,9 @@ export function PerformanceChart() {
   // Determine if we have a single data point (special case for rendering)
   const isSinglePoint = chartData.length === 1;
 
+  // Get currency from first data point, default to EUR
+  const portfolioCurrency = performanceData?.[0]?.currency ?? 'EUR';
+
   return (
     <Card>
       <CardHeader>
@@ -163,7 +166,7 @@ export function PerformanceChart() {
             <div className="text-center">
               <p className="text-gray-600 font-medium mb-2">Single Data Point</p>
               <p className="text-sm text-gray-500">
-                Portfolio Value: {formatCurrency(chartData[0].portfolio, 'EUR')}
+                Portfolio Value: {formatCurrency(chartData[0].portfolio, portfolioCurrency)}
               </p>
               <p className="text-xs text-gray-400 mt-2">
                 More data points will appear as your portfolio is tracked over time.
@@ -182,7 +185,7 @@ export function PerformanceChart() {
               <YAxis
                 yAxisId="left"
                 tick={{ fontSize: 12 }}
-                tickFormatter={(value) => formatCurrency(value, 'EUR')}
+                tickFormatter={(value) => formatCurrency(value, portfolioCurrency)}
                 width={80}
               />
               {hasBenchmarkData && (
@@ -190,12 +193,12 @@ export function PerformanceChart() {
                   yAxisId="right"
                   orientation="right"
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => formatCurrency(value, 'EUR')}
+                  tickFormatter={(value) => formatCurrency(value, portfolioCurrency)}
                   width={80}
                 />
               )}
               <Tooltip
-                formatter={(value: number) => formatCurrency(value, 'EUR')}
+                formatter={(value: number) => formatCurrency(value, portfolioCurrency)}
                 labelFormatter={(label) => formatDate(label)}
                 contentStyle={{
                   backgroundColor: 'white',
