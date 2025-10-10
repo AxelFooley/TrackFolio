@@ -178,7 +178,6 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
             </TableRow>
           </TableHeader>
           <TableBody>
-          <TableBody>
             {sortedHoldings.map((holding) => {
               const isPositive = holding.unrealized_gain >= 0;
               const rawPct = holding.return_percentage;

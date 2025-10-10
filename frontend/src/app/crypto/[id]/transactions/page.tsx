@@ -63,7 +63,7 @@ export default function CryptoTransactionsPage() {
       return;
     }
 
-    if (newTransaction.price <= 0) {
+    if (newTransaction.price_at_execution <= 0) {
       toast({
         title: 'Validation Error',
         description: 'Price must be greater than 0',
@@ -75,7 +75,15 @@ export default function CryptoTransactionsPage() {
     try {
       await createTransactionMutation.mutateAsync({
         portfolioId,
-        data: newTransaction,
+        data: {
+          symbol: newTransaction.symbol,
+          transaction_type: newTransaction.transaction_type,
+          quantity: newTransaction.quantity,
+          price: newTransaction.price_at_execution,
+          fees: newTransaction.fee,
+          currency: newTransaction.currency,
+          date: newTransaction.timestamp,
+        },
       });
 
       toast({
@@ -88,10 +96,10 @@ export default function CryptoTransactionsPage() {
         symbol: '',
         transaction_type: 'BUY',
         quantity: 0,
-        price: 0,
-        fees: 0,
+        price_at_execution: 0,
+        fee: 0,
         currency: portfolio?.base_currency || 'USD',
-        date: new Date().toISOString().split('T')[0],
+        timestamp: new Date().toISOString().split('T')[0],
       });
     } catch (error: any) {
       toast({
@@ -204,8 +212,8 @@ export default function CryptoTransactionsPage() {
                         id="price"
                         type="number"
                         step="any"
-                        value={newTransaction.price}
-                        onChange={(e) => setNewTransaction({ ...newTransaction, price: parseFloat(e.target.value) || 0 })}
+                        value={newTransaction.price_at_execution}
+                        onChange={(e) => setNewTransaction({ ...newTransaction, price_at_execution: parseFloat(e.target.value) || 0 })}
                         placeholder="0.00"
                         required
                       />
@@ -216,8 +224,8 @@ export default function CryptoTransactionsPage() {
                         id="fees"
                         type="number"
                         step="any"
-                        value={newTransaction.fees}
-                        onChange={(e) => setNewTransaction({ ...newTransaction, fees: parseFloat(e.target.value) || 0 })}
+                        value={newTransaction.fee}
+                        onChange={(e) => setNewTransaction({ ...newTransaction, fee: parseFloat(e.target.value) || 0 })}
                         placeholder="0.00"
                       />
                     </div>
@@ -243,8 +251,8 @@ export default function CryptoTransactionsPage() {
                       <Input
                         id="date"
                         type="date"
-                        value={newTransaction.date}
-                        onChange={(e) => setNewTransaction({ ...newTransaction, date: e.target.value })}
+                        value={newTransaction.timestamp}
+                        onChange={(e) => setNewTransaction({ ...newTransaction, timestamp: e.target.value })}
                         required
                       />
                     </div>
