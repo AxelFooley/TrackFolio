@@ -8,6 +8,12 @@ from app.models.benchmark import Benchmark
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.cached_metrics import CachedMetrics
 from app.models.stock_split import StockSplit
+from app.models.crypto import (
+    CryptoPortfolio,
+    CryptoTransaction,
+    CryptoTransactionType,
+    CryptoCurrency,
+)
 
 __all__ = [
     "Transaction",
@@ -19,4 +25,8 @@ __all__ = [
     "PortfolioSnapshot",
     "CachedMetrics",
     "StockSplit",
+    "CryptoPortfolio",
+    "CryptoTransaction",
+    "CryptoTransactionType",
+    "CryptoCurrency",
 ]

@@ -70,32 +70,34 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
             </TableHeader>
             <TableBody>
               {transactions.map((transaction) => {
-                const amount = transaction.price_per_share * transaction.quantity;
+                const price = Number(transaction.price ?? 0);
+                const qty = Number(transaction.quantity ?? 0);
+                const amount = price * qty;
                 return (
                   <TableRow key={transaction.id}>
-                    <TableCell>{formatDate(transaction.operation_date)}</TableCell>
+                    <TableCell>{formatDate(transaction.date)}</TableCell>
                     <TableCell>
                       <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          transaction.transaction_type === 'buy'
+                          transaction.transaction_type?.toUpperCase() === 'BUY'
                             ? 'bg-success/10 text-success'
                             : 'bg-danger/10 text-danger'
                         }`}
                       >
-                        {transaction.transaction_type?.toUpperCase() || 'N/A'}
+                        {transaction.transaction_type ?? 'N/A'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {transaction.quantity || '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(transaction.price_per_share, transaction.currency)}
+                      {formatCurrency(price, transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {formatCurrency(amount, transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(transaction.fees, transaction.currency)}
+                      {formatCurrency(Number(transaction.fees ?? 0), transaction.currency)}
                     </TableCell>
                     <TableCell>{transaction.currency}</TableCell>
                   </TableRow>

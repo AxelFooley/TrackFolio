@@ -25,6 +25,8 @@ from app.models import (
     Benchmark,
     PortfolioSnapshot,
     CachedMetrics,
+    CryptoPortfolio,
+    CryptoTransaction,
 )
 
 # this is the Alembic Config object, which provides

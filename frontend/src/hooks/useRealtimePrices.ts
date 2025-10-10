@@ -12,7 +12,7 @@ interface UseRealtimePricesReturn {
   lastUpdate: Date | null;
 }
 
-export function useRealtimePrices(): UseRealtimePricesReturn {
+export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesReturn {
   const [realtimePrices, setRealtimePrices] = useState<Map<string, RealtimePrice>>(new Map());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
@@ -22,9 +22,14 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isVisibleRef = useRef<boolean>(true);
 
+  // Memoize symbols to prevent unnecessary re-fetches when array reference changes
+  const symbolsKey = useMemo(() => symbols.sort().join(','), [symbols]);
+
   const fetchPrices = useCallback(async () => {
+    if (symbols.length === 0) return;
+
     try {
-      const response = await getRealtimePrices();
+      const response = await getRealtimePrices(symbols);
 
       // Debounce the state update to prevent UI flickering
       if (debounceTimerRef.current) {
@@ -33,9 +38,15 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
 
       debounceTimerRef.current = setTimeout(() => {
         const priceMap = new Map<string, RealtimePrice>();
-response.prices.forEach((price) => {
-          priceMap.set(price.ticker, price);
-        });
+
+        // Extract prices from response structure
+        const prices = response?.prices || [];
+
+        if (Array.isArray(prices)) {
+          prices.forEach((price) => {
+            priceMap.set(price.symbol, price);
+          });
+        }
 
         setRealtimePrices(priceMap);
         setLastUpdate(new Date());
@@ -47,7 +58,7 @@ response.prices.forEach((price) => {
       setError(err instanceof Error ? err : new Error('Failed to fetch realtime prices'));
       setIsLoading(false);
     }
-  }, []);
+  }, [symbolsKey, symbols.length]);
 
   const startPolling = useCallback(() => {
     // Clear existing interval
@@ -114,14 +125,19 @@ response.prices.forEach((price) => {
     };
   }, [fetchPrices]);
 
-  // Start polling on mount
+  // Start polling on mount or when symbolsKey changes
   useEffect(() => {
+    if (symbols.length === 0) {
+      setIsLoading(false);
+      return;
+    }
+
     startPolling();
 
     return () => {
       stopPolling();
     };
-  }, [startPolling, stopPolling]);
+  }, [symbolsKey, startPolling, stopPolling, symbols.length]);
 
   return {
     realtimePrices,

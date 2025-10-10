@@ -39,9 +39,9 @@ export default function AssetDetailPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="space-y-8">
-        <AssetHeader position={assetData.position} />
-        <PositionSummary position={assetData.position} />
-        <PriceChart ticker={ticker} position={assetData.position} />
+        <AssetHeader position={assetData} />
+        <PositionSummary position={assetData} />
+        <PriceChart ticker={ticker} position={assetData} />
         <TransactionHistory ticker={ticker} />
       </div>
     </div>
