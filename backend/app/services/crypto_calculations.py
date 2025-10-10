@@ -147,12 +147,12 @@ class CryptoCalculationService:
                     if realized_cost > 0:
                         realized_gain_loss += realized_proceeds - realized_cost
 
-            # Calculate total profit/loss
-            total_profit_loss = holdings_value - cost_basis
+            # Calculate total profit/loss against current holdings cost basis
+            current_cost_basis = sum(h['cost_basis'] for h in holdings.values())
+            total_profit_loss = holdings_value - current_cost_basis
             total_profit_loss_pct = float(
-                (total_profit_loss / cost_basis) * 100
-            ) if cost_basis > 0 else 0
-
+                (total_profit_loss / current_cost_basis) * 100
+            ) if current_cost_basis > 0 else 0
             # Calculate IRR
             irr = await self._calculate_irr(transactions, holdings_value)
 
