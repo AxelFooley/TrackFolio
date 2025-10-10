@@ -102,7 +102,6 @@ def create_daily_crypto_snapshots(self):
                     existing.base_currency = snapshot_data["base_currency"]
                     existing.holdings_breakdown = snapshot_data["holdings_breakdown"]
                     existing.total_return_pct = snapshot_data["total_return_pct"]
-                    existing.created_at = datetime.utcnow()
 
                     db.commit()
                     logger.info(f"Updated crypto snapshot for portfolio {portfolio.name} on {snapshot_date}")
