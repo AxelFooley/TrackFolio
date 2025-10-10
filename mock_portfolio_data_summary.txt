@@ -63,7 +63,8 @@ Status: ✅ SUCCESSFULLY TESTED
 ## Test Results:
 - ✅ CSV format validation passed
 - ✅ Import functionality working correctly
-- ✅ 10 transactions imported successfully
+- ✅ Sample smoke import successful (10 transactions)
+- ✅ Full dataset import (400+ transactions) validated separately
 - ✅ Fee matching working (each buy transaction has corresponding fee)
 - ✅ Position calculation working
 - ✅ Current price fetching working (some positions have current prices)
