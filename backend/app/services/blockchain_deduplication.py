@@ -7,7 +7,7 @@ for transaction matching and deduplication.
 """
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 import logging
 import redis
 import pickle
