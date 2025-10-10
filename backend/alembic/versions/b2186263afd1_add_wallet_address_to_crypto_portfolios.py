@@ -1,7 +1,7 @@
 """Add wallet_address to crypto portfolios
 
 Revision ID: b2186263afd1
-Revises: bba8de3622d9
+Revises: b4c986c7b760
 Create Date: 2025-10-09 20:30:00.000000+00:00
 
 """

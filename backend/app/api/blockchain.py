@@ -9,7 +9,7 @@ This module provides REST API endpoints for:
 """
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, validator
@@ -17,7 +17,7 @@ import logging
 
 from app.database import SyncSessionLocal
 from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
-from app.services.blockchain_fetcher import blockchain_fetcher
+from app.services.blockchain_fetcher import blockchain_fetcher, BlockchainFetchError
 from app.services.blockchain_deduplication import blockchain_deduplication
 from app.tasks.blockchain_sync import sync_wallet_manually, test_blockchain_connection
 
@@ -117,7 +117,6 @@ def get_db():
 @router.post("/sync/wallet", response_model=WalletSyncResponse)
 async def sync_wallet(
     request: WalletSyncRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
@@ -125,12 +124,11 @@ async def sync_wallet(
 
     This endpoint:
     1. Validates the portfolio and wallet address
-    2. Starts a background task to fetch transactions
+    2. Starts a Celery background task to fetch transactions
     3. Returns immediate response with task status
 
     Args:
         request: Wallet sync request parameters
-        background_tasks: FastAPI background tasks
         db: Database session
 
     Returns:
@@ -157,15 +155,18 @@ async def sync_wallet(
                        f"request has {request.wallet_address}"
             )
 
-        # Start background sync task
+        # Start background sync task with configurable parameters
         task = sync_wallet_manually.delay(
             wallet_address=request.wallet_address,
-            portfolio_id=request.portfolio_id
+            portfolio_id=request.portfolio_id,
+            max_transactions=request.max_transactions,
+            days_back=request.days_back
         )
 
         logger.info(
             f"Started manual sync task {task.id} for wallet {request.wallet_address} "
-            f"(portfolio {request.portfolio_id})"
+            f"(portfolio {request.portfolio_id}), max_transactions={request.max_transactions}, "
+            f"days_back={request.days_back}"
         )
 
         return WalletSyncResponse(
@@ -294,11 +295,13 @@ async def get_wallet_transactions(
             max_transactions=max_transactions,
             days_back=days_back
         )
-
-        if result['status'] != 'success':
+        
+        # Check for success: either status is 'success' or transactions are present
+        if result.get('status') != 'success' and not result.get('transactions'):
+            error_message = result.get('message', 'Unknown error') if isinstance(result, dict) else 'No transactions returned'
             raise HTTPException(
                 status_code=400,
-                detail=f"Failed to fetch transactions: {result.get('message', 'Unknown error')}"
+                detail=f"Failed to fetch transactions: {error_message}"
             )
 
         # Filter out existing transactions
@@ -306,7 +309,7 @@ async def get_wallet_transactions(
         unique_transactions = []
         duplicate_count = 0
 
-        for tx in result['transactions']:
+        for tx in result.get('transactions', []):
             if tx.get('transaction_hash') and tx['transaction_hash'] in existing_hashes:
                 duplicate_count += 1
             else:
@@ -324,6 +327,12 @@ async def get_wallet_transactions(
 
     except HTTPException:
         raise
+    except BlockchainFetchError as e:
+        logger.error(f"Blockchain fetch error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"All blockchain APIs unavailable: {str(e)}"
+        )
     except Exception as e:
         logger.error(f"Error fetching wallet transactions: {e}")
         raise HTTPException(

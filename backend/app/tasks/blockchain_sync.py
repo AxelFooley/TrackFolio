@@ -503,7 +503,13 @@ def get_historical_price_at_time(
     autoretry_for=(Exception,),
     retry_kwargs={'max_retries': 2, 'countdown': 60}
 )
-def sync_wallet_manually(self, wallet_address: str, portfolio_id: int):
+def sync_wallet_manually(
+    self, 
+    wallet_address: str, 
+    portfolio_id: int,
+    max_transactions: Optional[int] = 200,
+    days_back: Optional[int] = 30
+):
     """
     Manually trigger sync for a specific Bitcoin wallet.
 
@@ -512,11 +518,16 @@ def sync_wallet_manually(self, wallet_address: str, portfolio_id: int):
     Args:
         wallet_address: Bitcoin wallet address to sync
         portfolio_id: Portfolio ID to associate transactions with
+        max_transactions: Maximum number of transactions to fetch (default: 200)
+        days_back: Number of days to look back for transactions (default: 30)
 
     Returns:
         dict: Sync result for the wallet
     """
-    logger.info(f"Manual sync triggered for Bitcoin wallet {wallet_address} (portfolio {portfolio_id})")
+    logger.info(
+        f"Manual sync triggered for Bitcoin wallet {wallet_address} (portfolio {portfolio_id}), "
+        f"max_transactions={max_transactions}, days_back={days_back}"
+    )
 
     db = SyncSessionLocal()
 
@@ -542,13 +553,13 @@ def sync_wallet_manually(self, wallet_address: str, portfolio_id: int):
                 "transactions_failed": 0
             }
 
-        # Sync the wallet with larger limits for manual sync
+        # Sync the wallet with configurable limits for manual sync
         result = sync_single_wallet(
             wallet_address=wallet_address,
             portfolio_id=portfolio_id,
             db_session=db,
-            max_transactions=200,  # Higher limit for manual sync
-            days_back=30  # Look back further for manual sync
+            max_transactions=max_transactions,
+            days_back=days_back
         )
 
         logger.info(f"Manual sync completed for wallet {wallet_address}: {result}")
