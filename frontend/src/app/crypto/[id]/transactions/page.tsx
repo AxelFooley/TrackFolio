@@ -79,10 +79,10 @@ export default function CryptoTransactionsPage() {
           symbol: newTransaction.symbol,
           transaction_type: newTransaction.transaction_type,
           quantity: newTransaction.quantity,
-          price: newTransaction.price_at_execution,
-          fees: newTransaction.fee,
+          price_at_execution: newTransaction.price_at_execution,
+          fee: newTransaction.fee,
           currency: newTransaction.currency,
-          date: newTransaction.timestamp,
+          timestamp: newTransaction.timestamp,
         },
       });
 

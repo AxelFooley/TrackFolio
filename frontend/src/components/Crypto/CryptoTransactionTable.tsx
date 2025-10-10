@@ -77,10 +77,10 @@ export function CryptoTransactionTable({
   const [editingTransaction, setEditingTransaction] = useState<CryptoTransaction | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [sortField, setSortField] = useState<keyof CryptoTransaction>('date');
+  const [sortField, setSortField] = useState<keyof CryptoTransaction | 'total'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
-  const handleSort = (field: keyof CryptoTransaction) => {
+  const handleSort = (field: keyof CryptoTransaction | 'total') => {
     if (sortField === field) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
     } else {
@@ -110,10 +110,10 @@ export function CryptoTransactionTable({
       data: {
         transaction_type: editingTransaction.transaction_type,
         quantity: editingTransaction.quantity,
-        price: editingTransaction.price,
-        fees: editingTransaction.fees,
+        price_at_execution: editingTransaction.price,
+        fee: editingTransaction.fees,
         currency: editingTransaction.currency,
-        date: editingTransaction.date,
+        timestamp: editingTransaction.date,
         exchange: editingTransaction.exchange,
         notes: editingTransaction.notes,
       },
@@ -190,8 +190,12 @@ export function CryptoTransactionTable({
   });
 
   const sortedTransactions = [...filteredTransactions].sort((a, b) => {
-    const aValue = a[sortField];
-    const bValue = b[sortField];
+    const aValue = sortField === 'total'
+      ? Number(a.quantity) * Number(a.price)
+      : a[sortField as keyof CryptoTransaction];
+    const bValue = sortField === 'total'
+      ? Number(b.quantity) * Number(b.price)
+      : b[sortField as keyof CryptoTransaction];
 
     if (typeof aValue === 'number' && typeof bValue === 'number') {
       return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
@@ -269,8 +273,14 @@ export function CryptoTransactionTable({
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
-                <TableHead className="text-right">
-                Total
+              <TableHead
+                className="cursor-pointer text-right"
+                onClick={() => handleSort('total')}
+              >
+                <div className="flex items-center justify-end gap-2">
+                  Total
+                  <ArrowUpDown className="h-4 w-4" />
+                </div>
               </TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -285,7 +295,7 @@ export function CryptoTransactionTable({
               };
               const typeConfig = transactionTypeConfig[transaction.transaction_type] ?? fallback;
               const TypeIcon = typeConfig.icon;
-              const total = transaction.quantity * transaction.price;
+              const total = Number(transaction.quantity) * Number(transaction.price);
 
               return (
                 <TableRow key={transaction.id}>
