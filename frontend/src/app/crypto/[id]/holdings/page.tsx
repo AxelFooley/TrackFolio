@@ -364,12 +364,16 @@ export default function CryptoHoldingsPage() {
                             </div>
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
-                            <Badge
-                              variant={holding.return_percentage >= 0 ? 'default' : 'destructive'}
-                              className="text-xs"
-                            >
-                              {formatPercentage(holding.return_percentage)}
-                            </Badge>
+                            {holding.return_percentage === null || holding.return_percentage === undefined ? (
+                              <Badge variant="outline" className="text-xs">—</Badge>
+                            ) : (
+                              <Badge
+                                variant={holding.return_percentage >= 0 ? 'default' : 'destructive'}
+                                className="text-xs"
+                              >
+                                {formatPercentage(holding.return_percentage * 100)}
+                              </Badge>
+                            )}
                           </td>
                           <td className="py-4 px-4 text-right">
                             <Button

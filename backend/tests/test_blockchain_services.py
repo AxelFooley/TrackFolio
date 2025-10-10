@@ -12,8 +12,10 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
 from decimal import Decimal
+import time
 import redis
 import requests
+
 
 from app.services.blockchain_fetcher import BlockchainFetcherService
 from app.services.blockchain_deduplication import BlockchainDeduplicationService
@@ -39,13 +41,13 @@ class TestBlockchainFetcherService:
         return {
             'txid': 'test_tx_hash_12345',
             'status': {
-                'block_time': 1640995200  # 2022-01-01 00:00:00 UTC
+            'block_time': 1640995200  # 2022-01-01 00:00:00 UTC
             },
             'vout': [
-                {
-                    'value': 0.001,  # 0.001 BTC
-                    'scriptpubkey': 'test_script'
-                }
+            {
+                'value': 100000,  # 0.001 BTC in satoshis
+                'scriptpubkey': 'test_script'
+            }
             ]
         }
 
@@ -55,7 +57,7 @@ class TestBlockchainFetcherService:
         return {
             'hash': 'test_tx_hash_67890',
             'time': 1640995200,  # 2022-01-01 00:00:00 UTC
-            'balance': 100000000  # 1 BTC in satoshis
+            'result': 100000000  # 1 BTC net change in satoshis
         }
 
     def test_validate_bitcoin_address_valid(self, blockchain_fetcher):

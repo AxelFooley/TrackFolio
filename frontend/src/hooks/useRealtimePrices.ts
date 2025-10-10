@@ -22,7 +22,12 @@ export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesRetu
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isVisibleRef = useRef<boolean>(true);
 
+  // Memoize symbols to prevent unnecessary re-fetches when array reference changes
+  const symbolsKey = useMemo(() => symbols.sort().join(','), [symbols]);
+
   const fetchPrices = useCallback(async () => {
+    if (symbols.length === 0) return;
+
     try {
       const response = await getRealtimePrices(symbols);
 
@@ -53,7 +58,7 @@ export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesRetu
       setError(err instanceof Error ? err : new Error('Failed to fetch realtime prices'));
       setIsLoading(false);
     }
-  }, [symbols]);
+  }, [symbolsKey, symbols.length]);
 
   const startPolling = useCallback(() => {
     // Clear existing interval
@@ -120,14 +125,19 @@ export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesRetu
     };
   }, [fetchPrices]);
 
-  // Start polling on mount
+  // Start polling on mount or when symbolsKey changes
   useEffect(() => {
+    if (symbols.length === 0) {
+      setIsLoading(false);
+      return;
+    }
+
     startPolling();
 
     return () => {
       stopPolling();
     };
-  }, [startPolling, stopPolling]);
+  }, [symbolsKey, startPolling, stopPolling, symbols.length]);
 
   return {
     realtimePrices,

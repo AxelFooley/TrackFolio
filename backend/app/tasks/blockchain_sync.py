@@ -403,11 +403,13 @@ def sync_single_wallet(
         }
 
 
+from typing import Optional
+
 def get_historical_price_at_time(
     symbol: str,
     timestamp: datetime,
     base_currency: str = 'EUR'
-) -> Decimal:
+) -> Optional[Decimal]:
     """
     Get historical price for a cryptocurrency at a specific time using Yahoo Finance.
 

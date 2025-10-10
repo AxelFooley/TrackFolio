@@ -46,12 +46,12 @@ export function HoldingsTable() {
           : 0;
 
         // Calculate change values if not provided
+        const hasPrevClose = typeof realtimePrice.previous_close === 'number';
         const changeAmount = realtimePrice.change_amount ??
-          (realtimePrice.current_price - realtimePrice.previous_close);
+          (hasPrevClose ? (realtimePrice.current_price - realtimePrice.previous_close) : 0);
         const changePercent = realtimePrice.change_percent ??
           (realtimePrice.previous_close > 0 ?
             ((realtimePrice.current_price - realtimePrice.previous_close) / realtimePrice.previous_close) * 100 : 0);
-
         return {
           ...holding,
           current_price: realtimePrice.current_price,

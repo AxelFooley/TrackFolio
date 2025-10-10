@@ -132,7 +132,7 @@ export function PerformanceChart() {
     ...(point.benchmark != null && { benchmark: point.benchmark }),
   }));
 
-  const hasBenchmarkData = chartData.some(point => point.benchmark !== undefined);
+  const hasBenchmarkData = chartData.some(point => point.benchmark != null);
 
   // Determine if we have a single data point (special case for rendering)
   const isSinglePoint = chartData.length === 1;

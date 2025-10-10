@@ -40,7 +40,7 @@ RUN npm cache clean --force && \
 # Copy built application from builder stage
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-
+COPY --from=builder /app/public ./public
 # Set correct permissions
 RUN chown -R nextjs:nodejs /app
 

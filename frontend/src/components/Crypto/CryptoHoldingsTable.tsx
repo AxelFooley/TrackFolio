@@ -178,63 +178,68 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedHoldings.map((holding) => {
-              const isPositive = holding.unrealized_gain >= 0;
-              const returnPercentage = holding.return_percentage * 100;
+{sortedHoldings.map((holding) => {
+  const isPositive = holding.unrealized_gain >= 0;
+  const rawPct = holding.return_percentage;
+  const hasPct = rawPct !== null && rawPct !== undefined;
+  const returnPercentage = hasPct ? rawPct * 100 : null;
 
-              return (
-                <TableRow
-                  key={holding.symbol}
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => router.push(`/crypto/${portfolioId}/holdings/${holding.symbol}`)}
-                >
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <Bitcoin className="h-4 w-4 text-orange-500" />
-                      {holding.symbol}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-gray-600">
-                    {holding.asset_name}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {formatCryptoQuantity(holding.quantity)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.average_cost, holding.currency)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.current_price, holding.currency)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.current_value, holding.currency)}
-                  </TableCell>
-                  <TableCell
-                    className={`text-right font-mono ${
-                      isPositive ? 'text-success' : 'text-danger'
-                    }`}
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      {isPositive ? (
-                        <TrendingUp className="h-4 w-4" />
-                      ) : (
-                        <TrendingDown className="h-4 w-4" />
-                      )}
-                      {formatCurrency(holding.unrealized_gain, holding.currency)}
-                    </div>
-                  </TableCell>
-                  <TableCell
-                    className={`text-right font-mono ${
-                      returnPercentage >= 0 ? 'text-success' : 'text-danger'
-                    }`}
-                  >
-                    <Badge
-                      variant={returnPercentage >= 0 ? 'default' : 'destructive'}
-                      className="text-xs"
-                    >
-                      {formatPercentage(returnPercentage)}
-                    </Badge>
-                  </TableCell>
+  return (
+    <TableRow
+      key={holding.symbol}
+      className="cursor-pointer hover:bg-gray-50"
+      onClick={() => router.push(`/crypto/${portfolioId}/holdings/${holding.symbol}`)}
+    >
+      <TableCell className="font-medium">
+        <div className="flex items-center gap-2">
+          <Bitcoin className="h-4 w-4 text-orange-500" />
+          {holding.symbol}
+        </div>
+      </TableCell>
+      <TableCell className="text-gray-600">
+        {holding.asset_name}
+      </TableCell>
+      <TableCell className="text-right font-mono">
+        {formatCryptoQuantity(holding.quantity)}
+      </TableCell>
+      <TableCell className="text-right font-mono">
+        {formatCurrency(holding.average_cost, holding.currency)}
+      </TableCell>
+      <TableCell className="text-right font-mono">
+        {formatCurrency(holding.current_price, holding.currency)}
+      </TableCell>
+      <TableCell className="text-right font-mono">
+        {formatCurrency(holding.current_value, holding.currency)}
+      </TableCell>
+      <TableCell
+        className={`text-right font-mono ${
+          isPositive ? 'text-success' : 'text-danger'
+        }`}
+      >
+        <div className="flex items-center justify-end gap-1">
+          {isPositive ? (
+            <TrendingUp className="h-4 w-4" />
+          ) : (
+            <TrendingDown className="h-4 w-4" />
+          )}
+          {formatCurrency(holding.unrealized_gain, holding.currency)}
+        </div>
+      </TableCell>
+      <TableCell
+        className={`text-right font-mono ${
+          hasPct ? (returnPercentage! >= 0 ? 'text-success' : 'text-danger') : ''
+        }`}
+      >
+        <Badge
+          variant={!hasPct ? 'outline' : (returnPercentage! >= 0 ? 'default' : 'destructive')}
+          className="text-xs"
+        >
+          {hasPct ? formatPercentage(returnPercentage!) : '—'}
+        </Badge>
+      </TableCell>
+    </TableRow>
+  );
+})}
                 </TableRow>
               );
             })}

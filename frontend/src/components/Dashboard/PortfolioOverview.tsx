@@ -33,9 +33,11 @@ export function PortfolioOverview() {
           totalCurrentValue += currentValue;
           totalPreviousValue += previousValue;
         } else {
-          // Use fallback values from holdings if no real-time data
-          totalCurrentValue += holding.current_value ?? 0;
-          totalPreviousValue += holding.current_value ?? 0;
+          // Fallbacks when no real-time data
+          const curr = holding.current_value ?? 0;
+          const prev = (holding.previous_close_value ?? holding.previous_value ?? curr) ?? 0;
+          totalCurrentValue += curr;
+          totalPreviousValue += prev;
         }
       });
     }

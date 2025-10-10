@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 
-from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
+from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType, CryptoCurrency
 from app.services.blockchain_fetcher import blockchain_fetcher
 from app.services.blockchain_deduplication import blockchain_deduplication
 
@@ -480,22 +480,18 @@ class CryptoWalletService:
 
         address = address.strip()
 
-        # Basic length checks (Bitcoin addresses are typically 26-35 characters)
-        if len(address) < 26 or len(address) > 35:
+        # Bech32 (bc1...) – different charset and length (approx. 42–62)
+        if address.startswith('bc1'):
+            bech32_part = address[3:]
+            valid_bech32 = set('023456789acdefghjklmnpqrstuvwxyzqpzry9x8gf2tvdw0s3jn54khce6mua7l')
+            return 42 <= len(address) <= 62 and all(c in valid_bech32 for c in bech32_part)
+
+        # Base58 (legacy '1' / P2SH '3') – length 26–35
+        if not (26 <= len(address) <= 35):
             return False
-
-        # Basic character checks (Bitcoin addresses use base58 characters)
-        valid_chars = set("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
-        if not all(c in valid_chars for c in address):
-            return False
-
-        # Basic format checks for common address types
-        # Legacy addresses start with '1'
-        # P2SH addresses start with '3'
-        # Bech32 addresses start with 'bc1'
-        if address.startswith('1') or address.startswith('3') or address.startswith('bc1'):
-            return True
-
+        if address[0] in ('1', '3'):
+            valid_base58 = set('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz')
+            return all(c in valid_base58 for c in address)
         return False
 
     async def get_wallet_transaction_summary(

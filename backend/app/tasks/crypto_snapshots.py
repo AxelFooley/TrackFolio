@@ -6,7 +6,7 @@ Creates daily snapshots of crypto portfolio values for historical performance tr
 from celery import shared_task
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.exc import IntegrityError
 import logging
 import json
@@ -139,7 +139,8 @@ def create_daily_crypto_snapshots(self):
 
         # Clean up old snapshots (keep last 2 years)
         try:
-            cleanup_date = snapshot_date.replace(year=snapshot_date.year - 2)
+            # Subtract ~2 years safely to avoid Feb 29 invalid dates
+            cleanup_date = snapshot_date - timedelta(days=730)
             stmt = select(CryptoPortfolioSnapshot).where(
                 CryptoPortfolioSnapshot.snapshot_date < cleanup_date
             )
@@ -147,7 +148,6 @@ def create_daily_crypto_snapshots(self):
 
             if old_snapshots:
                 # Delete old snapshots
-                from sqlalchemy import delete
                 delete_stmt = delete(CryptoPortfolioSnapshot).where(
                     CryptoPortfolioSnapshot.snapshot_date < cleanup_date
                 )
@@ -409,8 +409,19 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
 
         if price_record:
             price_eur = Decimal(str(price_record.close))
-            # Get USD price (approximate conversion)
-            price_usd = price_eur / Decimal("0.92")
+            # Derive USD via dynamic FX if available
+            try:
+                fx = PriceFetcher()
+                import asyncio
+                eur_usd = asyncio.run(fx.fetch_fx_rate("EUR", "USD"))  # EURUSD=X
+                if eur_usd and eur_usd > 0:
+                    price_usd = price_eur * eur_usd
+                else:
+                    logger.warning("EUR/USD FX unavailable; skipping USD conversion")
+                    price_usd = None
+            except Exception:
+                logger.exception("FX conversion failed; skipping USD conversion")
+                price_usd = None
         else:
             # Try to get current price from Yahoo Finance
             price_fetcher = PriceFetcher()
@@ -418,7 +429,18 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
             price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
             if price_data and price_data.get("current_price"):
                 price_usd = price_data["current_price"]
-                price_eur = price_usd * Decimal("0.92")  # Use approximate conversion rate
+                # Convert with dynamic FX
+                try:
+                    import asyncio
+                    usd_eur = asyncio.run(price_fetcher.fetch_fx_rate("USD", "EUR"))  # USDEUR=X
+                    if usd_eur and usd_eur > 0:
+                        price_eur = price_usd * usd_eur
+                    else:
+                        logger.warning("USD/EUR FX unavailable; skipping holding")
+                        continue
+                except Exception:
+                    logger.exception("FX conversion failed; skipping holding")
+                    continue
             else:
                 # No fallback - skip this holding if no price data available
                 logger.warning(f"Could not get price for {symbol} on {snapshot_date}. Skipping holding from snapshot.")

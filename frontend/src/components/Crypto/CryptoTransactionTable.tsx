@@ -271,15 +271,15 @@ export function CryptoTransactionTable({
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
-              <TableHead
+                <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('currency')}
-              >
+                onClick={() => handleSort('total')}
+                >
                 <div className="flex items-center justify-end gap-2">
                   Total
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
-              </TableHead>
+                </TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>

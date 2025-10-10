@@ -15,6 +15,7 @@ import pickle
 from app.config import settings
 from app.database import SyncSessionLocal
 from app.models.crypto import CryptoTransaction
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 

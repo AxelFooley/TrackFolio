@@ -28,14 +28,14 @@ export default function CryptoTransactionsPage() {
 
   // State for new transaction form
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newTransaction, setNewTransaction] = useState<CryptoTransactionCreate>({
+  const [newTransaction, setNewTransaction] = useState({
     symbol: '',
-    transaction_type: 'BUY',
+    transaction_type: 'BUY' as 'BUY' | 'SELL' | 'TRANSFER_IN' | 'TRANSFER_OUT',
     quantity: 0,
-    price: 0,
-    fees: 0,
-    currency: 'USD',
-    date: new Date().toISOString().split('T')[0],
+    price_at_execution: 0,
+    fee: 0,
+    currency: 'USD' as 'USD' | 'EUR',
+    timestamp: new Date().toISOString().split('T')[0],
   });
 
   // Search and filter state

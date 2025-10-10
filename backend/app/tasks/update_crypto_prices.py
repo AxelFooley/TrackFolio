@@ -121,7 +121,7 @@ def update_crypto_prices(self):
                     high=price_eur,
                     low=price_eur,
                     close=price_eur,
-                    volume=Decimal("0"),  # Yahoo Finance real-time endpoint doesn't provide volume
+                    volume=0,  # Yahoo Finance real-time endpoint doesn't provide volume
                     source="yahoo"
                 )
 

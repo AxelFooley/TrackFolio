@@ -55,10 +55,7 @@ export function CryptoPriceChart({ portfolioId, timeRange, height = 400 }: Crypt
     return formatCurrency(value, 'USD');
   };
 
-  // Format date for X-axis
-  const formatXAxisTick = (tickItem: Date) => {
-    return formatDate(tickItem, timeRange === '1D' ? 'HH:mm' : 'MMM dd');
-  };
+  // X-axis uses preformatted displayDate strings directly
 
   return (
     <div className="w-full" style={{ height: `${height}px` }}>

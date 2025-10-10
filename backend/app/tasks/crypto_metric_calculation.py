@@ -81,36 +81,28 @@ def calculate_crypto_metrics(self):
                     failed_portfolios.append(portfolio.name)
                     continue
 
-                # Upsert cached metrics
-                # First try to update existing record
-                stmt = (
-                    update(CachedMetrics)
-                    .where(
-                        CachedMetrics.metric_type == "crypto_portfolio_metrics",
-                        CachedMetrics.metric_key == str(portfolio.id)
-                    )
-                    .values(
-                        metric_value=metrics,
-                        calculated_at=datetime.utcnow(),
-                        expires_at=expires_at
-                    )
+# At the top of backend/app/tasks/crypto_metric_calculation.py
+from sqlalchemy.dialects.postgresql import insert
+
+# …later, in the metric‐calculation function…
+
+                # Atomic upsert (PostgreSQL)
+                stmt = insert(CachedMetrics).values(
+                    metric_type="crypto_portfolio_metrics",
+                    metric_key=str(portfolio.id),
+                    metric_value=metrics,
+                    calculated_at=datetime.utcnow(),
+                    expires_at=expires_at
+                ).on_conflict_do_update(
+                    index_elements=["metric_type", "metric_key"],
+                    set_={
+                        "metric_value": metrics,
+                        "calculated_at": datetime.utcnow(),
+                        "expires_at": expires_at,
+                    }
                 )
-
-                result = db.execute(stmt)
+                db.execute(stmt)
                 db.commit()
-
-                if result.rowcount == 0:
-                    # No existing record, insert new one
-                    cached_metric = CachedMetrics(
-                        metric_type="crypto_portfolio_metrics",
-                        metric_key=str(portfolio.id),
-                        metric_value=metrics,
-                        calculated_at=datetime.utcnow(),
-                        expires_at=expires_at
-                    )
-                    db.add(cached_metric)
-                    db.commit()
-
                 logger.info(f"Calculated crypto metrics for portfolio {portfolio.name}: Total value = {metrics.get('total_value_eur')}")
                 calculated += 1
 
@@ -335,23 +327,23 @@ def await_calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
             price_usd = price_data["current_price"]
             price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
 
-            value_eur = holding["quantity"] * price_eur
-            value_usd = holding["quantity"] * price_usd
+                        value_eur = holding["quantity"] * price_eur
+                        value_usd = holding["quantity"] * price_usd
 
-            total_value_eur += value_eur
-            total_value_usd += value_usd
+                        total_value_eur += value_eur
+                        total_value_usd += value_usd
 
-            current_holdings[symbol] = {
-                "quantity": float(holding["quantity"]),
-                "average_cost": float(holding["total_cost"] / holding["quantity"]) if holding["quantity"] > 0 else 0,
-                "current_price_eur": float(price_eur),
-                "current_price_usd": float(price_usd),
-                "value_eur": float(value_eur),
-                "value_usd": float(value_usd),
-                "cost_basis": float(holding["total_cost"]),
-                "unrealized_pnl_eur": float(value_eur - holding["total_cost"]),
-                "unrealized_pnl_pct": float((value_eur / holding["total_cost"] - 1) * 100) if holding["total_cost"] > 0 else 0
-            }
+                        current_holdings[symbol] = {
+                            "quantity": float(holding["quantity"]),
+                            "average_cost": float(holding["total_cost"] / holding["quantity"]) if holding["quantity"] > 0 else 0,
+                            "current_price_eur": float(price_eur),
+                            "current_price_usd": float(price_usd),
+                            "value_eur": float(value_eur),
+                            "value_usd": float(value_usd),
+                            "cost_basis": float(holding["total_cost"]),
+                            "unrealized_pnl_eur": float(value_eur - holding["total_cost"]),
+                            "unrealized_pnl_pct": float((value_eur / holding["total_cost"] - 1) * 100) if holding["total_cost"] > 0 else 0
+                        }
         else:
             # If no price available, use cost basis
             current_holdings[symbol] = {

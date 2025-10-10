@@ -315,9 +315,10 @@ class MockDataGenerator:
         df = pd.DataFrame(self.transactions)
 
         # Create Directa header (first 9 rows)
+        now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         header_rows = [
-            ["Conto : 72024 Anghelone Alessandro"],
-            ["Data estrazione : 1-10-2025 10:52:29"],
+            ["Conto : 00000 Sample User"],
+            [f"Data estrazione : {now_str}"],
             [""],
             ["Compravendite ordinati per Data Operazione"],
             ["Dal : 04-04-2015"],

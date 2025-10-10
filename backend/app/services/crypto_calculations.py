@@ -306,11 +306,18 @@ class CryptoCalculationService:
 
                 # Get historical prices for current date
                 symbols = list(holdings.keys())
+                # Get portfolio base currency
+                portfolio_result = await self.db.execute(
+                    select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+                )
+                portfolio = portfolio_result.scalar_one_or_none()
+                base_currency = portfolio.base_currency.value if portfolio else "EUR"
+
                 historical_prices = await self._get_historical_prices(
                     symbols,
                     current_date,
                     current_date,
-                    "EUR"
+                    base_currency
                 )
 
                 # Calculate portfolio value

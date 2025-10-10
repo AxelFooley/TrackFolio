@@ -333,8 +333,7 @@ async def example_usage():
     # Fetch crypto price (auto-detected)
     btc_price = await unified_price_fetcher.fetch_price_with_auto_detection('BTC')
     if btc_price:
-        print(f"BTC Price: {btc_price['price']} {btc_price['currency']}")
-
+        print(f"BTC Price: {btc_price['current_price']} {btc_price.get('currency', 'USD')}")
     # Fetch historical data
     from datetime import timedelta
     end_date = date.today()

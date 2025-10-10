@@ -775,42 +775,44 @@ async def get_crypto_prices(
         if len(symbol_list) > 50:
             raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed per request")
 
-        # Get prices from Yahoo Finance
-        price_fetcher = PriceFetcher()
-        prices = []
+@router.get("/prices", response_model=CryptoPriceResponse)
+async def get_crypto_prices(
+    symbols: str = Query(..., description="Comma-separated list of crypto symbols (e.g., BTC,ETH,ADA)"),
+    currency: str = Query("eur", pattern="^(eur|usd)$", description="Target currency"),
+):
+    # Get prices from Yahoo Finance
+    price_fetcher = PriceFetcher()
+    # Build batch tickers
+    tickers = [(f"{s}-USD", None) for s in symbol_list]
+    # Execute sync fetches in threadpool inside helper
+    batch = price_fetcher.fetch_realtime_prices_batch(tickers)
 
-        for symbol in symbol_list:
-            try:
-                # Add appropriate suffix for crypto symbols on Yahoo Finance
-                yahoo_symbol = f"{symbol}-USD"
+    eur_rate = None
+    if currency.lower() == 'eur':
+        eur_rate = await _get_usd_to_eur_rate()
 
-                # Use Yahoo Finance to fetch current price
-                price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
-
-                if price_data and price_data.get('current_price'):
-                    price = price_data['current_price']
-
-                    # Convert to target currency if needed (Yahoo returns USD)
-                    if currency.lower() == 'eur':
-                        # Get USD to EUR conversion rate
-                        eur_rate = await _get_usd_to_eur_rate()
-                        if eur_rate:
-                            price = price * eur_rate
-                        else:
-                            logger.warning(f"Could not convert {symbol} price to EUR, using USD")
-
-                    prices.append(CryptoPriceData(
-                        symbol=symbol,
-                        price=price,
-                        currency=currency.upper(),
-                        price_usd=price_data['current_price'],
-                        market_cap_usd=None,  # Yahoo Finance may not provide this in real-time endpoint
-                        volume_24h_usd=None,  # Yahoo Finance may not provide this in real-time endpoint
-                        change_percent_24h=float(price_data.get('change_percent', 0)) if price_data.get('change_percent') else None,
-                        timestamp=price_data.get('timestamp', datetime.utcnow()),
-                        source='yahoo'
-                    ))
-            except Exception as e:
+    prices = []
+    for s, data in zip(symbol_list, batch):
+        if not data or not data.get('current_price'):
+            continue
+        price = data['current_price']
+        if currency.lower() == 'eur' and eur_rate:
+            price *= eur_rate
+        prices.append(CryptoPriceData(
+            symbol=s,
+            price=price,
+            currency=currency.upper(),
+            price_usd=data['current_price'],
+            market_cap_usd=None,
+            volume_24h_usd=None,
+            change_percent_24h=(
+                float(data.get('change_percent', 0))
+                if data.get('change_percent')
+                else None
+            ),
+            timestamp=data.get('timestamp', datetime.utcnow()),
+            source='yahoo'
+        ))
                 logger.warning(f"Failed to get price for {symbol}: {e}")
                 # Continue with other symbols
                 continue
@@ -849,51 +851,15 @@ async def get_crypto_price_history(
         if days_diff > 365:
             raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
 
-        symbol = symbol.upper().strip()
-
         # Get historical prices from Yahoo Finance
         price_fetcher = PriceFetcher()
         yahoo_symbol = f"{symbol}-USD"
 
-        historical_prices = price_fetcher.fetch_historical_prices_sync(
+        historical_prices = await price_fetcher.fetch_historical_prices(
             yahoo_symbol,
             start_date=start_date,
             end_date=end_date
         )
-
-        if not historical_prices:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No historical price data found for {symbol} in the specified date range"
-            )
-
-        # Convert to target currency if needed (Yahoo returns USD)
-        if currency.lower() == 'eur':
-            eur_rate = await _get_usd_to_eur_rate()
-            if eur_rate:
-                for data_point in historical_prices:
-                    data_point['price'] = data_point['close'] * eur_rate
-                    data_point['currency'] = 'EUR'
-            else:
-                for data_point in historical_prices:
-                    data_point['price'] = data_point['close']
-                    data_point['currency'] = 'USD'
-        else:
-            for data_point in historical_prices:
-                data_point['price'] = data_point['close']
-                data_point['currency'] = 'USD'
-
-        # Convert to response format
-        prices = [
-            CryptoHistoricalPrice(
-                date=data_point['date'],
-                symbol=symbol,
-                price=data_point['price'],
-                currency=data_point['currency'],
-                price_usd=data_point['close'],
-                timestamp=datetime.utcnow(),
-                source='yahoo'
-            )
             for data_point in historical_prices
         ]
 

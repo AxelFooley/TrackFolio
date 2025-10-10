@@ -47,23 +47,75 @@ class Settings(BaseSettings):
     metrics_cache_ttl: int = 86400  # 24 hours
 
     # Blockchain settings
-    blockchain_sync_enabled: bool = True
-    blockchain_sync_interval_minutes: int = 30  # Sync every 30 minutes
-    blockchain_max_transactions_per_sync: int = 50
-    blockchain_sync_days_back: int = 7
-    blockchain_rate_limit_requests_per_second: float = 1.0
-    blockchain_request_timeout_seconds: int = 30
-    blockchain_max_retries: int = 3
+    blockchain_sync_enabled: bool = Field(
+        True,
+        env="BLOCKCHAIN_SYNC_ENABLED",
+        description="Enable or disable blockchain sync"
+    )
+    blockchain_sync_interval_minutes: PositiveInt = Field(
+        30,
+        env="BLOCKCHAIN_SYNC_INTERVAL_MINUTES",
+        description="Interval in minutes between blockchain syncs"
+    )
+    blockchain_max_transactions_per_sync: PositiveInt = Field(
+        50,
+        env="BLOCKCHAIN_MAX_TRANSACTIONS_PER_SYNC",
+        description="Maximum number of transactions to sync per run"
+    )
+    blockchain_sync_days_back: PositiveInt = Field(
+        7,
+        env="BLOCKCHAIN_SYNC_DAYS_BACK",
+        description="Number of days back to fetch transactions"
+    )
+    blockchain_rate_limit_requests_per_second: PositiveFloat = Field(
+        1.0,
+        env="BLOCKCHAIN_RATE_LIMIT_REQUESTS_PER_SECOND",
+        description="Rate limit for blockchain API requests per second"
+    )
+    blockchain_request_timeout_seconds: PositiveInt = Field(
+        30,
+        env="BLOCKCHAIN_REQUEST_TIMEOUT_SECONDS",
+        description="Timeout for blockchain API requests in seconds"
+    )
+    blockchain_max_retries: PositiveInt = Field(
+        3,
+        env="BLOCKCHAIN_MAX_RETRIES",
+        description="Maximum number of retries for blockchain API requests"
+    )
 
     # Blockchain API endpoints (can be overridden)
-    blockstream_api_url: str = "https://blockstream.info/api"
-    blockchain_com_api_url: str = "https://blockchain.info"
-    blockcypher_api_url: str = "https://api.blockcypher.com/v1/btc/main"
+    blockstream_api_url: HttpUrl = Field(
+        "https://blockstream.info/api",
+        env="BLOCKSTREAM_API_URL",
+        description="Blockstream API endpoint"
+    )
+    blockchain_com_api_url: HttpUrl = Field(
+        "https://blockchain.info",
+        env="BLOCKCHAIN_COM_API_URL",
+        description="Blockchain.com API endpoint"
+    )
+    blockcypher_api_url: HttpUrl = Field(
+        "https://api.blockcypher.com/v1/btc/main",
+        env="BLOCKCYPHER_API_URL",
+        description="BlockCypher API endpoint"
+    )
 
     # Blockchain cache settings
-    blockchain_transaction_cache_ttl: int = 300  # 5 minutes
-    blockchain_address_cache_ttl: int = 86400  # 24 hours
-    blockchain_deduplication_cache_ttl: int = 86400 * 7  # 7 days
+    blockchain_transaction_cache_ttl: NonNegativeInt = Field(
+        300,
+        env="BLOCKCHAIN_TRANSACTION_CACHE_TTL",
+        description="Cache TTL for blockchain transactions (seconds)"
+    )
+    blockchain_address_cache_ttl: NonNegativeInt = Field(
+        86400,
+        env="BLOCKCHAIN_ADDRESS_CACHE_TTL",
+        description="Cache TTL for blockchain addresses (seconds)"
+    )
+    blockchain_deduplication_cache_ttl: NonNegativeInt = Field(
+        86400 * 7,
+        env="BLOCKCHAIN_DEDUPLICATION_CACHE_TTL",
+        description="Cache TTL for blockchain transaction deduplication (seconds)"
+    )
 
 
 # Global settings instance
