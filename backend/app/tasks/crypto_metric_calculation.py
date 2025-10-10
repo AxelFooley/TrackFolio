@@ -20,6 +20,54 @@ from sqlalchemy.dialects.postgresql import insert
 logger = logging.getLogger(__name__)
 
 
+def _calculate_holdings_from_transactions(transactions):
+    """
+    Calculate current holdings from transaction history.
+
+    Args:
+        transactions: List of CryptoTransaction objects
+
+    Returns:
+        dict: Holdings keyed by symbol with quantity and total_cost
+    """
+    holdings = {}
+
+    for txn in transactions:
+        symbol = txn.symbol
+        if symbol not in holdings:
+            holdings[symbol] = {
+                "quantity": Decimal("0"),
+                "total_cost": Decimal("0"),
+            }
+
+        if txn.transaction_type in [CryptoTransactionType.BUY, CryptoTransactionType.TRANSFER_IN]:
+            # Add to position
+            holdings[symbol]["quantity"] += txn.quantity
+            holdings[symbol]["total_cost"] += txn.total_amount
+        elif txn.transaction_type in [CryptoTransactionType.SELL, CryptoTransactionType.TRANSFER_OUT]:
+            # Calculate average cost per unit before reducing position
+            if holdings[symbol]["quantity"] > 0:
+                average_cost_per_unit = holdings[symbol]["total_cost"] / holdings[symbol]["quantity"]
+            else:
+                average_cost_per_unit = Decimal("0")
+
+            # Reduce quantity
+            sold_quantity = min(txn.quantity, holdings[symbol]["quantity"])  # Prevent negative
+            holdings[symbol]["quantity"] -= sold_quantity
+
+            # Reduce cost basis by the cost of units sold (not by proceeds)
+            cost_removed = average_cost_per_unit * sold_quantity
+            holdings[symbol]["total_cost"] -= cost_removed
+
+            # Ensure no negative values
+            if holdings[symbol]["quantity"] < 0:
+                holdings[symbol]["quantity"] = Decimal("0")
+            if holdings[symbol]["total_cost"] < 0:
+                holdings[symbol]["total_cost"] = Decimal("0")
+
+    return holdings
+
+
 @shared_task(
     bind=True,
     autoretry_for=(Exception,),
@@ -220,42 +268,8 @@ def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
             "calculated_at": datetime.utcnow().isoformat()
         }
 
-    # Get current holdings
-    holdings = {}
-
-    for txn in transactions:
-        symbol = txn.symbol
-        if symbol not in holdings:
-            holdings[symbol] = {
-                "quantity": Decimal("0"),
-                "total_cost": Decimal("0"),
-                "transactions": []
-            }
-
-        if txn.transaction_type == CryptoTransactionType.BUY or txn.transaction_type == CryptoTransactionType.TRANSFER_IN:
-            # Add to position
-            holdings[symbol]["quantity"] += txn.quantity
-            holdings[symbol]["total_cost"] += txn.total_amount
-        elif txn.transaction_type == CryptoTransactionType.SELL or txn.transaction_type == CryptoTransactionType.TRANSFER_OUT:
-            # Calculate average cost per unit before reducing position
-            if holdings[symbol]["quantity"] > 0:
-                average_cost_per_unit = holdings[symbol]["total_cost"] / holdings[symbol]["quantity"]
-            else:
-                average_cost_per_unit = Decimal("0")
-
-            # Reduce quantity
-            sold_quantity = min(txn.quantity, holdings[symbol]["quantity"])  # Prevent negative
-            holdings[symbol]["quantity"] -= sold_quantity
-
-            # Reduce cost basis by the cost of units sold (not by proceeds)
-            cost_removed = average_cost_per_unit * sold_quantity
-            holdings[symbol]["total_cost"] -= cost_removed
-
-            # Ensure no negative values
-            if holdings[symbol]["quantity"] < 0:
-                holdings[symbol]["quantity"] = Decimal("0")
-            if holdings[symbol]["total_cost"] < 0:
-                holdings[symbol]["total_cost"] = Decimal("0")
+    # Get current holdings using helper function
+    holdings = _calculate_holdings_from_transactions(transactions)
 
     # Recalculate total cost basis from holdings
     total_cost_basis = sum(holding["total_cost"] for holding in holdings.values())
@@ -381,41 +395,8 @@ def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
     if not transactions:
         return {}
 
-    # Calculate holdings
-    holdings = {}
-    for txn in transactions:
-        symbol = txn.symbol
-        if symbol not in holdings:
-            holdings[symbol] = {
-                "quantity": Decimal("0"),
-                "total_cost": Decimal("0"),
-                "transactions": []
-            }
-
-        if txn.transaction_type in [CryptoTransactionType.BUY, CryptoTransactionType.TRANSFER_IN]:
-            # Add to position
-            holdings[symbol]["quantity"] += txn.quantity
-            holdings[symbol]["total_cost"] += txn.total_amount
-        elif txn.transaction_type in [CryptoTransactionType.SELL, CryptoTransactionType.TRANSFER_OUT]:
-            # Calculate average cost per unit before reducing position
-            if holdings[symbol]["quantity"] > 0:
-                average_cost_per_unit = holdings[symbol]["total_cost"] / holdings[symbol]["quantity"]
-            else:
-                average_cost_per_unit = Decimal("0")
-
-            # Reduce quantity
-            sold_quantity = min(txn.quantity, holdings[symbol]["quantity"])  # Prevent negative
-            holdings[symbol]["quantity"] -= sold_quantity
-
-            # Reduce cost basis by the cost of units sold (not by proceeds)
-            cost_removed = average_cost_per_unit * sold_quantity
-            holdings[symbol]["total_cost"] -= cost_removed
-
-            # Ensure no negative values
-            if holdings[symbol]["quantity"] < 0:
-                holdings[symbol]["quantity"] = Decimal("0")
-            if holdings[symbol]["total_cost"] < 0:
-                holdings[symbol]["total_cost"] = Decimal("0")
+    # Calculate holdings using helper function
+    holdings = _calculate_holdings_from_transactions(transactions)
 
     # Calculate metrics for each symbol
     metrics = {}

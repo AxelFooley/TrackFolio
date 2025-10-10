@@ -103,7 +103,7 @@ export function CryptoTransactionTable({
     e.preventDefault();
     if (!editingTransaction) return;
 
-    try{
+    try {
       await updateTransactionMutation.mutateAsync({
       portfolioId,
       transactionId: editingTransaction.id,
