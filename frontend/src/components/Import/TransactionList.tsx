@@ -17,6 +17,13 @@ import { AlertTriangle, Pencil } from 'lucide-react';
 import { EditTransactionModal } from '@/components/Modals/EditTransactionModal';
 import type { Transaction } from '@/lib/types';
 
+/**
+ * Display a "Recent Transactions" card that shows loading, empty, or populated transaction states and supports editing individual transactions.
+ *
+ * Shows a skeleton list while data is loading, an empty-state message when there are no transactions, and a horizontally scrollable table of transactions with formatted date, ticker, type badge, quantity, computed amount, fees (with a missing-fee indicator), currency, and an edit action that opens an edit modal.
+ *
+ * @returns The transactions UI as a React element.
+ */
 export function TransactionList() {
   const { data: transactions, isLoading } = useTransactions(0, 50);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);

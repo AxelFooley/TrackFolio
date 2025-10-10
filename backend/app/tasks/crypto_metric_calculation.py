@@ -30,13 +30,12 @@ logger = logging.getLogger(__name__)
 )
 def calculate_crypto_metrics(self):
     """
-    Calculate and cache IRR and other metrics for all crypto portfolios.
-
-    This task is idempotent - it will update existing metrics or create new ones.
-    Scheduled to run daily at 23:15 CET (after crypto price updates).
-
+    Calculate and cache per-portfolio and aggregated crypto metrics for all active crypto portfolios.
+    
+    Performs portfolio-level metric computation, upserts each portfolio's metrics into CachedMetrics with a 24-hour expiry, computes and upserts global metrics, cleans up expired cached entries, and aggregates success/failure counts.
+    
     Returns:
-        dict: Summary of metrics calculated
+        dict: Summary with keys "status", "calculated" (number cached), "failed" (number failed), "total_portfolios", and optionally "failed_portfolios" (list of failed portfolio names).
     """
     logger.info("Starting crypto metric calculation task")
 
@@ -180,14 +179,29 @@ def calculate_crypto_metrics(self):
 
 def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
     """
-    Calculate all metrics for a crypto portfolio.
-
-    Args:
-        db: Database session
-        portfolio_id: Crypto portfolio ID
-
+    Compute portfolio-level crypto metrics for the specified portfolio.
+    
+    Calculates current value, cost basis, unrealized P&L, simple total return, per-symbol holdings and asset allocation using transaction history and realtime prices. Returns None if the portfolio does not exist or is not active.
+    
+    Parameters:
+        portfolio_id (int): ID of the crypto portfolio to compute metrics for.
+    
     Returns:
-        dict: Metrics including total value, IRR, asset allocation, etc.
+        dict or None: Metrics dictionary when the portfolio is found and active, otherwise `None`.
+        The metrics dictionary includes at least the following keys:
+            - portfolio_id: portfolio identifier
+            - portfolio_name: portfolio name
+            - total_value_eur: total market value in EUR
+            - total_value_usd: total market value in USD
+            - total_cost_basis: aggregated cost basis
+            - unrealized_pnl_eur: unrealized profit/loss in EUR
+            - unrealized_pnl_pct: unrealized profit/loss as a percentage
+            - total_return_pct: simple total return percentage
+            - asset_allocation: mapping of symbol -> {percentage, value_eur, value_usd}
+            - holdings: mapping of symbol -> per-symbol metrics (quantity, average_cost, current_price_eur/usd, value_eur/usd, cost_basis, unrealized_pnl_eur, unrealized_pnl_pct)
+            - num_positions: number of active positions
+            - base_currency: portfolio base currency code
+            - calculated_at: ISO8601 UTC timestamp of calculation
     """
     # Get portfolio
     portfolio = db.execute(
@@ -362,14 +376,25 @@ def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
 
 def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
     """
-    Calculate metrics for each crypto position in a portfolio.
-
-    Args:
-        db: Database session
-        portfolio_id: Crypto portfolio ID
-
+    Calculate per-symbol position metrics for a crypto portfolio.
+    
+    Parameters:
+        portfolio_id (int): ID of the crypto portfolio to analyze.
+    
     Returns:
-        dict: Symbol-specific metrics
+        dict: Mapping from symbol (str) to a metrics dictionary containing:
+            - symbol (str)
+            - quantity (float)
+            - average_cost (float)
+            - current_price_eur (float)
+            - current_value_eur (float)
+            - cost_basis (float)
+            - unrealized_pnl_eur (float)
+            - unrealized_pnl_pct (float)
+            - irr (float)
+            - calculated_at (str, UTC ISO timestamp)
+    
+        Returns an empty dict if the portfolio has no transactions or no positive-quantity positions.
     """
     # Get portfolio transactions
     transactions = db.execute(
@@ -467,13 +492,22 @@ def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
 
 def calculate_global_crypto_metrics(db) -> dict:
     """
-    Calculate global metrics across all crypto portfolios.
-
-    Args:
-        db: Database session
-
+    Compute aggregated crypto metrics across all active portfolios.
+    
+    If there are active portfolios, returns a dictionary containing aggregated totals, returns, asset allocation, counts, and a UTC ISO timestamp; returns `None` if no active portfolios are found.
+    
     Returns:
-        dict: Global crypto metrics
+        dict or None: Aggregated metrics with keys:
+            - total_value_eur (float): Sum market value in EUR across portfolios.
+            - total_value_usd (float): Sum market value in USD across portfolios.
+            - total_cost_basis (float): Sum of cost basis across portfolios.
+            - unrealized_pnl_eur (float): total_value_eur minus total_cost_basis.
+            - unrealized_pnl_pct (float): percent unrealized profit/loss based on EUR totals.
+            - total_return_pct (float): same as unrealized_pnl_pct (simple aggregate return).
+            - asset_allocation (dict): mapping symbol -> {percentage (float), value_eur (float), value_usd (float)}.
+            - num_portfolios (int): number of active portfolios included.
+            - num_positions (int): number of distinct symbols held across all portfolios.
+            - calculated_at (str): UTC ISO timestamp when metrics were calculated.
     """
     # Get all active crypto portfolios
     portfolios = db.execute(

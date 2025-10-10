@@ -23,6 +23,14 @@ interface EditTransactionModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * Renders a modal dialog that lets the user edit a transaction's date, quantity, price, and fees while displaying ticker, type, and currency as read-only.
+ *
+ * @param transaction - The transaction to edit; ticker, transaction_type, and currency are shown but cannot be changed.
+ * @param open - Whether the modal is currently open.
+ * @param onOpenChange - Callback called with the updated open state to show or hide the modal.
+ * @returns The Edit Transaction modal React element.
+ */
 export function EditTransactionModal({
   transaction,
   open,

@@ -25,20 +25,24 @@ class UnifiedPriceFetcher:
     """
 
     def __init__(self):
-        """Initialize unified price fetcher."""
+        """
+        Create a UnifiedPriceFetcher and initialize its internal Yahoo Finance fetcher.
+        
+        Sets self.yahoo_fetcher to a new PriceFetcher instance used for interacting with Yahoo Finance.
+        """
         self.yahoo_fetcher = PriceFetcher()
 
     async def fetch_current_price(self, ticker: str, asset_type: str = "stock", currency: str = "eur") -> Optional[Dict]:
         """
-        Fetch current price for any asset type.
-
-        Args:
-            ticker: Asset ticker symbol
-            asset_type: Type of asset ('stock', 'crypto', 'etf')
-            currency: Target currency ('eur' or 'usd')
-
+        Fetch the current market price for a ticker, supporting stocks, ETFs, and cryptocurrencies.
+        
+        Parameters:
+            ticker (str): Asset ticker symbol. For crypto provide the base symbol (e.g., "BTC"); the method will query the corresponding USD pair.
+            asset_type (str): Asset category: "stock", "etf", or "crypto".
+            currency (str): Target currency for the returned price, either "eur" or "usd". When "eur", USD prices are converted to EUR; on conversion failure a fallback rate is applied.
+        
         Returns:
-            Dict with price data or None if failed
+            dict or None: A dictionary with price data (keys vary by asset type; e.g., `"current_price"` for crypto, `"close"` for stocks/ETFs). Returns `None` if fetching fails.
         """
         try:
             if asset_type.lower() == "crypto":
@@ -114,17 +118,20 @@ class UnifiedPriceFetcher:
         currency: str = "eur"
     ) -> List[Dict]:
         """
-        Fetch historical prices for any asset type.
-
-        Args:
-            ticker: Asset ticker symbol
-            start_date: Start date for historical data
-            end_date: End date for historical data
-            asset_type: Type of asset ('stock', 'crypto', 'etf')
-            currency: Target currency ('eur' or 'usd')
-
+        Fetch historical price series for a ticker, optionally converting prices to EUR.
+        
+        Parameters:
+            ticker (str): Asset symbol (for crypto the plain symbol, e.g. "BTC").
+            start_date (date): Inclusive start date for the historical range.
+            end_date (date): Inclusive end date for the historical range.
+            asset_type (str): Asset category; expected values include "stock" or "crypto".
+            currency (str): Target currency for returned prices, either "eur" or "usd".
+        
         Returns:
-            List of price dictionaries
+            List[Dict]: A list of price point dictionaries. Each dictionary contains numeric
+            keys 'open', 'high', 'low', 'close', a date-like 'date' (as provided by the source),
+            and a 'currency' string. If conversion to EUR is requested the prices and 'currency'
+            will reflect that conversion. Returns an empty list on error.
         """
         try:
             if asset_type.lower() == "crypto":
@@ -192,13 +199,10 @@ class UnifiedPriceFetcher:
 
     def detect_asset_type(self, ticker: str) -> str:
         """
-        Automatically detect asset type based on ticker.
-
-        Args:
-            ticker: Asset ticker symbol
-
+        Determine the asset type for a given ticker symbol.
+        
         Returns:
-            Detected asset type ('stock', 'crypto', 'etf', 'unknown')
+        	`crypto`, `etf`, or `stock` indicating the detected asset type. `crypto` is returned when the ticker (uppercased) matches a curated set of cryptocurrency symbols; `etf` is returned for tickers that match common ETF patterns (e.g., ending with `.L` or starting with `I`, `VTI`, `SPY`); otherwise `stock` is returned.
         """
         # Common cryptocurrency symbols (list could be expanded)
         crypto_symbols = {
@@ -224,14 +228,14 @@ class UnifiedPriceFetcher:
 
     async def fetch_price_with_auto_detection(self, ticker: str, currency: str = "eur") -> Optional[Dict]:
         """
-        Fetch price with automatic asset type detection.
-
-        Args:
-            ticker: Asset ticker symbol
-            currency: Target currency ('eur' or 'usd')
-
+        Automatically detect the asset type for a ticker and fetch its current price.
+        
+        Parameters:
+            ticker (str): Asset ticker symbol to fetch.
+            currency (str): Target currency for the returned price; expected values are "eur" or "usd".
+        
         Returns:
-            Dict with price data or None if failed
+            dict: Fetched price data for the detected asset type, or `None` if the fetch failed.
         """
         asset_type = self.detect_asset_type(ticker)
         logger.info(f"Auto-detected {ticker} as {asset_type}")
@@ -240,10 +244,15 @@ class UnifiedPriceFetcher:
 
     def get_supported_cryptocurrencies(self) -> List[Dict]:
         """
-        Get list of supported cryptocurrencies.
-
+        Return a curated list of popular cryptocurrencies supported by Yahoo Finance.
+        
+        Each item in the returned list is a dictionary with the following keys:
+        - `symbol`: short ticker symbol (e.g., "BTC")
+        - `name`: human-readable name (e.g., "Bitcoin")
+        - `yahoo_symbol`: Yahoo Finance symbol (e.g., "BTC-USD")
+        
         Returns:
-            List of cryptocurrency assets
+            List[Dict]: List of cryptocurrency descriptor dictionaries.
         """
         try:
             # Return curated list of popular cryptocurrencies supported by Yahoo Finance
@@ -279,10 +288,16 @@ class UnifiedPriceFetcher:
 
     async def test_all_services(self) -> Dict[str, bool]:
         """
-        Test all connected price services.
-
+        Run a set of connectivity and fetch tests for configured price services.
+        
+        Performs simple success checks for Yahoo Finance spot fetch, Yahoo Finance crypto realtime fetch, and mixed asset lookup via the fetch_price_with_auto_detection helper.
+        
         Returns:
-            Dict with service status
+            Dict[str, bool]: Mapping of test names to `True` if the test succeeded or `False` if it failed.
+            Known keys:
+              - "yahoo_finance": basic Yahoo Finance latest price fetch for AAPL
+              - "yahoo_finance_crypto": Yahoo Finance realtime crypto fetch for BTC-USD
+              - "mixed_assets": combined auto-detected fetches for AAPL (stock) and BTC (crypto)
         """
         results = {}
 
@@ -320,7 +335,11 @@ unified_price_fetcher = UnifiedPriceFetcher()
 
 # Example usage functions
 async def example_usage():
-    """Example usage of the unified price fetcher."""
+    """
+    Demonstrates common operations of the UnifiedPriceFetcher.
+    
+    Runs service health checks, fetches an auto-detected stock price and an auto-detected crypto price, retrieves recent historical prices for a crypto asset, and obtains the curated list of supported cryptocurrencies. Intended for example or manual testing; prints results to standard output.
+    """
 
     # Test all services
     status = await unified_price_fetcher.test_all_services()

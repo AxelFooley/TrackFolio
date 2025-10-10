@@ -12,6 +12,14 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 
 const timeRanges: TimeRange[] = ['1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'];
 
+/**
+ * Render the portfolio performance chart with range selection controls, handling loading, error, and no-data states, and optionally overlaying benchmark data.
+ *
+ * The component fetches performance and benchmark data for the selected time range, formats and maps data for the chart,
+ * displays a single-point summary when only one data point exists, and renders a responsive line chart for multiple points.
+ *
+ * @returns A JSX element that displays the Performance card with range buttons, status UIs, and a responsive line chart (portfolio and optional benchmark).
+ */
 export function PerformanceChart() {
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y');
   const { data: performanceData, isLoading, error, refetch } = usePerformanceData(selectedRange);

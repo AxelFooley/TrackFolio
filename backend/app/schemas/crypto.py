@@ -86,7 +86,15 @@ class CryptoTransactionCreate(BaseModel):
     @field_validator('symbol')
     @classmethod
     def validate_symbol(cls, v: str) -> str:
-        """Validate and normalize symbol."""
+        """
+        Normalize a crypto symbol by trimming surrounding whitespace and converting to uppercase.
+        
+        Parameters:
+            v (str): The input symbol to normalize.
+        
+        Returns:
+            str: The normalized symbol (trimmed and uppercased).
+        """
         return v.upper().strip()
 
 

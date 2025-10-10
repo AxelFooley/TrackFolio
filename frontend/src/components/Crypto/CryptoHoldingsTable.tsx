@@ -23,6 +23,16 @@ interface CryptoHoldingsTableProps {
   showSearch?: boolean;
 }
 
+/**
+ * Renders a searchable, sortable table of cryptocurrency holdings for a portfolio.
+ *
+ * Supports client-side searching (by symbol or asset name), column sorting (toggleable asc/desc), optional result limiting, skeleton loading UI, and an empty-state message when no holdings exist. Rows navigate to the per-holding detail page and the "View all" action navigates to the full holdings list.
+ *
+ * @param portfolioId - Portfolio identifier used to fetch and navigate to holdings
+ * @param limit - Optional maximum number of holdings to display; when provided and the total exceeds `limit`, a "View all" action is shown
+ * @param showSearch - When `true` (default), show the search input to filter results
+ * @returns The rendered holdings table element
+ */
 export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: CryptoHoldingsTableProps) {
   const router = useRouter();
   const { data: holdings, isLoading } = useCryptoHoldings(portfolioId);

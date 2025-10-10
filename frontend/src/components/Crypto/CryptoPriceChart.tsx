@@ -22,6 +22,15 @@ interface CryptoPriceChartProps {
   currency?: string;
 }
 
+/**
+ * Renders a responsive line chart of a portfolio's performance over a specified time range, optionally comparing it to a benchmark.
+ *
+ * @param portfolioId - The portfolio identifier to fetch performance data for.
+ * @param timeRange - The time range to display (e.g., "1D", "7D", "1M").
+ * @param height - The chart height in pixels (defaults to 400).
+ * @param currency - Currency code used for formatting values (defaults to `'USD'`).
+ * @returns A React element that displays the portfolio (and optional benchmark) performance chart, including loading and empty-data states.
+ */
 export function CryptoPriceChart({ portfolioId, timeRange, height = 400, currency = 'USD' }: CryptoPriceChartProps) {
   const { data: performanceData, isLoading } = useCryptoPerformanceData(portfolioId, timeRange);
 

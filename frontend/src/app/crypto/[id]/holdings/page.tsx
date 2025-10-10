@@ -12,6 +12,16 @@ import { ArrowLeft, Search, Bitcoin, TrendingUp, TrendingDown, ArrowUpDown, Eye 
 import { CryptoHoldingsTable } from '@/components/Crypto/CryptoHoldingsTable';
 import type { CryptoPosition } from '@/lib/types';
 
+/**
+ * Render a detailed holdings view for a cryptocurrency portfolio, including header, summary cards,
+ * optional asset allocation, and a searchable, sortable holdings table with navigation actions.
+ *
+ * The component reads the portfolio id from route params, loads portfolio, holdings, and metrics,
+ * computes totals and sorting/filtering state, and provides UI for navigating to portfolio and
+ * individual holding details.
+ *
+ * @returns A React element that renders the crypto portfolio holdings page
+ */
 export default function CryptoHoldingsPage() {
   const params = useParams();
   const router = useRouter();

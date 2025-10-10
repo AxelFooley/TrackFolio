@@ -8,6 +8,14 @@ import { PriceChart } from '@/components/Asset/PriceChart';
 import { TransactionHistory } from '@/components/Asset/TransactionHistory';
 import { Loader2 } from 'lucide-react';
 
+/**
+ * Render the asset detail page for the route's ticker, handling loading, error, and success states.
+ *
+ * When loading, displays a centered spinner; on error or missing data, displays an "Asset Not Found" message
+ * mentioning the ticker; otherwise renders a layout containing AssetHeader, PositionSummary, PriceChart, and TransactionHistory.
+ *
+ * @returns The page's JSX element representing the asset detail view for the current ticker.
+ */
 export default function AssetDetailPage() {
   const params = useParams();
   const ticker = params?.ticker as string;

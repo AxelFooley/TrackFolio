@@ -28,7 +28,14 @@ class TestBlockchainFetcherService:
 
     @pytest.fixture
     def blockchain_fetcher(self):
-        """Create a blockchain fetcher instance for testing."""
+        """
+        Create a BlockchainFetcherService configured with a mocked Redis connection for tests.
+        
+        The mocked Redis client has `ping` returning True, `get` returning None, and `setex` returning True to simulate a reachable Redis with empty cache state.
+        
+        Returns:
+            BlockchainFetcherService: a fetcher instance that uses the mocked Redis client.
+        """
         with patch('app.services.blockchain_fetcher.redis.from_url') as mock_redis:
             mock_redis.return_value.ping.return_value = True
             mock_redis.return_value.get.return_value = None
@@ -37,7 +44,17 @@ class TestBlockchainFetcherService:
 
     @pytest.fixture
     def sample_blockstream_tx(self):
-        """Sample Blockstream transaction data."""
+        """
+        Provide a representative Blockstream-format transaction used in tests.
+        
+        Returns:
+            dict: A sample transaction dictionary with keys:
+                - 'txid' (str): Transaction identifier.
+                - 'status' (dict): Contains 'block_time' (int) as a UNIX timestamp.
+                - 'vout' (list): List of output dicts, each with:
+                    - 'value' (int): Output value in satoshis.
+                    - 'scriptpubkey' (str): Output script.
+        """
         return {
             'txid': 'test_tx_hash_12345',
             'status': {
@@ -53,7 +70,15 @@ class TestBlockchainFetcherService:
 
     @pytest.fixture
     def sample_blockchaincom_tx(self):
-        """Sample Blockchain.com transaction data."""
+        """
+        Provide a sample Blockchain.com transaction payload used in tests.
+        
+        Returns:
+            dict: A transaction dict with keys:
+                - 'hash' (str): Transaction identifier.
+                - 'time' (int): Unix timestamp (seconds).
+                - 'result' (int): Net change in satoshis (positive for incoming, negative for outgoing).
+        """
         return {
             'hash': 'test_tx_hash_67890',
             'time': 1640995200,  # 2022-01-01 00:00:00 UTC
@@ -253,7 +278,19 @@ class TestBlockchainDeduplicationService:
 
     @pytest.fixture
     def sample_transactions(self):
-        """Sample transaction data for testing."""
+        """
+        Provide a list of sample crypto transaction dictionaries used in tests.
+        
+        Each dictionary represents a transaction with the following keys:
+        - transaction_hash (str): Unique transaction identifier.
+        - symbol (str): Asset symbol (e.g., 'BTC').
+        - quantity (Decimal): Transaction amount.
+        - timestamp (datetime): Transaction timestamp.
+        - transaction_type (CryptoTransactionType): IN/OUT transaction type.
+        
+        Returns:
+            list[dict]: Two sample transaction dictionaries for testing.
+        """
         return [
             {
                 'transaction_hash': 'tx_hash_1',
