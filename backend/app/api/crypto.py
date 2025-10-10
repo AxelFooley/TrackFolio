@@ -761,73 +761,50 @@ async def get_crypto_portfolio_history(
 @router.get("/prices", response_model=CryptoPriceResponse)
 async def get_crypto_prices(
     symbols: str = Query(..., description="Comma-separated list of crypto symbols (e.g., BTC,ETH,ADA)"),
-    currency: str = Query("eur", regex="^(eur|usd)$", description="Target currency"),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get current prices for multiple cryptocurrencies using Yahoo Finance."""
-    try:
-        # Parse symbols
-        symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-
-        if not symbol_list:
-            raise HTTPException(status_code=400, detail="At least one symbol is required")
-
-        if len(symbol_list) > 50:
-            raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed per request")
-
-@router.get("/prices", response_model=CryptoPriceResponse)
-async def get_crypto_prices(
-    symbols: str = Query(..., description="Comma-separated list of crypto symbols (e.g., BTC,ETH,ADA)"),
     currency: str = Query("eur", pattern="^(eur|usd)$", description="Target currency"),
 ):
-    # Get prices from Yahoo Finance
+    """Get current prices for multiple cryptocurrencies using Yahoo Finance."""
+    # Parse and validate symbols
+    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not symbol_list:
+        raise HTTPException(status_code=400, detail="At least one symbol is required")
+    if len(symbol_list) > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed per request")
+
     price_fetcher = PriceFetcher()
-    # Build batch tickers
     tickers = [(f"{s}-USD", None) for s in symbol_list]
-    # Execute sync fetches in threadpool inside helper
-    batch = price_fetcher.fetch_realtime_prices_batch(tickers)
+    batch_results = price_fetcher.fetch_realtime_prices_batch(tickers)
+    by_ticker = {d["ticker"]: d for d in batch_results if d and d.get("ticker")}
 
     eur_rate = None
-    if currency.lower() == 'eur':
+    if currency.lower() == "eur":
         eur_rate = await _get_usd_to_eur_rate()
 
-    prices = []
-    for s, data in zip(symbol_list, batch):
-        if not data or not data.get('current_price'):
+    prices: list[CryptoPriceData] = []
+    for s in symbol_list:
+        data = by_ticker.get(f"{s}-USD")
+        if not data or not data.get("current_price"):
             continue
-        price = data['current_price']
-        if currency.lower() == 'eur' and eur_rate:
-            price *= eur_rate
+        price = data["current_price"]
+        if currency.lower() == "eur" and eur_rate:
+            price = price * eur_rate
         prices.append(CryptoPriceData(
             symbol=s,
             price=price,
             currency=currency.upper(),
-            price_usd=data['current_price'],
+            price_usd=data["current_price"],
             market_cap_usd=None,
             volume_24h_usd=None,
-            change_percent_24h=(
-                float(data.get('change_percent', 0))
-                if data.get('change_percent')
-                else None
-            ),
-            timestamp=data.get('timestamp', datetime.utcnow()),
-            source='yahoo'
+            change_percent_24h=float(data.get("change_percent", 0)) if data.get("change_percent") else None,
+            timestamp=data.get("timestamp", datetime.utcnow()),
+            source="yahoo",
         ))
-                logger.warning(f"Failed to get price for {symbol}: {e}")
-                # Continue with other symbols
-                continue
 
-        return CryptoPriceResponse(
-            prices=prices,
-            currency=currency.upper(),
-            timestamp=datetime.utcnow()
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get crypto prices: {str(e)}")
-
+    return CryptoPriceResponse(
+        prices=prices,
+        currency=currency.upper(),
+        timestamp=datetime.utcnow(),
+    )
 
 @router.get("/prices/history", response_model=CryptoPriceHistoryResponse)
 async def get_crypto_price_history(
