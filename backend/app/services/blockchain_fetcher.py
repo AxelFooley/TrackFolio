@@ -336,15 +336,15 @@ class BlockchainFetcherService:
         try:
             # Extract relevant data
             tx_hash = tx_data.get('hash')
-            timestamp_ms = tx_data.get('time', 0) * 1000  # Convert to milliseconds
+            timestamp_seconds = tx_data.get('time', 0)  # Blockchain.info provides seconds
             result = tx_data.get('result', 0)  # Net change in wallet balance for this transaction
 
-            if not tx_hash or not timestamp_ms:
+            if not tx_hash or not timestamp_seconds:
                 logger.warning(f"Missing required fields in transaction data: {tx_data}")
                 return None
 
             # Convert timestamp to datetime
-            timestamp = datetime.fromtimestamp(timestamp_ms / 1000)
+            timestamp = datetime.fromtimestamp(timestamp_seconds)
 
             # Calculate the actual amount received/sent by our wallet
             # Look through outputs to find those belonging to our wallet
@@ -634,7 +634,7 @@ class BlockchainFetcherService:
         try:
             # Calculate date threshold
             date_threshold = datetime.utcnow() - timedelta(days=days_back)
-            threshold_timestamp = int(date_threshold.timestamp() * 1000)  # Blockchain.info uses milliseconds
+            threshold_timestamp = int(date_threshold.timestamp())  # Blockchain.info uses seconds
 
             # Build request URL - use the correct rawaddr endpoint structure
             endpoint = f"/rawaddr/{wallet_address}"
@@ -653,7 +653,7 @@ class BlockchainFetcherService:
             # Process transactions
             for tx_data in data.get('txs', []):
                 # Check transaction timestamp
-                if tx_data.get('time', 0) * 1000 < threshold_timestamp:
+                if tx_data.get('time', 0) < threshold_timestamp:
                     continue
 
                 # Convert transaction format
