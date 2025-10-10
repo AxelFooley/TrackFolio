@@ -323,15 +323,10 @@ def sync_single_wallet(
                             raise Exception("Yahoo Finance returned no price data")
 
                     except Exception as e:
-                        # Final fallback - use estimated price to avoid losing the transaction
-                        logger.warning(f"Could not get any price data for transaction {tx_hash}: {e}, using fallback price")
-                        # Use a reasonable fallback price based on transaction date
-                        # For 2024-2025, use ~$95,000 EUR as fallback (updated for current BTC prices)
-                        fallback_price = Decimal("95000.0")
-                        tx_data['price_at_execution'] = fallback_price
-                        tx_data['total_amount'] = tx_data['quantity'] * fallback_price
-                        tx_data['currency'] = CryptoCurrency.EUR
-                        tx_data['notes'] = f"{tx_data.get('notes', '')} (Price estimated - {fallback_price} EUR - Yahoo Finance unavailable)"
+                        # No fallback - skip transactions without valid price data
+                        logger.error(f"Could not get any price data for transaction {tx_hash}: {e}. Skipping transaction.")
+                        failed_transactions.append(tx_data)
+                        continue
 
                 # Create transaction record
                 transaction = CryptoTransaction(

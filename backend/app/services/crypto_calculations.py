@@ -25,7 +25,7 @@ from app.schemas.crypto import (
     CryptoPerformanceData,
     CryptoCurrency
 )
-from app.services.coincap import coincap_service
+from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -397,7 +397,7 @@ class CryptoCalculationService:
 
     async def _get_current_prices(self, symbols: List[str], currency: str) -> Dict[str, Dict]:
         """
-        Get current prices for multiple symbols.
+        Get current prices for multiple symbols using Yahoo Finance.
 
         Args:
             symbols: List of crypto symbols
@@ -407,42 +407,39 @@ class CryptoCalculationService:
             Dictionary of price data by symbol
         """
         prices = {}
+        price_fetcher = PriceFetcher()
 
         for symbol in symbols:
             try:
-                price_data = coincap_service.get_current_price(symbol, currency)
-                if price_data:
-                    prices[symbol] = price_data
-                else:
-                    # Use fallback price if CoinCap fails
-                    logger.warning(f"Using fallback price for {symbol} due to CoinCap API failure")
-                    # Use reasonable fallback prices based on current market conditions (2025)
-                    fallback_prices = {
-                        'BTC': Decimal("95000.0"),  # ~$95,000 EUR for Bitcoin
-                        'ETH': Decimal("3500.0"),   # ~$3,500 EUR for Ethereum
-                        'USDT': Decimal("1.0"),      # ~$1 EUR for Tether
-                        'USDC': Decimal("1.0"),      # ~$1 EUR for USD Coin
-                    }
+                # Add appropriate suffix for crypto symbols on Yahoo Finance
+                yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
 
-                    if symbol in fallback_prices:
-                        price_eur = fallback_prices[symbol]
-                        if currency.lower() == 'eur':
-                            price = price_eur
+                # Use Yahoo Finance to fetch current price
+                price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
+
+                if price_data and price_data.get('current_price'):
+                    price = price_data['current_price']
+
+                    # Convert to target currency if needed (Yahoo returns USD)
+                    if currency.lower() == 'eur':
+                        # Get USD to EUR conversion rate
+                        eur_rate = await self._get_usd_to_eur_rate()
+                        if eur_rate:
+                            price = price * eur_rate
                         else:
-                            # Convert EUR to USD using fallback rate
-                            price = price_eur / Decimal("0.92")  # EUR to USD
+                            logger.warning(f"Could not convert {symbol} price to EUR, using USD")
 
-                        prices[symbol] = {
-                            'symbol': symbol,
-                            'price': price,
-                            'currency': currency.upper(),
-                            'price_usd': price if currency.lower() == 'usd' else price_eur,
-                            'timestamp': datetime.utcnow(),
-                            'source': 'fallback'
-                        }
-                        logger.info(f"Used fallback price for {symbol}: {price} {currency.upper()}")
-                    else:
-                        logger.warning(f"No fallback price available for {symbol}")
+                    prices[symbol] = {
+                        'symbol': symbol,
+                        'price': price,
+                        'currency': currency.upper(),
+                        'price_usd': price_data['current_price'],
+                        'timestamp': datetime.utcnow(),
+                        'source': 'yahoo'
+                    }
+                else:
+                    # No fallback - if Yahoo Finance fails, we don't add the price
+                    logger.warning(f"Could not fetch price for {symbol} from Yahoo Finance - skipping")
             except Exception as e:
                 logger.warning(f"Error getting current price for {symbol}: {e}")
 
@@ -456,7 +453,7 @@ class CryptoCalculationService:
         currency: str
     ) -> Dict[str, List[Dict]]:
         """
-        Get historical prices for multiple symbols.
+        Get historical prices for multiple symbols using Yahoo Finance.
 
         Args:
             symbols: List of crypto symbols
@@ -468,16 +465,78 @@ class CryptoCalculationService:
             Dictionary of historical price data by symbol
         """
         prices = {}
+        price_fetcher = PriceFetcher()
 
         for symbol in symbols:
             try:
-                price_data = coincap_service.get_historical_prices(symbol, start_date, end_date, currency)
+                # Add appropriate suffix for crypto symbols on Yahoo Finance
+                yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
+
+                # Use Yahoo Finance to fetch historical prices
+                price_data = price_fetcher.fetch_historical_prices_sync(
+                    yahoo_symbol,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+
                 if price_data:
-                    prices[symbol] = price_data
+                    # Convert to target currency if needed (Yahoo returns USD)
+                    if currency.lower() == 'eur':
+                        eur_rate = await self._get_usd_to_eur_rate()
+                        if eur_rate:
+                            for data_point in price_data:
+                                data_point['price'] = data_point['close'] * eur_rate
+                                data_point['currency'] = 'EUR'
+                        else:
+                            for data_point in price_data:
+                                data_point['price'] = data_point['close']
+                                data_point['currency'] = 'USD'
+                    else:
+                        for data_point in price_data:
+                            data_point['price'] = data_point['close']
+                            data_point['currency'] = 'USD'
+
+                    # Format to match expected structure
+                    formatted_data = []
+                    for data_point in price_data:
+                        formatted_data.append({
+                            'date': data_point['date'],
+                            'symbol': symbol,
+                            'price': data_point['price'],
+                            'currency': data_point['currency'],
+                            'price_usd': data_point['close'],
+                            'timestamp': datetime.utcnow(),
+                            'source': 'yahoo'
+                        })
+
+                    prices[symbol] = formatted_data
+                else:
+                    logger.warning(f"No historical data available for {symbol}")
             except Exception as e:
                 logger.warning(f"Error getting historical prices for {symbol}: {e}")
 
         return prices
+
+    async def _get_usd_to_eur_rate(self) -> Optional[Decimal]:
+        """
+        Get USD to EUR conversion rate using Yahoo Finance.
+
+        Returns:
+            USD to EUR conversion rate or None if failed
+        """
+        try:
+            price_fetcher = PriceFetcher()
+            import asyncio
+            rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
+            if rate:
+                return rate
+            else:
+                # Fallback to a reasonable approximation
+                logger.warning("Using fallback USD to EUR rate (0.92)")
+                return Decimal("0.92")
+        except Exception as e:
+            logger.error(f"Error getting USD to EUR rate: {e}")
+            return Decimal("0.92")  # Fallback rate
 
     async def _calculate_irr(self, transactions: List[CryptoTransaction], current_value: Decimal) -> Optional[float]:
         """
