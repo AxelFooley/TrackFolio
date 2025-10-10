@@ -84,15 +84,17 @@ export function TransactionList() {
                     <TableCell>{formatDate(transaction.date)}</TableCell>
                     <TableCell className="font-medium">{transaction.ticker || '-'}</TableCell>
                     <TableCell>
-                      <span
+                        <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                           transaction.transaction_type === 'BUY'
-                            ? 'bg-success/10 text-success'
-                            : 'bg-danger/10 text-danger'
+                          ? 'bg-success/10 text-success'
+                          : transaction.transaction_type === 'SELL'
+                          ? 'bg-danger/10 text-danger'
+                          : 'bg-gray-100 text-gray-600'
                         }`}
-                      >
+                        >
                         {transaction.transaction_type || 'N/A'}
-                      </span>
+                        </span>
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {transaction.quantity || '-'}
