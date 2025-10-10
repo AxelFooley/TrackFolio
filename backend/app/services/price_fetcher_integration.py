@@ -28,7 +28,7 @@ class UnifiedPriceFetcher:
         """Initialize unified price fetcher."""
         self.yahoo_fetcher = PriceFetcher()
 
-    def fetch_current_price(self, ticker: str, asset_type: str = "stock", currency: str = "eur") -> Optional[Dict]:
+    async def fetch_current_price(self, ticker: str, asset_type: str = "stock", currency: str = "eur") -> Optional[Dict]:
         """
         Fetch current price for any asset type.
 
@@ -51,9 +51,8 @@ class UnifiedPriceFetcher:
                     # Convert to target currency if needed
                     if currency.lower() == "eur":
                         # Get USD to EUR conversion rate
-                        import asyncio
                         try:
-                            eur_rate = asyncio.run(self.yahoo_fetcher.fetch_fx_rate("USD", "EUR"))
+                            eur_rate = await self.yahoo_fetcher.fetch_fx_rate("USD", "EUR")
                             if eur_rate:
                                 price_eur = price_usd * eur_rate
                                 result["current_price"] = price_eur
@@ -63,7 +62,8 @@ class UnifiedPriceFetcher:
                                 price_eur = price_usd * Decimal("0.92")
                                 result["current_price"] = price_eur
                                 result["currency"] = "EUR"
-                        except:
+                        except Exception as e:
+                            logger.warning(f"Error converting to EUR: {e}, using fallback rate")
                             # Fallback conversion
                             price_eur = price_usd * Decimal("0.92")
                             result["current_price"] = price_eur
@@ -82,15 +82,15 @@ class UnifiedPriceFetcher:
 
                     # Convert to target currency if needed
                     if currency.lower() == "eur":
-                        import asyncio
                         try:
-                            eur_rate = asyncio.run(self.yahoo_fetcher.fetch_fx_rate("USD", "EUR"))
+                            eur_rate = await self.yahoo_fetcher.fetch_fx_rate("USD", "EUR")
                             if eur_rate:
                                 price_eur = result['close'] * eur_rate
                                 result['close'] = price_eur
                                 result['currency'] = 'EUR'
                                 logger.info(f"Converted to EUR: {price_eur}")
-                        except:
+                        except Exception as e:
+                            logger.warning(f"Error converting to EUR: {e}, using fallback rate")
                             # Fallback conversion
                             price_eur = result['close'] * Decimal("0.92")
                             result['close'] = price_eur
@@ -105,7 +105,7 @@ class UnifiedPriceFetcher:
             logger.error(f"Error fetching price for {ticker}: {e}")
             return None
 
-    def fetch_historical_prices(
+    async def fetch_historical_prices(
         self,
         ticker: str,
         start_date: date,
@@ -135,9 +135,8 @@ class UnifiedPriceFetcher:
 
                 # Convert to target currency if needed
                 if currency.lower() == "eur" and result:
-                    import asyncio
                     try:
-                        eur_rate = asyncio.run(self.yahoo_fetcher.fetch_fx_rate("USD", "EUR"))
+                        eur_rate = await self.yahoo_fetcher.fetch_fx_rate("USD", "EUR")
                         if eur_rate:
                             for price_point in result:
                                 price_point['close'] = price_point['close'] * eur_rate
@@ -146,7 +145,8 @@ class UnifiedPriceFetcher:
                                 price_point['low'] = price_point['low'] * eur_rate
                                 price_point['currency'] = 'EUR'
                             logger.info(f"Converted {len(result)} crypto price points to EUR")
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Error converting to EUR: {e}, using fallback rate")
                         # Fallback conversion
                         for price_point in result:
                             price_point['close'] = price_point['close'] * Decimal("0.92")
@@ -163,9 +163,8 @@ class UnifiedPriceFetcher:
 
                 # Convert to target currency if needed
                 if currency.lower() == "eur" and result:
-                    import asyncio
                     try:
-                        eur_rate = asyncio.run(self.yahoo_fetcher.fetch_fx_rate("USD", "EUR"))
+                        eur_rate = await self.yahoo_fetcher.fetch_fx_rate("USD", "EUR")
                         if eur_rate:
                             for price_point in result:
                                 price_point['close'] = price_point['close'] * eur_rate
@@ -174,7 +173,8 @@ class UnifiedPriceFetcher:
                                 price_point['low'] = price_point['low'] * eur_rate
                                 price_point['currency'] = 'EUR'
                             logger.info(f"Converted {len(result)} price points to EUR")
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Error converting to EUR: {e}, using fallback rate")
                         # Fallback conversion
                         for price_point in result:
                             price_point['close'] = price_point['close'] * Decimal("0.92")
@@ -221,7 +221,7 @@ class UnifiedPriceFetcher:
         # Default to stock
         return "stock"
 
-    def fetch_price_with_auto_detection(self, ticker: str, currency: str = "eur") -> Optional[Dict]:
+    async def fetch_price_with_auto_detection(self, ticker: str, currency: str = "eur") -> Optional[Dict]:
         """
         Fetch price with automatic asset type detection.
 
@@ -235,7 +235,7 @@ class UnifiedPriceFetcher:
         asset_type = self.detect_asset_type(ticker)
         logger.info(f"Auto-detected {ticker} as {asset_type}")
 
-        return self.fetch_current_price(ticker, asset_type, currency)
+        return await self.fetch_current_price(ticker, asset_type, currency)
 
     def get_supported_cryptocurrencies(self) -> List[Dict]:
         """
@@ -276,7 +276,7 @@ class UnifiedPriceFetcher:
             logger.error(f"Error getting supported cryptocurrencies: {e}")
             return []
 
-    def test_all_services(self) -> Dict[str, bool]:
+    async def test_all_services(self) -> Dict[str, bool]:
         """
         Test all connected price services.
 
@@ -303,8 +303,8 @@ class UnifiedPriceFetcher:
 
         # Test mixed assets
         try:
-            stock_price = self.fetch_price_with_auto_detection('AAPL')
-            crypto_price = self.fetch_price_with_auto_detection('BTC')
+            stock_price = await self.fetch_price_with_auto_detection('AAPL')
+            crypto_price = await self.fetch_price_with_auto_detection('BTC')
             results['mixed_assets'] = stock_price is not None and crypto_price is not None
         except Exception as e:
             logger.error(f"Mixed assets test failed: {e}")
@@ -318,20 +318,20 @@ unified_price_fetcher = UnifiedPriceFetcher()
 
 
 # Example usage functions
-def example_usage():
+async def example_usage():
     """Example usage of the unified price fetcher."""
 
     # Test all services
-    status = unified_price_fetcher.test_all_services()
+    status = await unified_price_fetcher.test_all_services()
     print("Service Status:", status)
 
     # Fetch stock price (auto-detected)
-    apple_price = unified_price_fetcher.fetch_price_with_auto_detection('AAPL')
+    apple_price = await unified_price_fetcher.fetch_price_with_auto_detection('AAPL')
     if apple_price:
         print(f"AAPL Price: {apple_price['close']} {apple_price.get('currency', 'USD')}")
 
     # Fetch crypto price (auto-detected)
-    btc_price = unified_price_fetcher.fetch_price_with_auto_detection('BTC')
+    btc_price = await unified_price_fetcher.fetch_price_with_auto_detection('BTC')
     if btc_price:
         print(f"BTC Price: {btc_price['price']} {btc_price['currency']}")
 
@@ -340,7 +340,7 @@ def example_usage():
     end_date = date.today()
     start_date = end_date - timedelta(days=30)
 
-    eth_history = unified_price_fetcher.fetch_historical_prices(
+    eth_history = await unified_price_fetcher.fetch_historical_prices(
         'ETH', start_date, end_date, 'crypto', 'eur'
     )
     print(f"ETH Historical Prices: {len(eth_history)} data points")
@@ -351,4 +351,5 @@ def example_usage():
 
 
 if __name__ == "__main__":
-    example_usage()
+    import asyncio
+    asyncio.run(example_usage())

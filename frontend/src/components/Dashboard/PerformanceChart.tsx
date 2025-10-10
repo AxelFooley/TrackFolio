@@ -129,7 +129,7 @@ export function PerformanceChart() {
   const chartData = performanceData.map((point) => ({
     date: point.date,
     portfolio: point.portfolio,
-    ...(point.benchmark && { benchmark: point.benchmark }),
+    ...(point.benchmark != null && { benchmark: point.benchmark }),
   }));
 
   const hasBenchmarkData = chartData.some(point => point.benchmark !== undefined);

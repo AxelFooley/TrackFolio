@@ -470,7 +470,7 @@ async def get_portfolio_blockchain_transactions(
         return {
             "portfolio_id": portfolio_id,
             "wallet_address": portfolio.wallet_address,
-            "transactions": [TransactionResponse.from_orm(tx) for tx in transactions],
+            "transactions": [TransactionResponse.model_validate(tx, from_attributes=True) for tx in transactions],
             "total_count": total_count,
             "limit": limit,
             "offset": offset,

@@ -1089,25 +1089,4 @@ async def crypto_health_check():
             "timestamp": datetime.utcnow()
         }
 
-# Helper function for currency conversion
-async def _get_usd_to_eur_rate() -> Optional[Decimal]:
-    """
-    Get USD to EUR conversion rate using Yahoo Finance.
-
-    Returns:
-        USD to EUR conversion rate or None if failed
-    """
-    try:
-        price_fetcher = PriceFetcher()
-        import asyncio
-        rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
-        if rate:
-            return rate
-        else:
-            # Fallback to a reasonable approximation
-            logger.warning("Using fallback USD to EUR rate (0.92)")
-            return Decimal("0.92")
-    except Exception as e:
-        logger.error(f"Error getting USD to EUR rate: {e}")
-        return Decimal("0.92")  # Fallback rate
 

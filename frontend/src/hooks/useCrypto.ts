@@ -310,8 +310,8 @@ export function useSyncWallet() {
       }
     },
     onSuccess: (data, portfolioId) => {
-      // Update with the new status from the server
-      queryClient.setQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status'], data.status);
+      // Update with the full response data from the server
+      queryClient.setQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status'], data);
 
       // Invalidate related queries
       queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId] });

@@ -282,18 +282,18 @@ class BlockchainFetcherService:
             timestamp = datetime.fromtimestamp(block_time)
 
             # Calculate the value for this wallet address
-            # This is simplified - you'd want to properly parse inputs/outputs
-            total_value = 0
+            # Blockstream API returns vout.value in satoshis (not BTC)
+            total_satoshis = 0
             for vout in tx_data.get('vout', []):
                 # Check if this output belongs to our wallet
                 scriptpubkey = vout.get('scriptpubkey', '')
                 # This is simplified - proper address detection would require script parsing
-                # For now, we'll use the transaction value
-                total_value += vout.get('value', 0)
+                # For now, we'll use the transaction value (already in satoshis)
+                total_satoshis += int(vout.get('value', 0))
 
-            # Convert from BTC to satoshis for precision
-            value_satoshis = int(total_value * 100000000)
-            quantity = Decimal(str(total_value))
+            # Store satoshis and convert to BTC quantity
+            value_satoshis = total_satoshis
+            quantity = Decimal(total_satoshis) / Decimal("100000000")
 
             # For now, we'll estimate the price based on the transaction date
             # In a real implementation, you'd fetch historical price data

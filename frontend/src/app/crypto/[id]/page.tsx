@@ -230,7 +230,7 @@ export default function CryptoPortfolioDetailPage() {
                     <p className="font-semibold">{metrics.best_performer.symbol}</p>
                     <p className="text-sm text-gray-600">{metrics.best_performer.asset_name}</p>
                     <p className="text-sm text-success">
-                      {formatPercentage(metrics.best_performer.return_percentage * 100)}
+                      {formatPercentage(metrics.best_performer.return_percentage)}
                     </p>
                   </div>
                 ) : (
@@ -251,7 +251,7 @@ export default function CryptoPortfolioDetailPage() {
                     <p className="font-semibold">{metrics.worst_performer.symbol}</p>
                     <p className="text-sm text-gray-600">{metrics.worst_performer.asset_name}</p>
                     <p className="text-sm text-danger">
-                      {formatPercentage(metrics.worst_performer.return_percentage * 100)}
+                      {formatPercentage(metrics.worst_performer.return_percentage)}
                     </p>
                   </div>
                 ) : (

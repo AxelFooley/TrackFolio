@@ -323,7 +323,7 @@ export default function CryptoHoldingsPage() {
                   <tbody>
                     {sortedHoldings.map((holding) => {
                       const isPositive = holding.unrealized_gain >= 0;
-                      const returnPercentage = holding.return_percentage * 100;
+                      const returnPercentage = holding.return_percentage;
 
                       return (
                         <tr
@@ -365,10 +365,10 @@ export default function CryptoHoldingsPage() {
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
                             <Badge
-                              variant={returnPercentage >= 0 ? 'default' : 'destructive'}
+                              variant={holding.return_percentage >= 0 ? 'default' : 'destructive'}
                               className="text-xs"
                             >
-                              {formatPercentage(returnPercentage)}
+                              {formatPercentage(holding.return_percentage)}
                             </Badge>
                           </td>
                           <td className="py-4 px-4 text-right">

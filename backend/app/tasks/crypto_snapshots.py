@@ -349,7 +349,6 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
 
     # Calculate current holdings
     holdings = {}
-    total_cost_basis = Decimal("0")
 
     for txn in transactions:
         symbol = txn.symbol
@@ -359,22 +358,33 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
                 "total_cost": Decimal("0")
             }
 
-        if txn.transaction_type == CryptoTransactionType.BUY:
+        if txn.transaction_type == CryptoTransactionType.BUY or txn.transaction_type == CryptoTransactionType.TRANSFER_IN:
+            # Add to position
             holdings[symbol]["quantity"] += txn.quantity
             holdings[symbol]["total_cost"] += txn.total_amount
-            total_cost_basis += txn.total_amount
-        elif txn.transaction_type == CryptoTransactionType.SELL:
-            holdings[symbol]["quantity"] -= txn.quantity
-            holdings[symbol]["total_cost"] -= txn.total_amount
-            total_cost_basis -= txn.total_amount
-        elif txn.transaction_type == CryptoTransactionType.TRANSFER_IN:
-            holdings[symbol]["quantity"] += txn.quantity
-            holdings[symbol]["total_cost"] += txn.total_amount
-            total_cost_basis += txn.total_amount
-        elif txn.transaction_type == CryptoTransactionType.TRANSFER_OUT:
-            holdings[symbol]["quantity"] -= txn.quantity
-            holdings[symbol]["total_cost"] -= txn.total_amount
-            total_cost_basis -= txn.total_amount
+        elif txn.transaction_type == CryptoTransactionType.SELL or txn.transaction_type == CryptoTransactionType.TRANSFER_OUT:
+            # Calculate average cost per unit before reducing position
+            if holdings[symbol]["quantity"] > 0:
+                average_cost_per_unit = holdings[symbol]["total_cost"] / holdings[symbol]["quantity"]
+            else:
+                average_cost_per_unit = Decimal("0")
+
+            # Reduce quantity
+            sold_quantity = min(txn.quantity, holdings[symbol]["quantity"])  # Prevent negative
+            holdings[symbol]["quantity"] -= sold_quantity
+
+            # Reduce cost basis by the cost of units sold (not by proceeds)
+            cost_removed = average_cost_per_unit * sold_quantity
+            holdings[symbol]["total_cost"] -= cost_removed
+
+            # Ensure no negative values
+            if holdings[symbol]["quantity"] < 0:
+                holdings[symbol]["quantity"] = Decimal("0")
+            if holdings[symbol]["total_cost"] < 0:
+                holdings[symbol]["total_cost"] = Decimal("0")
+
+    # Recalculate total cost basis from holdings
+    total_cost_basis = sum(holding["total_cost"] for holding in holdings.values())
 
     # Get current prices for non-zero holdings
     total_value_eur = Decimal("0")
@@ -386,17 +396,19 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
             continue
 
         # Get current price (for snapshot, we want the price as of snapshot_date)
-        # Try to get price from price_history table first
+        # Try to get the most recent price from price_history table first
         price_record = db.execute(
-            select(func.max(PriceHistory.close))
+            select(PriceHistory)
             .where(
                 PriceHistory.ticker == symbol,
                 PriceHistory.date <= snapshot_date
             )
-        ).scalar()
+            .order_by(PriceHistory.date.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
         if price_record:
-            price_eur = price_record
+            price_eur = Decimal(str(price_record.close))
             # Get USD price (approximate conversion)
             price_usd = price_eur / Decimal("0.92")
         else:
