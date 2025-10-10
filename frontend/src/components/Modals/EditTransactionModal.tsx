@@ -91,7 +91,7 @@ export function EditTransactionModal({
       await updateMutation.mutateAsync({
         id: transaction.id,
         data: {
-          date: new Date(form.date).toISOString(),
+          date: `${form.date}T00:00:00.000Z`,
           quantity: quantityValue,
           price: priceValue,
           fees: feesValue,
