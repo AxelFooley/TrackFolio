@@ -23,7 +23,7 @@ def upgrade() -> None:
 
     # Add wallet_address column to crypto_portfolios table
     op.add_column('crypto_portfolios',
-        sa.Column('wallet_address', sa.String(length=62), nullable=True,
+        sa.Column('wallet_address', sa.String(length=90), nullable=True,
                  comment='Bitcoin wallet address for paper wallet tracking (optional)')
     )
 
