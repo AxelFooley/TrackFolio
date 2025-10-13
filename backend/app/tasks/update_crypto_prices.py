@@ -19,6 +19,7 @@ from app.database import SyncSessionLocal
 from app.models import PriceHistory, CryptoTransaction, CryptoTransactionType
 from app.services.price_fetcher import PriceFetcher
 from app.services.currency_converter import get_exchange_rate
+
 logger = logging.getLogger(__name__)
 
 
