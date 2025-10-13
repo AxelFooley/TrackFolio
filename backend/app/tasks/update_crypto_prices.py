@@ -198,7 +198,7 @@ def update_crypto_prices(self):
     retry_backoff_max=600,
     retry_jitter=True
 )
-def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
+def update_crypto_price_for_symbol(self, symbol: str, price_date: Optional[str] = None):
     """
     Update and store the price for a single cryptocurrency symbol for a given date.
     
