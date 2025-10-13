@@ -220,8 +220,8 @@ class UnifiedPriceFetcher:
         if ticker.upper() in crypto_symbols:
             return "crypto"
 
-        # Check for common ETF patterns
-        if ticker.endswith('.L') or ticker.startswith('I') or ticker.startswith('VTI') or ticker.startswith('SPY'):
+        # Check for common ETF patterns (London-listed or specific major ETFs)
+        if ticker.endswith('.L') or ticker in {'VTI', 'SPY', 'VOO', 'IVV', 'QQQ'}:
             return "etf"
 
         # Default to stock
