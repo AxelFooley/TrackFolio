@@ -145,8 +145,8 @@ export function PerformanceChart() {
   // Determine if we have a single data point (special case for rendering)
   const isSinglePoint = chartData.length === 1;
 
-  // Get currency from first data point, default to EUR
-  const portfolioCurrency = performanceData?.[0]?.currency ?? 'EUR';
+  // Portfolio currency (currently hardcoded to EUR as API doesn't return currency with performance data)
+  const portfolioCurrency = 'EUR';
 
   return (
     <Card>

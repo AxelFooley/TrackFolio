@@ -42,7 +42,8 @@ export function PortfolioOverview() {
         } else {
           // Fallbacks when no real-time data
           const curr = holding.current_value ?? 0;
-          const prev = (holding.previous_close_value ?? holding.previous_value ?? curr) ?? 0;
+          // Calculate previous value from today's change: previous = current - change
+          const prev = holding.today_change != null ? curr - holding.today_change : curr;
           totalCurrentValue += curr;
           totalPreviousValue += prev;
         }

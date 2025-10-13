@@ -48,7 +48,7 @@ export function AddTransactionModal({
   const [formData, setFormData] = useState<TransactionCreate>({
     isin: '',
     ticker: '',
-    transaction_type: 'buy',
+    transaction_type: 'BUY',
     quantity: 0,
     price: 0,
     currency: 'EUR',
@@ -112,7 +112,7 @@ export function AddTransactionModal({
       setFormData({
         isin: '',
         ticker: '',
-        transaction_type: 'buy',
+        transaction_type: 'BUY',
         quantity: 0,
         price: 0,
         currency: 'EUR',
@@ -154,14 +154,14 @@ export function AddTransactionModal({
               <Label htmlFor="transaction_type">Transaction Type</Label>
               <Select
                 value={formData.transaction_type}
-                onValueChange={(value) => handleFieldChange('transaction_type', value as 'buy' | 'sell')}
+                onValueChange={(value) => handleFieldChange('transaction_type', value as 'BUY' | 'SELL')}
               >
                 <SelectTrigger id="transaction_type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="buy">Buy</SelectItem>
-                  <SelectItem value="sell">Sell</SelectItem>
+                  <SelectItem value="BUY">Buy</SelectItem>
+                  <SelectItem value="SELL">Sell</SelectItem>
                 </SelectContent>
               </Select>
             </div>
