@@ -571,13 +571,13 @@ class BlockchainFetcherService:
 
             # Detect transaction type
             tx_type = self._detect_transaction_type(tx_data, wallet_address)
-    def fetch_transactions(
-        self,
-        wallet_address: str,
-        portfolio_id: int,
-        max_transactions: int = 100,
-        days_back: Optional[int] = None
-    ) -> Dict[str, Any]:
+
+            return {
+                'transaction_hash': tx_hash,
+                'timestamp': timestamp,
+                'transaction_type': tx_type,
+                'symbol': 'BTC',
+                'quantity': quantity,
                 'price_at_execution': estimated_price,
                 'total_amount': abs(quantity) * estimated_price,
                 'currency': CryptoCurrency.USD,
