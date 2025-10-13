@@ -30,6 +30,17 @@ interface AddTransactionModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * Render a modal dialog for creating a new stock transaction.
+ *
+ * The modal provides inputs for transaction type, ticker, ISIN, date, quantity,
+ * price per share, currency, and fees, shows a transaction summary, and submits
+ * validated data using the create transaction hook.
+ *
+ * @param open - Whether the modal is visible
+ * @param onOpenChange - Callback invoked with the new open state when it changes
+ * @returns A JSX element rendering the add-transaction modal
+ */
 export function AddTransactionModal({
   open,
   onOpenChange,

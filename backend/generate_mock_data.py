@@ -41,11 +41,20 @@ PORTFOLIO_POSITIONS = [
 
 class MockDataGenerator:
     def __init__(self):
+        """
+        Initialize the generator's internal state.
+        
+        Sets up an empty list to collect transaction records and initializes the order reference counter at 1000 for generating unique order identifiers.
+        """
         self.transactions = []
         self.order_ref_counter = 1000
 
     def get_historical_prices(self, ticker: str, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
-        """Fetch historical prices for a ticker."""
+        """
+        Retrieve historical price series for a given ticker over a date range.
+        
+        Returns a pandas DataFrame indexed by date containing the historical OHLCV and corporate-action fields produced by yfinance (typically: `Open`, `High`, `Low`, `Close`, `Volume`, `Dividends`, `Stock Splits`), or `None` if prices could not be fetched.
+        """
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(start=start_date, end=end_date)
@@ -55,7 +64,14 @@ class MockDataGenerator:
             return None
 
     def generate_realistic_prices(self, base_price: float, start_date: datetime, end_date: datetime) -> List[Tuple[datetime, float]]:
-        """Generate realistic price movements with trend and volatility."""
+        """
+        Generate a daily price series between start_date and end_date that simulates realistic market movements with trend and volatility.
+        
+        The series models a random walk with a small annual trend and daily volatility, skips weekends, rounds prices to two decimals, and enforces a floor so prices never fall below 10% of the provided base_price.
+        
+        Returns:
+            List[Tuple[datetime, float]]: Ordered list of (date, price) tuples for trading days only.
+        """
         prices = []
         current_date = start_date
         current_price = base_price
@@ -82,7 +98,11 @@ class MockDataGenerator:
         return prices
 
     def generate_transactions(self):
-        """Generate 10 years of realistic transaction data."""
+        """
+        Generate a 10-year sequence of transactions for all positions and store them in self.transactions.
+        
+        Populates the generator's transaction list with simulated buys, sells, dividends and fees for each position in PORTFOLIO_POSITIONS across the date range 2015-01-01 to 2025-01-01. Attempts to obtain a base price from live market data; if unavailable, uses a randomized fallback price.
+        """
         start_date = datetime(2015, 1, 1)
         end_date = datetime(2025, 1, 1)
 
@@ -112,7 +132,17 @@ class MockDataGenerator:
             )
 
     def _generate_position_transactions(self, position: Dict, base_price: float, start_date: datetime, end_date: datetime):
-        """Generate transactions for a single position."""
+        """
+        Simulate and append a time series of buy, sell, dividend and fee transactions for a single portfolio position over a date range.
+        
+        Simulates an investment plan for the given position between start_date and end_date and appends generated transactions to self.transactions. The simulation includes an initial purchase, periodic contributions, occasional rebalancing sells, probabilistic dividend payments, and infrequent random trades; amounts, timings, and frequencies are randomized to produce realistic variation.
+        
+        Parameters:
+            position (Dict): Position metadata; expected keys include "ticker", "isin", and "name".
+            base_price (float): Reference price used when generating the synthetic price history and transaction sizes.
+            start_date (datetime): Inclusive start of the simulation period.
+            end_date (datetime): Inclusive end of the simulation period.
+        """
         ticker = position["ticker"]
         isin = position["isin"]
         name = position["name"]
@@ -208,7 +238,19 @@ class MockDataGenerator:
 
     def _create_buy_transaction(self, date: datetime, ticker: str, isin: str, name: str,
                                quantity: int, price: float):
-        """Create a buy transaction."""
+        """
+                               Create and record a buy transaction for the given security.
+                               
+                               Increments the internal order reference, appends a purchase transaction entry (the purchase amount is stored as a negative value in "Importo euro"), and records a corresponding fee transaction linked to the created order.
+                               
+                               Parameters:
+                                   date (datetime): Operation and value date for the transaction.
+                                   ticker (str): Security ticker symbol.
+                                   isin (str): Security ISIN identifier.
+                                   name (str): Security descriptive name used in the transaction description.
+                                   quantity (int): Number of shares purchased.
+                                   price (float): Price per share in EUR.
+                               """
         self.order_ref_counter += 1
         order_ref = f"ORD{self.order_ref_counter:06d}"
 
@@ -237,7 +279,17 @@ class MockDataGenerator:
 
     def _create_sell_transaction(self, date: datetime, ticker: str, isin: str, name: str,
                                 quantity: int, price: float):
-        """Create a sell transaction."""
+        """
+                                Record a sell transaction and its associated fee in the generator's transaction list.
+                                
+                                Parameters:
+                                    date (datetime): Operation and value date for the sale.
+                                    ticker (str): Asset ticker symbol.
+                                    isin (str): Asset ISIN identifier (may be empty).
+                                    name (str): Asset display name used in the description.
+                                    quantity (int): Number of shares sold (positive integer).
+                                    price (float): Sale price per share in EUR.
+                                """
         self.order_ref_counter += 1
         order_ref = f"ORD{self.order_ref_counter:06d}"
 
@@ -266,7 +318,19 @@ class MockDataGenerator:
 
     def _create_dividend_transaction(self, date: datetime, ticker: str, isin: str, name: str,
                                    amount: float):
-        """Create a dividend transaction."""
+        """
+                                   Record a dividend payment transaction for the specified instrument.
+                                   
+                                   Parameters:
+                                       date (datetime): Operation and value date for the dividend.
+                                       ticker (str): Instrument ticker symbol.
+                                       isin (str): Instrument ISIN identifier.
+                                       name (str): Instrument name used in the transaction description.
+                                       amount (float): Dividend amount in EUR.
+                                   
+                                   Side effects:
+                                       Increments the generator's internal order reference and appends a transaction entry to self.transactions.
+                                   """
         self.order_ref_counter += 1
         order_ref = f"DIV{self.order_ref_counter:06d}"
 
@@ -288,7 +352,14 @@ class MockDataGenerator:
         self.transactions.append(transaction)
 
     def _create_fee_transaction(self, date: datetime, order_ref: str, amount: float):
-        """Create a fee transaction."""
+        """
+        Record a commission/fee transaction and add it to the generator's transactions list.
+        
+        Parameters:
+            date (datetime): Operation and value date for the fee.
+            order_ref (str): Order reference to include in the transaction description and reference field.
+            amount (float): Fee amount in EUR; recorded as a negative value in "Importo euro" and as a positive value in "Importo Divisa".
+        """
         transaction = {
             "Data operazione": date.strftime("%d-%m-%Y"),
             "Data valuta": date.strftime("%d-%m-%Y"),
@@ -307,7 +378,14 @@ class MockDataGenerator:
         self.transactions.append(transaction)
 
     def save_to_csv(self, filename: str):
-        """Save transactions to CSV file in Directa format."""
+        """
+        Write the generator's accumulated transactions to a CSV file using a Directa-style layout.
+        
+        The transactions are sorted by the "Data operazione" field (format "%d-%m-%Y") before export. A nine-row Directa header is written first, followed by the transaction table encoded as UTF-8. After writing the file, a summary file is generated alongside the CSV.
+        
+        Parameters:
+            filename (str): Path to the output CSV file.
+        """
         # Sort transactions by date
         self.transactions.sort(key=lambda x: datetime.strptime(x["Data operazione"], "%d-%m-%Y"))
 
@@ -345,7 +423,14 @@ class MockDataGenerator:
         self._generate_summary(filename)
 
     def _generate_summary(self, filename: str):
-        """Generate a summary of the generated data."""
+        """
+        Write a human-readable summary of the generated transactions and save it next to the CSV file.
+        
+        The summary aggregates totals (transactions, buys, sells, dividends, fees), counts unique positions (by ISIN), and the date range of operations, then logs these metrics and writes them to a text file named by replacing the CSV extension with `_summary.txt`.
+        
+        Parameters:
+            filename (str): Path to the CSV file that was written; the summary file is created by replacing the `.csv` suffix with `_summary.txt`.
+        """
         summary = {
             'total_transactions': len(self.transactions),
             'buys': len([t for t in self.transactions if t['Tipo operazione'] == 'Acquisto']),
@@ -385,7 +470,11 @@ class MockDataGenerator:
                 f.write(f"  {pos['ticker']} - {pos['name']} ({pos['sector']})\n")
 
 def main():
-    """Main function to generate mock data."""
+    """
+    Generate and save a mock portfolio transactions CSV for local use.
+    
+    Creates a MockDataGenerator, produces a ten-year sequence of mock transactions for predefined positions, writes the result to "mock_portfolio_data.csv", and logs progress and completion.
+    """
     logger.info("Generating mock portfolio data...")
 
     generator = MockDataGenerator()

@@ -21,6 +21,15 @@ import type { Position } from '@/lib/types';
 type SortField = keyof Position;
 type SortDirection = 'asc' | 'desc';
 
+/**
+ * Render a sortable holdings table that displays portfolio positions augmented with real-time price data.
+ *
+ * The component shows loading skeletons while holdings load, an empty state when there are no holdings,
+ * and a table of positions when data is available. Each row is clickable to navigate to the asset detail page.
+ * The table supports sorting by multiple fields and displays live-update metadata when real-time prices are available.
+ *
+ * @returns The rendered holdings table React element
+ */
 export function HoldingsTable() {
   const router = useRouter();
   const { data: holdings, isLoading } = useHoldings();

@@ -16,6 +16,13 @@ import { ArrowLeft, Plus, Upload, Search, Bitcoin } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import type { CryptoTransactionCreate } from '@/lib/types';
 
+/**
+ * Renders the crypto transactions management page for a portfolio, including transaction list, filters, summary cards, and a dialog-driven form to add new transactions.
+ *
+ * The page fetches portfolio and transaction data, provides search and symbol filtering, shows transaction statistics, and lets the user create a transaction with client-side validation and toast feedback.
+ *
+ * @returns The page UI for managing cryptocurrency transactions for the current portfolio.
+ */
 export default function CryptoTransactionsPage() {
   const params = useParams();
   const router = useRouter();

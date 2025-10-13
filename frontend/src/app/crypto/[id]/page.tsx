@@ -13,6 +13,13 @@ import { CryptoPriceChart } from '@/components/Crypto/CryptoPriceChart';
 import { WalletSync } from '@/components/Crypto/WalletSync';
 import { useToast } from '@/hooks/use-toast';
 
+/**
+ * Render the detailed view for a cryptocurrency portfolio, including overview metrics, a performance chart with selectable time ranges, portfolio metrics (best/worst performer and largest position), optional wallet sync, and a holdings table.
+ *
+ * Fetches portfolio, metrics, and holdings data for the ID from route params; exposes a refresh action that updates live prices and shows success or error toasts, and provides navigation actions for adding transactions and viewing holdings.
+ *
+ * @returns The React element for the crypto portfolio detail page.
+ */
 export default function CryptoPortfolioDetailPage() {
   const params = useParams();
   const router = useRouter();

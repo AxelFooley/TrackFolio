@@ -7,6 +7,13 @@ import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { useMemo } from 'react';
 
+/**
+ * Render a card showing the top daily gainers and losers from the user's holdings.
+ *
+ * Computes current value, unrealized gain, today's total position change, and today's percentage change using holdings and real-time price data, then displays the top three gainers and top three losers. Provides loading, no-holdings, and no-movers fallback UIs.
+ *
+ * @returns A React element displaying today's movers (top gainers and top losers) with current value and today's change.
+ */
 export function TodaysMovers() {
   const { data: holdings, isLoading } = useHoldings();
   const symbols = holdings?.map(h => h.ticker) || [];

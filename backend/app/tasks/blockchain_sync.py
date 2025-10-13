@@ -26,10 +26,12 @@ logger = logging.getLogger(__name__)
 
 def get_usd_to_eur_rate() -> Optional[Decimal]:
     """
-    Get USD to EUR conversion rate using Yahoo Finance FX data.
-
+    Retrieve the USD-to-EUR exchange rate using Yahoo Finance FX data.
+    
+    Fetches the EUR/USD rate and returns its reciprocal so the result represents how many EUR equal 1 USD.
+    
     Returns:
-        USD to EUR conversion rate (e.g., 0.92) or None if failed
+        Decimal: Amount of EUR per 1 USD (e.g., Decimal('0.92')), or `None` if the rate could not be obtained.
     """
     try:
         price_fetcher = PriceFetcher()
@@ -62,19 +64,12 @@ def get_usd_to_eur_rate() -> Optional[Decimal]:
 )
 def sync_all_wallets(self):
     """
-    Sync all Bitcoin wallets configured in crypto portfolios.
-
-    This task:
-    1. Finds all portfolios with Bitcoin wallet addresses
-    2. Fetches new transactions from blockchain APIs
-    3. Detects and prevents duplicate transactions
-    4. Calculates accurate prices at execution time
-    5. Saves new transactions to the database
-
-    Scheduled to run every 30 minutes.
-
+    Orchestrates a full synchronization for all configured Bitcoin wallets and returns a summary of the global results.
+    
+    Runs synchronization across every portfolio that has a Bitcoin wallet address and aggregates per-wallet outcomes into a single result.
+    
     Returns:
-        dict: Summary of sync results across all wallets
+        dict: Summary containing overall status, counts (added/skipped/failed/fetched), and per-wallet result details.
     """
     return _sync_bitcoin_wallets_impl()
 
@@ -85,19 +80,21 @@ sync_bitcoin_wallets = sync_all_wallets
 
 def _sync_bitcoin_wallets_impl():
     """
-    Sync all Bitcoin wallets configured in crypto portfolios.
-
-    This task:
-    1. Finds all portfolios with Bitcoin wallet addresses
-    2. Fetches new transactions from blockchain APIs
-    3. Detects and prevents duplicate transactions
-    4. Calculates accurate prices at execution time
-    5. Saves new transactions to the database
-
-    Scheduled to run every 30 minutes.
-
+    Synchronizes all active Bitcoin wallets' transactions into the database.
+    
+    Finds active portfolios with wallet addresses, runs per-wallet synchronization (adds new transactions, skips duplicates, records failures), and returns an aggregated summary of the run. If blockchain synchronization is disabled in settings, returns a disabled status without performing work.
+    
     Returns:
-        dict: Summary of sync results across all wallets
+        dict: Summary of the synchronization run. Common keys:
+            - status (str): "success" when run completed, or "disabled" if sync is turned off.
+            - message (str): Human-readable summary.
+            - wallets_synced (int): Number of wallets processed.
+            - total_transactions_added (int): Count of new transactions inserted.
+            - total_transactions_skipped (int): Count of transactions skipped (duplicates or integrity conflicts).
+            - total_wallets_failed (int): Count of wallets that failed during processing.
+            - sync_timestamp (str): ISO-8601 UTC timestamp of the run.
+            - wallet_results (list): Per-wallet result objects with portfolio_id, portfolio_name, wallet_address and their individual status/counts.
+        When synchronization is disabled, the dict contains "status": "disabled", "message", and zeroed counts.
     """
     # Check if blockchain sync is enabled
     if not settings.blockchain_sync_enabled:
@@ -411,15 +408,17 @@ def get_historical_price_at_time(
     base_currency: str = 'EUR'
 ) -> Optional[Decimal]:
     """
-    Get historical price for a cryptocurrency at a specific time using Yahoo Finance.
-
-    Args:
-        symbol: Cryptocurrency symbol (e.g., 'BTC')
-        timestamp: Target timestamp
-        base_currency: Target currency
-
+    Retrieve the price of a cryptocurrency closest to a given timestamp in the requested currency.
+    
+    Attempts to obtain a historical price near the provided timestamp and falls back to a current price when historical data is unavailable. Returned value is expressed in the requested base currency; if a conversion from USD to EUR is required but unavailable, the function may return the USD value or None when no price can be determined.
+    
+    Parameters:
+        symbol (str): Cryptocurrency symbol (e.g., 'BTC').
+        timestamp (datetime): Target point in time for the price lookup.
+        base_currency (str): Desired currency for the returned price (case-insensitive, typically 'EUR' or 'USD').
+    
     Returns:
-        Historical price or None if not available
+        Decimal or None: Price of the cryptocurrency in the requested base currency, or `None` if no price data could be obtained.
     """
     try:
         # Get date from timestamp
@@ -513,18 +512,16 @@ def sync_wallet_manually(
     days_back: Optional[int] = 30
 ):
     """
-    Manually trigger sync for a specific Bitcoin wallet.
-
-    This task can be called from API endpoints for immediate wallet sync.
-
-    Args:
-        wallet_address: Bitcoin wallet address to sync
-        portfolio_id: Portfolio ID to associate transactions with
-        max_transactions: Maximum number of transactions to fetch (default: 200)
-        days_back: Number of days to look back for transactions (default: 30)
-
+    Manually trigger a synchronization of transactions for a single Bitcoin wallet and return the per-wallet sync result.
+    
+    Parameters:
+    	wallet_address (str): Bitcoin wallet address to synchronize.
+    	portfolio_id (int): ID of the portfolio that must own the wallet.
+    	max_transactions (Optional[int]): Maximum number of transactions to fetch for this sync (default 200).
+    	days_back (Optional[int]): Lookback window in days for transactions to fetch (default 30).
+    
     Returns:
-        dict: Sync result for the wallet
+    	dict: Summary of the sync outcome containing keys such as `status`, `transactions_added`, `transactions_skipped`, `transactions_failed`, and optionally `error` with details when the sync cannot be performed.
     """
     logger.info(
         f"Manual sync triggered for Bitcoin wallet {wallet_address} (portfolio {portfolio_id}), "
@@ -582,10 +579,18 @@ def sync_wallet_manually(
 )
 def test_blockchain_connection(self):
     """
-    Test connection to all blockchain APIs.
-
+    Test connectivity to configured blockchain API services.
+    
     Returns:
-        dict: Connection test results
+        dict: Summary of the connection test. On success includes:
+            - status (str): "success"
+            - message (str): human-readable summary like "Connected to X/Y blockchain APIs"
+            - api_results (dict): mapping of API identifiers to boolean connection results
+            - timestamp (str): ISO-formatted UTC timestamp
+        On failure includes:
+            - status (str): "error"
+            - error (str): error message
+            - timestamp (str): ISO-formatted UTC timestamp
     """
     logger.info("Testing blockchain API connections")
 

@@ -67,13 +67,20 @@ class PriceFetcher:
     @staticmethod
     async def fetch_stock_price(ticker: str) -> Optional[Dict[str, Decimal]]:
         """
-        Fetch current price for stock/ETF from Yahoo Finance.
-
-        Args:
-            ticker: Stock ticker symbol
-
+        Fetch the latest OHLCV price for a stock or ETF from Yahoo Finance.
+        
+        Parameters:
+            ticker (str): The Yahoo Finance ticker symbol to query.
+        
         Returns:
-            Dict with price data (open, high, low, close, volume) or None
+            Optional[Dict[str, Decimal | int | str]]: A dictionary with keys:
+                - `open` (Decimal): Opening price for the latest trading period.
+                - `high` (Decimal): Highest price for the latest trading period.
+                - `low` (Decimal): Lowest price for the latest trading period.
+                - `close` (Decimal): Closing price for the latest trading period.
+                - `volume` (int): Traded volume for the latest trading period.
+                - `source` (str): Data source identifier (always "yahoo").
+            Returns `None` if no data is available or an error occurs.
         """
         try:
             stock = yf.Ticker(ticker)
@@ -106,15 +113,15 @@ class PriceFetcher:
         end_date: date
     ) -> List[Dict]:
         """
-        Fetch historical price data.
-
-        Args:
-            ticker: Asset ticker symbol
-            start_date: Start date
-            end_date: End date
-
+        Retrieve historical OHLCV price records for the given ticker between start_date and end_date.
+        
+        Parameters:
+            ticker (str): Asset ticker symbol to fetch.
+            start_date (date): Inclusive start date for the historical range.
+            end_date (date): Inclusive end date for the historical range.
+        
         Returns:
-            List of price dictionaries
+            List[Dict]: A list of price records, each containing keys `date`, `open`, `high`, `low`, `close`, `volume`, and `source`; returns an empty list if no data is available or on failure.
         """
         return await PriceFetcher._fetch_stock_historical(ticker, start_date, end_date)
 
@@ -124,7 +131,25 @@ class PriceFetcher:
         start_date: date,
         end_date: date
     ) -> List[Dict]:
-        """Fetch historical stock prices from Yahoo Finance."""
+        """
+        Retrieve historical OHLCV records for a ticker between two dates.
+        
+        Parameters:
+            ticker (str): Ticker symbol to query on Yahoo Finance.
+            start_date (date): Inclusive start date for the historical range.
+            end_date (date): Exclusive end date for the historical range.
+        
+        Returns:
+            List[Dict]: A list of price records. Each record contains:
+                - `date` (date): The trading date.
+                - `open` (Decimal): Opening price.
+                - `high` (Decimal): Highest price.
+                - `low` (Decimal): Lowest price.
+                - `close` (Decimal): Closing price.
+                - `volume` (int): Traded volume.
+                - `source` (str): Data source identifier ("yahoo").
+            Returns an empty list if no data is available or an error occurs.
+        """
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(start=start_date, end=end_date)
@@ -155,14 +180,14 @@ class PriceFetcher:
     @staticmethod
     async def fetch_fx_rate(base: str = "EUR", quote: str = "USD") -> Optional[Decimal]:
         """
-        Fetch currency exchange rate from Yahoo Finance.
-
-        Args:
-            base: Base currency (default: EUR)
-            quote: Quote currency (default: USD)
-
+        Fetch the FX exchange rate for a currency pair from Yahoo Finance.
+        
+        Parameters:
+        	base (str): Base currency code (default "EUR").
+        	quote (str): Quote currency code (default "USD").
+        
         Returns:
-            Exchange rate (e.g., 1.10 for EUR/USD) or None
+        	Decimal: Exchange rate expressing how many units of `quote` equal one unit of `base` (e.g., 1.10 for EUR/USD), or `None` if the rate is unavailable.
         """
         try:
             # Yahoo Finance FX ticker format: EURUSD=X
@@ -337,14 +362,12 @@ class PriceFetcher:
     ) -> List[Dict]:
         """
         Fetch real-time prices for multiple tickers in parallel.
-
-        Uses ThreadPoolExecutor for concurrent fetching with rate limiting.
-
-        Args:
-            tickers: List of (ticker, isin) tuples
-
+        
+        Parameters:
+            tickers (List[Tuple[str, Optional[str]]]): List of (ticker, isin) pairs to fetch.
+        
         Returns:
-            List of price dictionaries (successful fetches only)
+            List[Dict]: Price dictionaries for tickers that were successfully fetched.
         """
         if not tickers:
             return []

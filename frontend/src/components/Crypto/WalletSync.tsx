@@ -14,6 +14,15 @@ interface WalletSyncProps {
   walletAddress: string;
 }
 
+/**
+ * Renders a card UI that displays Bitcoin wallet synchronization status and actions for the given portfolio.
+ *
+ * Shows current sync state, last sync time, transaction count, error messages, and a control to initiate a wallet sync.
+ *
+ * @param portfolioId - The portfolio identifier used to fetch and trigger wallet sync operations.
+ * @param walletAddress - The Bitcoin wallet address to display (truncated in the UI) or undefined if not configured.
+ * @returns A React element rendering the wallet sync card with status details and sync controls.
+ */
 export function WalletSync({ portfolioId, walletAddress }: WalletSyncProps) {
   const { data: syncStatus, isLoading: statusLoading } = useWalletSyncStatus(portfolioId);
   const syncWalletMutation = useSyncWallet();

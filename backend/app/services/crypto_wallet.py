@@ -25,7 +25,9 @@ class CryptoWalletService:
     """Service for managing crypto wallets in portfolios."""
 
     def __init__(self, db: AsyncSession):
-        """Initialize with database session."""
+        """
+        Create a CryptoWalletService and retain the provided asynchronous database session for later operations.
+        """
         self.db = db
 
     async def configure_wallet_for_portfolio(
@@ -35,13 +37,23 @@ class CryptoWalletService:
     ) -> Dict[str, Any]:
         """
         Configure a Bitcoin wallet address for a crypto portfolio.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-            wallet_address: Bitcoin wallet address
-
+        
+        Validates the portfolio exists and the wallet address format, persists the trimmed
+        address and updated timestamp, clears deduplication cache for the portfolio, and
+        returns a summary of the operation.
+        
+        Parameters:
+            portfolio_id (int): ID of the crypto portfolio to configure.
+            wallet_address (str): Bitcoin wallet address to associate with the portfolio.
+        
         Returns:
-            Configuration result with status and details
+            result (dict): Operation outcome. Typical keys:
+                - success (bool): `True` on success, `False` on failure.
+                - message (str): Human-readable success message (when successful).
+                - error (str): Error message (when failed).
+                - portfolio_id (int): The provided portfolio ID.
+                - wallet_address (str): The configured address (on success).
+                - timestamp (str): ISO8601 timestamp of the operation (on success).
         """
         try:
             # Validate portfolio exists
@@ -96,13 +108,24 @@ class CryptoWalletService:
 
     async def get_wallet_status(self, portfolio_id: int) -> Dict[str, Any]:
         """
-        Get comprehensive wallet status for a portfolio.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-
+        Retrieve status and aggregated statistics for a portfolio's Bitcoin wallet.
+        
+        Parameters:
+            portfolio_id (int): ID of the crypto portfolio to inspect.
+        
         Returns:
-            Wallet status information
+            dict: A status payload containing:
+                - success (bool): `True` on success, `False` on error.
+                - wallet_configured (bool): Whether a wallet address is configured for the portfolio.
+                - portfolio_id (int): The provided portfolio identifier.
+                - wallet_address (str|None): Configured wallet address when present.
+                - total_blockchain_transactions (int): Total count of Bitcoin Blockchain transactions for the portfolio.
+                - recent_blockchain_transactions_7d (int): Count of Bitcoin Blockchain transactions in the last 7 days.
+                - last_blockchain_transaction (str|None): ISO-8601 timestamp of the most recent Bitcoin Blockchain transaction, or `None`.
+                - transaction_type_breakdown (list): List of objects with `type` (transaction type name), `count` (int), and `total_amount` (float) summarizing transactions by type.
+                - blockchain_api_status (Any): Result of the blockchain API connectivity check.
+                - last_sync_check (str): ISO-8601 timestamp of when the status was generated.
+                - error (str, optional): Error message when `success` is `False`.
         """
         try:
             # Get portfolio
@@ -219,14 +242,30 @@ class CryptoWalletService:
         days_back: int = 30
     ) -> Dict[str, Any]:
         """
-        Get wallet balance history for a portfolio.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-            days_back: Number of days to look back
-
+        Return the wallet's running balance history and current balance for a portfolio over a lookback period.
+        
+        Parameters:
+            portfolio_id (int): ID of the crypto portfolio to query.
+            days_back (int): Number of days to include in the history (default 30).
+        
         Returns:
-            Balance history data
+            dict: On success, a dictionary containing:
+                - `success` (bool): True.
+                - `portfolio_id` (int): The requested portfolio ID.
+                - `wallet_address` (str): Configured wallet address.
+                - `current_balance` (float): Balance after applying all returned transactions.
+                - `balance_history` (list): Ordered list of transaction snapshots. Each entry contains:
+                    - `timestamp` (str, ISO 8601): Transaction timestamp.
+                    - `transaction_id` (int): Transaction record ID.
+                    - `transaction_type` (str): Transaction type (e.g., "BUY", "SELL", "TRANSFER_IN", "TRANSFER_OUT").
+                    - `quantity` (float): Quantity changed by the transaction.
+                    - `running_balance` (float): Balance after the transaction.
+                - `total_transactions` (int): Number of transactions included.
+                - `period_days` (int): The requested lookback period in days.
+            On failure, a dictionary with:
+                - `success` (bool): False.
+                - `error` (str): Error message.
+                - `portfolio_id` (int): The requested portfolio ID.
         """
         try:
             # Get portfolio
@@ -306,15 +345,27 @@ class CryptoWalletService:
         days_back: int = 7
     ) -> Dict[str, Any]:
         """
-        Manually trigger wallet synchronization.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-            max_transactions: Maximum number of transactions to fetch
-            days_back: Number of days to look back
-
+        Trigger a manual synchronization of blockchain transactions for a portfolio's configured Bitcoin wallet.
+        
+        Fetches transactions from the blockchain for the portfolio's wallet address, filters duplicates, inserts new CryptoTransaction records, and commits the results.
+        
+        Parameters:
+            portfolio_id (int): ID of the crypto portfolio to sync.
+            max_transactions (int): Maximum number of transactions to fetch from the blockchain (default 50).
+            days_back (int): Number of days to look back when fetching transactions (default 7).
+        
         Returns:
-            Sync result with status and details
+            dict: Summary of the synchronization containing:
+                - success (bool): `true` if the sync completed without a top-level failure, `false` otherwise.
+                - message (str, optional): Informational message on success.
+                - error (str, optional): Error message on failure.
+                - portfolio_id (int): The supplied portfolio ID.
+                - wallet_address (str, optional): The portfolio's wallet address when available.
+                - transactions_imported (int, optional): Number of transactions inserted.
+                - transactions_skipped (int, optional): Number of transactions skipped due to duplication.
+                - transactions_failed (int, optional): Number of transactions that failed during processing.
+                - total_processed (int, optional): Total transactions returned by the fetcher.
+                - sync_timestamp (str, optional): ISO-8601 timestamp of when the sync completed.
         """
         try:
             # Get portfolio
@@ -412,13 +463,19 @@ class CryptoWalletService:
 
     async def remove_wallet_configuration(self, portfolio_id: int) -> Dict[str, Any]:
         """
-        Remove wallet configuration from a portfolio.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-
+        Remove the configured wallet address from the specified portfolio and clear related deduplication cache.
+        
+        Parameters:
+            portfolio_id (int): ID of the crypto portfolio to update.
+        
         Returns:
-            Removal result
+            dict: Result object with:
+                - `success` (bool): `True` if the configuration was removed, `False` otherwise.
+                - `message` (str, optional): Human-readable success message when `success` is `True`.
+                - `error` (str, optional): Error message when `success` is `False` (e.g., portfolio not found or failure details).
+                - `portfolio_id` (int): The provided portfolio ID.
+                - `previous_wallet_address` (str | None, optional): The wallet address that was removed when the operation succeeded.
+                - `timestamp` (str, optional): ISO-8601 timestamp of the removal when the operation succeeded.
         """
         try:
             # Get portfolio
@@ -467,13 +524,15 @@ class CryptoWalletService:
 
     def _validate_bitcoin_address(self, address: str) -> bool:
         """
-        Basic Bitcoin address validation.
-
-        Args:
-            address: Bitcoin address to validate
-
+        Perform basic format validation of a Bitcoin address.
+        
+        Validates common Bitcoin address formats: Bech32 addresses starting with "bc1" (checks length and Bech32 character set) and Base58 addresses starting with "1" or "3" (checks length and Base58 character set). This is a syntactic check only; it does not verify checksums or consult external services.
+        
+        Parameters:
+            address (str): Bitcoin address to validate.
+        
         Returns:
-            True if address format appears valid, False otherwise
+            bool: `True` if the address appears to be a valid Bitcoin address format, `False` otherwise.
         """
         if not address or not isinstance(address, str):
             return False
@@ -500,14 +559,24 @@ class CryptoWalletService:
         days_back: int = 30
     ) -> Dict[str, Any]:
         """
-        Get a summary of wallet transactions for analytics.
-
-        Args:
-            portfolio_id: ID of the crypto portfolio
-            days_back: Number of days to look back
-
+        Produce an aggregated transaction summary for a portfolio's Bitcoin wallet over a lookback period.
+        
+        Parameters:
+            portfolio_id (int): ID of the crypto portfolio to summarize.
+            days_back (int): Number of days to include in the summary (default 30).
+        
         Returns:
-            Transaction summary data
+            dict: A payload with the following keys:
+                - success (bool): `True` when the summary was produced, `False` on error or if portfolio/wallet is missing.
+                - portfolio_id (int): The requested portfolio ID.
+                - wallet_address (str): Configured wallet address (present when success is `True`).
+                - period_days (int): The requested lookback period in days.
+                - total_transactions (int): Count of blockchain transactions in the period.
+                - total_volume (float): Sum of `total_amount` for transactions in the period (as float).
+                - transaction_counts_by_type (dict): Mapping of transaction type name to count for the period.
+                - average_daily_transactions (float): Average transactions per day over `days_back`, rounded to two decimals.
+                - summary_period (dict): ISO8601 `start_date` and `end_date` for the summary window.
+                - error (str, optional): Error message present when `success` is `False`.
         """
         try:
             # Get portfolio

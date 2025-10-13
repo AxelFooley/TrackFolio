@@ -46,10 +46,10 @@ router = APIRouter(prefix="/api/crypto", tags=["crypto"])
 
 async def _get_usd_to_eur_rate() -> Optional[Decimal]:
     """
-    Get USD to EUR conversion rate using Yahoo Finance.
-
+    Obtain the USD→EUR conversion rate, using PriceFetcher and falling back to Decimal('0.92') when unavailable.
+    
     Returns:
-        USD to EUR conversion rate or None if failed
+        Decimal: Conversion rate from USD to EUR; returns Decimal('0.92') if fetching fails or no rate is available.
     """
     try:
         price_fetcher = PriceFetcher()
@@ -73,7 +73,14 @@ async def create_crypto_portfolio(
     portfolio_data: CryptoPortfolioCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new crypto portfolio."""
+    """
+    Create a new crypto portfolio with the provided data.
+    
+    Validates that no existing portfolio uses the same name, persists the new portfolio with is_active set to True, and returns the created portfolio. Raises HTTP 400 if a portfolio name conflict is found; raises HTTP 500 on unexpected errors (after rolling back the DB transaction).
+    
+    Returns:
+        The created CryptoPortfolio instance.
+    """
     try:
         # Check if portfolio with same name already exists for user
         existing_result = await db.execute(
@@ -116,7 +123,19 @@ async def list_crypto_portfolios(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of portfolios to return"),
     db: AsyncSession = Depends(get_db)
 ):
-    """List crypto portfolios with optional filtering and pagination."""
+    """
+    List crypto portfolios with optional active-state filtering and pagination.
+    
+    Retrieves portfolios from the database, includes per-portfolio aggregated metrics (value, cost basis, profit/loss, transaction count) and a wallet_sync_status block that indicates whether a wallet is configured and recent blockchain transaction counts when available.
+    
+    Parameters:
+    	is_active (Optional[bool]): If provided, filter portfolios by their active status.
+    	skip (int): Number of portfolios to skip (offset).
+    	limit (int): Maximum number of portfolios to return.
+    
+    Returns:
+    	CryptoPortfolioList: An object containing the list of portfolio responses with attached metrics and wallet sync status, and the total matching portfolio count.
+    """
     try:
         query = select(CryptoPortfolio)
 
@@ -209,7 +228,18 @@ async def get_crypto_portfolio(
     portfolio_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get detailed crypto portfolio information with metrics and holdings."""
+    """
+    Retrieve a detailed portfolio summary including computed metrics, holdings, and wallet sync status.
+    
+    Parameters:
+        portfolio_id (int): ID of the portfolio to retrieve.
+    
+    Returns:
+        dict: A summary object containing at least a `portfolio` entry (portfolio details), computed metrics and holdings, and a `wallet_sync_status` object with wallet configuration and recent blockchain transaction info.
+    
+    Raises:
+        HTTPException: 404 if the portfolio is not found; 500 if an unexpected error occurs while retrieving or composing the summary.
+    """
     try:
         calc_service = CryptoCalculationService(db)
         summary = await calc_service.calculate_portfolio_summary(portfolio_id)
@@ -304,7 +334,25 @@ async def update_crypto_portfolio(
     portfolio_update: CryptoPortfolioUpdate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Update crypto portfolio details."""
+    """
+    Update the fields of an existing crypto portfolio.
+    
+    Updates only the fields provided in `portfolio_update`, sets the portfolio's `updated_at`
+    timestamp to the current UTC time, persists the changes, and returns the refreshed portfolio.
+    
+    Parameters:
+        portfolio_id (int): ID of the portfolio to update.
+        portfolio_update (CryptoPortfolioUpdate): Fields to update; only set fields are applied.
+        db (AsyncSession): Database session dependency (omitted from docs when generating user-facing API docs).
+    
+    Returns:
+        CryptoPortfolio: The updated portfolio instance after commit and refresh.
+    
+    Raises:
+        HTTPException: 404 if the portfolio does not exist.
+        HTTPException: 400 if another portfolio already uses the requested name.
+        HTTPException: 500 if an unexpected error occurs while updating (transaction is rolled back).
+    """
     try:
         # Get existing portfolio
         result = await db.execute(
@@ -355,7 +403,13 @@ async def delete_crypto_portfolio(
     portfolio_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete a crypto portfolio and all its transactions."""
+    """
+    Delete the crypto portfolio identified by portfolio_id and its associated transactions.
+    
+    Raises:
+        HTTPException: 404 if the portfolio does not exist.
+        HTTPException: 500 if deletion fails.
+    """
     try:
         # Check if portfolio exists
         result = await db.execute(
@@ -385,7 +439,23 @@ async def create_crypto_transaction(
     transaction_data: CryptoTransactionCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Add a transaction to a crypto portfolio."""
+    """
+    Create and persist a crypto transaction for the specified portfolio.
+    
+    Validates that the portfolio exists and is active, rejects duplicate transaction hashes when provided, computes the transaction total (quantity * price_at_execution), saves the transaction, and returns the persisted CryptoTransaction with database-populated fields.
+    
+    Parameters:
+        portfolio_id (int): ID of the portfolio to which the transaction will be added.
+        transaction_data (CryptoTransactionCreate): Transaction payload containing symbol, quantity, price, timestamp, and optional fields.
+    
+    Returns:
+        CryptoTransaction: The created and refreshed transaction instance with persisted fields populated.
+    
+    Raises:
+        HTTPException: 404 if the portfolio is not found.
+        HTTPException: 400 if the portfolio is inactive or a transaction with the same hash already exists.
+        HTTPException: 500 if an unexpected error occurs while persisting the transaction.
+    """
     try:
         # Verify portfolio exists
         portfolio_result = await db.execute(
@@ -459,7 +529,27 @@ async def list_crypto_transactions(
     limit: int = Query(50, ge=1, le=200, description="Maximum number of transactions to return"),
     db: AsyncSession = Depends(get_db)
 ):
-    """List transactions for a crypto portfolio with filtering and pagination."""
+    """
+    List transactions belonging to a crypto portfolio, with optional filtering and pagination.
+    
+    Filters may be applied by symbol (case-insensitive), transaction type, and timestamp range. The result is ordered by timestamp descending and paginated using skip/limit.
+    
+    Parameters:
+        portfolio_id (int): ID of the portfolio whose transactions are returned.
+        symbol (Optional[str]): Filter by crypto symbol (case-insensitive).
+        transaction_type (Optional[CryptoTransactionType]): Filter by transaction type.
+        start_date (Optional[datetime]): Include transactions on or after this timestamp.
+        end_date (Optional[datetime]): Include transactions on or before this timestamp.
+        skip (int): Number of transactions to skip (offset).
+        limit (int): Maximum number of transactions to return.
+        db (AsyncSession): Database session dependency.
+    
+    Returns:
+        CryptoTransactionList: Object containing `transactions` (list of CryptoTransaction) and `total_count` (int).
+    
+    Raises:
+        HTTPException: 404 if the portfolio does not exist; 500 for unexpected errors.
+    """
     try:
         # Verify portfolio exists
         portfolio_result = await db.execute(
@@ -510,7 +600,22 @@ async def update_crypto_transaction(
     transaction_update: CryptoTransactionUpdate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Update a crypto transaction."""
+    """
+    Update fields of an existing crypto transaction.
+    
+    If `quantity` or `price_at_execution` are changed, `total_amount` is recalculated. If `symbol` is updated it will be normalized to upper-case.
+    
+    Parameters:
+        transaction_update (CryptoTransactionUpdate): Fields to update; unset fields are ignored.
+    
+    Returns:
+        CryptoTransaction: The updated transaction record.
+    
+    Raises:
+        HTTPException: With status 404 if the transaction does not exist.
+        HTTPException: With status 400 if another transaction already uses the provided `transaction_hash`.
+        HTTPException: With status 500 for other failures during the update.
+    """
     try:
         # Get existing transaction
         result = await db.execute(
@@ -571,7 +676,13 @@ async def delete_crypto_transaction(
     transaction_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete a crypto transaction."""
+    """
+    Delete the crypto transaction with the given ID.
+    
+    Raises:
+        HTTPException: 404 if no transaction with the specified ID exists.
+        HTTPException: 500 if the deletion fails due to an internal error.
+    """
     try:
         # Check if transaction exists
         result = await db.execute(
@@ -600,7 +711,19 @@ async def get_crypto_portfolio_metrics(
     portfolio_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get comprehensive metrics for a crypto portfolio."""
+    """
+    Retrieve computed metrics for a crypto portfolio.
+    
+    Parameters:
+        portfolio_id (int): ID of the portfolio to compute metrics for.
+    
+    Returns:
+        CryptoPortfolioMetrics: Calculated portfolio metrics for the given portfolio.
+    
+    Raises:
+        HTTPException: 404 if the portfolio does not exist.
+        HTTPException: 500 if an unexpected error prevents metrics calculation.
+    """
     try:
         calc_service = CryptoCalculationService(db)
         metrics = await calc_service.calculate_portfolio_metrics(portfolio_id)
@@ -621,7 +744,15 @@ async def get_crypto_portfolio_holdings(
     portfolio_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get current holdings for a crypto portfolio."""
+    """
+    Retrieve current crypto holdings for a portfolio.
+    
+    Returns:
+        List[CryptoHolding]: Current holdings for the specified portfolio.
+    
+    Raises:
+        HTTPException: 404 if the portfolio does not exist; 500 if holdings calculation fails.
+    """
     try:
         calc_service = CryptoCalculationService(db)
         holdings = await calc_service.calculate_holdings(portfolio_id)
@@ -643,7 +774,23 @@ async def get_crypto_portfolio_performance(
     range: str = Query("1M", regex="^(1D|1W|1M|3M|6M|1Y|ALL)$", description="Time range for performance data"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get performance data for a crypto portfolio within a time range."""
+    """
+    Return time-series performance snapshots for a crypto portfolio over a preset range.
+    
+    Parameters:
+        range (str): Time window for performance. Allowed values: "1D", "1W", "1M", "3M", "6M", "1Y", "ALL".
+    
+    Returns:
+        List[dict]: A list of daily performance points with keys:
+            - `date` (str): ISO-8601 date string.
+            - `portfolio_value` (float): Portfolio value on that date.
+            - `cost_basis` (float): Cost basis on that date.
+            - `profit_loss` (float): Absolute profit or loss on that date.
+            - `profit_loss_pct` (float): Profit or loss as a percentage.
+    
+    Raises:
+        HTTPException: 404 if the portfolio does not exist; 500 if performance data cannot be retrieved.
+    """
     try:
         # Verify portfolio exists
         portfolio_result = await db.execute(
@@ -707,7 +854,28 @@ async def get_crypto_portfolio_history(
     end_date: date = Query(..., description="End date for performance data"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get historical performance data for a crypto portfolio."""
+    """
+    Retrieve time-series performance for a crypto portfolio over a given date range.
+    
+    Parameters:
+        portfolio_id (int): ID of the portfolio to query.
+        start_date (date): Inclusive start date for the performance range; must be on or before end_date.
+        end_date (date): Inclusive end date for the performance range; must be on or after start_date.
+        
+    Returns:
+        CryptoPortfolioPerformance: Object containing:
+            - portfolio_id: the requested portfolio id
+            - performance_data: list of performance points (ordered by date)
+            - start_value: portfolio value at the start date or None if no data
+            - end_value: portfolio value at the end date or None if no data
+            - total_return: end_value minus start_value or None
+            - total_return_pct: percentage return (0 if start_value is 0) or None
+    
+    Raises:
+        HTTPException: 400 if start_date is after end_date.
+        HTTPException: 404 if the portfolio does not exist.
+        HTTPException: 500 for unexpected errors while fetching or computing history.
+    """
     try:
         # Validate date range
         if start_date > end_date:
@@ -763,7 +931,17 @@ async def get_crypto_prices(
     symbols: str = Query(..., description="Comma-separated list of crypto symbols (e.g., BTC,ETH,ADA)"),
     currency: str = Query("eur", pattern="^(eur|usd)$", description="Target currency"),
 ):
-    """Get current prices for multiple cryptocurrencies using Yahoo Finance."""
+    """
+    Retrieve current prices for the given comma-separated crypto symbols and return them in the requested currency.
+    
+    Symbols are normalized to uppercase; symbols without a valid current price are omitted. If currency is "EUR", USD prices are converted using the USD→EUR rate helper. Raises an HTTPException with status 400 when no symbols are provided or when more than 50 symbols are supplied.
+    
+    Returns:
+        CryptoPriceResponse: Contains a list of `CryptoPriceData` entries (one per symbol with available price), the response currency (uppercase), and a timestamp.
+    
+    Raises:
+        HTTPException: Status 400 if the symbols list is empty or exceeds 50 symbols.
+    """
     # Parse and validate symbols
     symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     if not symbol_list:
@@ -813,7 +991,25 @@ async def get_crypto_price_history(
     end_date: date = Query(..., description="End date for historical data"),
     currency: str = Query("eur", pattern="^(eur|usd)$", description="Target currency"),
 ):
-    """Get historical price data for a cryptocurrency using Yahoo Finance."""
+    """
+    Retrieve historical daily close prices for a cryptocurrency over a specified date range.
+    
+    Parameters:
+        symbol (str): Crypto symbol (e.g., "BTC", "ETH").
+        start_date (date): Start date for the historical range (inclusive).
+        end_date (date): End date for the historical range (inclusive).
+        currency (str): Target currency for returned prices ("EUR" or "USD").
+    
+    Returns:
+        CryptoPriceHistoryResponse: Response containing the requested symbol, target currency,
+        a list of `CryptoHistoricalPrice` records (each with date, symbol, price in the requested
+        currency, price_usd, timestamp, and source), and `total_count` equal to the number of returned entries.
+    
+    Raises:
+        HTTPException: Raised with status 400 for invalid input (e.g., invalid symbol, start_date > end_date,
+        or a date range longer than 365 days), or with status 500 for unexpected failures while fetching or
+        processing historical price data.
+    """
     try:
         # Validate inputs
         if not symbol or len(symbol) > 20:
@@ -1019,7 +1215,16 @@ async def get_supported_crypto_symbols():
 
 @router.get("/health")
 async def crypto_health_check():
-    """Health check for crypto services."""
+    """
+    Checks availability of external crypto services and returns a health summary.
+    
+    Returns:
+        A dict with the following keys:
+        - status (str): One of "healthy", "degraded", or "unhealthy".
+        - services (dict): Mapping of service names to their status ("healthy" or "unhealthy").
+        - timestamp (datetime): UTC datetime when the check was performed.
+        - error (str, optional): Error message present when status is "unhealthy".
+    """
     try:
         # Test Yahoo Finance connection
         price_fetcher = PriceFetcher()
@@ -1040,5 +1245,4 @@ async def crypto_health_check():
             "error": str(e),
             "timestamp": datetime.utcnow()
         }
-
 
