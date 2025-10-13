@@ -397,7 +397,7 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
                         existing.high = price_eur
                         existing.low = price_eur
                         existing.close = price_eur
-                        existing.volume = Decimal("0")  # Yahoo Finance historical data doesn't include volume in this endpoint
+                        existing.volume = 0  # Yahoo Finance historical data doesn't include volume in this endpoint
                         existing.source = "yahoo"
                         prices_updated += 1
                     else:
@@ -411,7 +411,7 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
                         high=price_eur,
                         low=price_eur,
                         close=price_eur,
-                        volume=Decimal("0"),  # Yahoo Finance historical data doesn't include volume in this endpoint
+                        volume=0,  # Yahoo Finance historical data doesn't include volume in this endpoint
                         source="yahoo"
                     )
                     db.add(price_record)
