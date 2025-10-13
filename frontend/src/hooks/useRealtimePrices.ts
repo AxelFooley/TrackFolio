@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { getRealtimePrices } from '@/lib/api';
 import type { RealtimePrice } from '@/lib/types';
 
@@ -33,7 +33,7 @@ export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesRetu
   const isVisibleRef = useRef<boolean>(true);
 
   // Memoize symbols to prevent unnecessary re-fetches when array reference changes
-  const symbolsKey = useMemo(() => symbols.sort().join(','), [symbols]);
+  const symbolsKey = useMemo(() => [...symbols].sort().join(','), [symbols]);
 
   const fetchPrices = useCallback(async () => {
     if (symbols.length === 0) return;
