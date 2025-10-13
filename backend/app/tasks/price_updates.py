@@ -94,14 +94,20 @@ def update_daily_prices(self):
                     skipped += 1
                     continue
 
-                # Fetch latest price
+                # Fetch price for the exact target date
                 # Rate limiting: sleep 0.5s between requests to avoid API throttling
                 time.sleep(0.5)
 
-                price_data = price_fetcher.fetch_latest_price(ticker, isin)
+                hist = price_fetcher.fetch_historical_prices_sync(
+                    ticker=ticker,
+                    isin=isin,
+                    start_date=price_date,
+                    end_date=price_date,
+                )
+                price_data = next((p for p in (hist or []) if p.get("date") == price_date), None)
 
                 if not price_data or not price_data.get("close"):
-                    logger.warning(f"No price data returned for {ticker} (ISIN: {isin})")
+                    logger.warning(f"No price data for {ticker} on {price_date} (ISIN: {isin})")
                     failed += 1
                     failed_tickers.append(ticker)
                     continue
@@ -223,11 +229,16 @@ def update_price_for_ticker(self, ticker: str, price_date: str = None):
                 "reason": "Price already exists"
             }
 
-        # Fetch price
-        price_data = price_fetcher.fetch_latest_price(ticker)
+        # Fetch price for the exact target date
+        hist = price_fetcher.fetch_historical_prices_sync(
+            ticker=ticker,
+            start_date=target_date,
+            end_date=target_date,
+        )
+        price_data = next((p for p in (hist or []) if p.get("date") == target_date), None)
 
         if not price_data or not price_data.get("close"):
-            logger.warning(f"No price data returned for {ticker}")
+            logger.warning(f"No price data for {ticker} on {target_date}")
             return {
                 "status": "failed",
                 "ticker": ticker,
