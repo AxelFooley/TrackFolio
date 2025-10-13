@@ -67,15 +67,15 @@ def update_crypto_prices(self):
 
         if not crypto_symbols:
             logger.info("No crypto symbols found. Skipping crypto price update.")
-           today = date.today()
+            today = date.today()
             return {
                 "status": "success",
                 "updated": 0,
                 "skipped": 0,
                 "failed": 0,
-               "total_symbols": 0,
-               "price_date": str(today),
-               "failed_symbols": [],
+                "total_symbols": 0,
+                "price_date": str(today),
+                "failed_symbols": [],
                 "message": "No crypto symbols found"
             }
 
