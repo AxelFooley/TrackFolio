@@ -354,7 +354,7 @@ export default function CryptoTransactionsPage() {
               <CardContent>
                 <div className="text-sm font-medium">
                   {transactionsData.items.length > 0
-                    ? formatDate(transactionsData.items[0].date)
+                    ? formatDate(transactionsData.items[0].timestamp)
                     : 'No transactions'}
                 </div>
               </CardContent>
