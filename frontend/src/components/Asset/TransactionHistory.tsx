@@ -81,7 +81,7 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
             </TableHeader>
             <TableBody>
               {transactions.map((transaction) => {
-                const price = Number(transaction.amount ?? 0);
+                const price = Number(transaction.price_per_share ?? 0);
                 const qty = Number(transaction.quantity ?? 0);
                 const amount = price * qty;
                 return (
@@ -108,7 +108,7 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
                       {formatCurrency(amount, transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(Number(transaction.fee ?? 0), transaction.currency)}
+                      {formatCurrency(Number(transaction.fees ?? 0), transaction.currency)}
                     </TableCell>
                     <TableCell>{transaction.currency}</TableCell>
                   </TableRow>

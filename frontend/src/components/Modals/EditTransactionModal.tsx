@@ -38,9 +38,9 @@ export function EditTransactionModal({
 }: EditTransactionModalProps) {
   // Initialize form state with current transaction values
   const [form, setForm] = useState({
-    date: transaction.date.split('T')[0], // Format as YYYY-MM-DD for input[type="date"]
+    date: transaction.operation_date.split('T')[0], // Format as YYYY-MM-DD for input[type="date"]
     quantity: (transaction.quantity || 0).toString(),
-    price: (transaction.price || 0).toString(),
+    price: (transaction.price_per_share || 0).toString(),
     fees: transaction.fees.toString(),
   });
 

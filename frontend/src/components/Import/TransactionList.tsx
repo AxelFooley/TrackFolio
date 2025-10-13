@@ -88,7 +88,7 @@ export function TransactionList() {
               <TableBody>
                 {transactions.items.map((transaction) => (
                   <TableRow key={transaction.id}>
-                    <TableCell>{formatDate(transaction.date)}</TableCell>
+                    <TableCell>{formatDate(transaction.operation_date)}</TableCell>
                     <TableCell className="font-medium">{transaction.ticker || '-'}</TableCell>
                     <TableCell>
                         <span
@@ -107,7 +107,7 @@ export function TransactionList() {
                       {transaction.quantity || '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency((transaction.price || 0) * (transaction.quantity || 0), transaction.currency)}
+                      {formatCurrency((transaction.price_per_share || 0) * (transaction.quantity || 0), transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       <div className="flex items-center justify-end gap-2">
