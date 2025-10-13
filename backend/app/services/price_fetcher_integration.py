@@ -9,6 +9,7 @@ from decimal import Decimal
 from datetime import date, datetime
 from typing import Dict, List, Optional
 import logging
+import asyncio
 
 from .price_fetcher import PriceFetcher
 
@@ -303,7 +304,7 @@ class UnifiedPriceFetcher:
 
         # Test Yahoo Finance
         try:
-            yahoo_result = self.yahoo_fetcher.fetch_latest_price('AAPL')
+            yahoo_result = await self.yahoo_fetcher.fetch_latest_price('AAPL')
             results['yahoo_finance'] = yahoo_result is not None
         except Exception as e:
             logger.error(f"Yahoo Finance test failed: {e}")
@@ -311,7 +312,7 @@ class UnifiedPriceFetcher:
 
         # Test crypto via Yahoo Finance
         try:
-            crypto_result = self.yahoo_fetcher.fetch_realtime_price('BTC-USD')
+            crypto_result = await asyncio.to_thread(self.yahoo_fetcher.fetch_realtime_price, 'BTC-USD')
             results['yahoo_finance_crypto'] = crypto_result is not None
         except Exception as e:
             logger.error(f"Yahoo Finance crypto test failed: {e}")
