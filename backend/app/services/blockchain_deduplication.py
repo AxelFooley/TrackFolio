@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 import logging
 import redis
-import pickle
 
 from app.config import settings
 from app.database import SyncSessionLocal
@@ -124,11 +123,15 @@ class BlockchainDeduplicationService:
             hashes: Set of transaction hashes
         """
         # Update Redis cache
-        if self._redis_client:
+        if self._redis_client and hashes:
             try:
                 cache_key = self._get_cache_key(portfolio_id)
-                serialized_data = pickle.dumps(hashes)
-                self._redis_client.setex(cache_key, self.HASH_CACHE_TTL, serialized_data)
+                # Delete existing key first
+                self._redis_client.delete(cache_key)
+                # Add all hashes to the set
+                self._redis_client.sadd(cache_key, *hashes)
+                # Set expiration
+                self._redis_client.expire(cache_key, self.HASH_CACHE_TTL)
             except Exception as e:
                 logger.warning(f"Error updating Redis cache: {e}")
 
