@@ -86,7 +86,7 @@ export function CryptoTransactionTable({
   const [editingTransaction, setEditingTransaction] = useState<CryptoTransaction | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [sortField, setSortField] = useState<keyof CryptoTransaction | 'total'>('date');
+  const [sortField, setSortField] = useState<keyof CryptoTransaction | 'total'>('timestamp');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const handleSort = (field: keyof CryptoTransaction | 'total') => {
@@ -119,10 +119,10 @@ export function CryptoTransactionTable({
       data: {
         transaction_type: editingTransaction.transaction_type,
         quantity: editingTransaction.quantity,
-        price_at_execution: editingTransaction.price,
-        fee: editingTransaction.fees,
+        price_at_execution: editingTransaction.price_at_execution,
+        fee: editingTransaction.fee,
         currency: editingTransaction.currency,
-        timestamp: editingTransaction.date,
+        timestamp: editingTransaction.timestamp,
         exchange: editingTransaction.exchange,
         notes: editingTransaction.notes,
       },
@@ -200,10 +200,10 @@ export function CryptoTransactionTable({
 
   const sortedTransactions = [...filteredTransactions].sort((a, b) => {
     const aValue = sortField === 'total'
-      ? Number(a.quantity) * Number(a.price)
+      ? Number(a.quantity) * Number(a.price_at_execution)
       : a[sortField as keyof CryptoTransaction];
     const bValue = sortField === 'total'
-      ? Number(b.quantity) * Number(b.price)
+      ? Number(b.quantity) * Number(b.price_at_execution)
       : b[sortField as keyof CryptoTransaction];
 
     if (typeof aValue === 'number' && typeof bValue === 'number') {
@@ -230,7 +230,7 @@ export function CryptoTransactionTable({
             <TableRow>
               <TableHead
                 className="cursor-pointer"
-                onClick={() => handleSort('date')}
+                onClick={() => handleSort('timestamp')}
               >
                 <div className="flex items-center gap-2">
                   Date
@@ -266,7 +266,7 @@ export function CryptoTransactionTable({
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('price')}
+                onClick={() => handleSort('price_at_execution')}
               >
                 <div className="flex items-center justify-end gap-2">
                   Price
@@ -275,7 +275,7 @@ export function CryptoTransactionTable({
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('fees')}
+                onClick={() => handleSort('fee')}
               >
                 <div className="flex items-center justify-end gap-2">
                   Fees
@@ -304,17 +304,17 @@ export function CryptoTransactionTable({
               };
               const typeConfig = transactionTypeConfig[transaction.transaction_type] ?? fallback;
               const TypeIcon = typeConfig.icon;
-              const total = Number(transaction.quantity) * Number(transaction.price);
+              const total = Number(transaction.quantity) * Number(transaction.price_at_execution);
 
               return (
                 <TableRow key={transaction.id}>
                   <TableCell>
                     <div>
                       <div className="font-medium">
-                        {formatDate(transaction.date)}
+                        {formatDate(transaction.timestamp)}
                       </div>
                       <div className="text-xs text-gray-500">
-                        {formatDateTime(transaction.date, 'HH:mm')}
+                        {formatDateTime(transaction.timestamp, 'HH:mm')}
                       </div>
                     </div>
                   </TableCell>
@@ -337,10 +337,10 @@ export function CryptoTransactionTable({
                     {formatCryptoQuantity(transaction.quantity)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {formatCurrency(transaction.price, transaction.currency)}
+                    {formatCurrency(transaction.price_at_execution, transaction.currency)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {formatCurrency(transaction.fees, transaction.currency)}
+                    {formatCurrency(transaction.fee, transaction.currency)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
                     {formatCurrency(total, transaction.currency)}
@@ -434,10 +434,10 @@ export function CryptoTransactionTable({
                     id="edit-price"
                     type="number"
                     step="any"
-                    value={editingTransaction.price}
+                    value={editingTransaction.price_at_execution}
                     onChange={(e) => setEditingTransaction({
                       ...editingTransaction,
-                      price: parseFloat(e.target.value) || 0,
+                      price_at_execution: parseFloat(e.target.value) || 0,
                     })}
                     required
                   />
@@ -448,10 +448,10 @@ export function CryptoTransactionTable({
                     id="edit-fees"
                     type="number"
                     step="any"
-                    value={editingTransaction.fees}
+                    value={editingTransaction.fee}
                     onChange={(e) => setEditingTransaction({
                       ...editingTransaction,
-                      fees: parseFloat(e.target.value) || 0,
+                      fee: parseFloat(e.target.value) || 0,
                     })}
                   />
                 </div>
@@ -477,10 +477,10 @@ export function CryptoTransactionTable({
                   <Input
                     id="edit-date"
                     type="date"
-                    value={editingTransaction.date}
+                    value={editingTransaction.timestamp}
                     onChange={(e) => setEditingTransaction({
                       ...editingTransaction,
-                      date: e.target.value,
+                      timestamp: e.target.value,
                     })}
                     required
                   />
@@ -517,7 +517,7 @@ export function CryptoTransactionTable({
               <p><strong>Symbol:</strong> {editingTransaction.symbol}</p>
               <p><strong>Type:</strong> {(transactionTypeConfig[editingTransaction.transaction_type] ?? { label: editingTransaction.transaction_type }).label}</p>
               <p><strong>Quantity:</strong> {formatCryptoQuantity(editingTransaction.quantity)}</p>
-              <p><strong>Date:</strong> {formatDate(editingTransaction.date)}</p>
+              <p><strong>Date:</strong> {formatDate(editingTransaction.timestamp)}</p>
             </div>
           )}
           <DialogFooter>
