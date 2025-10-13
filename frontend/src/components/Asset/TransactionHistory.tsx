@@ -86,7 +86,7 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
                 const amount = price * qty;
                 return (
                   <TableRow key={transaction.id}>
-                    <TableCell>{formatDate(transaction.date)}</TableCell>
+                    <TableCell>{formatDate(transaction.operation_date)}</TableCell>
                     <TableCell>
                       <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
