@@ -8,6 +8,7 @@ Provides functionality for managing Bitcoin paper wallets in crypto portfolios:
 - Wallet status monitoring
 """
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, Tuple
@@ -206,7 +207,7 @@ class CryptoWalletService:
             tx_type_stats = tx_type_breakdown.all()
 
             # Test blockchain API connectivity
-            api_status = blockchain_fetcher.test_api_connection()
+            api_status = await asyncio.to_thread(blockchain_fetcher.test_api_connection)
 
             return {
                 "success": True,
@@ -382,7 +383,8 @@ class CryptoWalletService:
                 }
 
             # Use blockchain fetcher to get transactions
-            result = blockchain_fetcher.fetch_transactions(
+            result = await asyncio.to_thread(
+                blockchain_fetcher.fetch_transactions,
                 wallet_address=portfolio.wallet_address,
                 portfolio_id=portfolio_id,
                 max_transactions=max_transactions,
