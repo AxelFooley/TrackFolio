@@ -49,7 +49,7 @@ class UnifiedPriceFetcher:
             if asset_type.lower() == "crypto":
                 # Use Yahoo Finance for cryptocurrencies with -USD suffix
                 yahoo_symbol = f"{ticker}-USD"
-                result = self.yahoo_fetcher.fetch_realtime_price(yahoo_symbol)
+                result = await asyncio.to_thread(self.yahoo_fetcher.fetch_realtime_price, yahoo_symbol)
                 if result and result.get("current_price"):
                     price_usd = result["current_price"]
 

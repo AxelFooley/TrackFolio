@@ -71,6 +71,26 @@ const transactionTypeConfig = {
  * @param limit - Optional maximum number of transactions to display after filtering and sorting.
  * @returns The transactions table UI containing the filtered, sorted rows and the edit/delete dialogs. 
  */
+/**
+ * Convert ISO8601 datetime string to datetime-local input format (YYYY-MM-DDTHH:mm)
+ */
+const toDateTimeLocal = (isoString: string): string => {
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+/**
+ * Convert datetime-local input format (YYYY-MM-DDTHH:mm) to ISO8601 string
+ */
+const fromDateTimeLocal = (localString: string): string => {
+  return new Date(localString).toISOString();
+};
+
 export function CryptoTransactionTable({
   portfolioId,
   searchTerm = '',
@@ -473,14 +493,14 @@ export function CryptoTransactionTable({
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="edit-date">Date</Label>
+                  <Label htmlFor="edit-datetime">Date & Time</Label>
                   <Input
-                    id="edit-date"
-                    type="date"
-                    value={editingTransaction.timestamp}
+                    id="edit-datetime"
+                    type="datetime-local"
+                    value={toDateTimeLocal(editingTransaction.timestamp)}
                     onChange={(e) => setEditingTransaction({
                       ...editingTransaction,
-                      timestamp: e.target.value,
+                      timestamp: fromDateTimeLocal(e.target.value),
                     })}
                     required
                   />

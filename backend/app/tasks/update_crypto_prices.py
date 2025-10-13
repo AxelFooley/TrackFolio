@@ -7,6 +7,7 @@ Runs every 5 minutes to keep crypto prices current.
 from celery import shared_task
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 import logging
@@ -67,11 +68,15 @@ def update_crypto_prices(self):
 
         if not crypto_symbols:
             logger.info("No crypto symbols found. Skipping crypto price update.")
+            today = date.today()
             return {
                 "status": "success",
                 "updated": 0,
                 "skipped": 0,
                 "failed": 0,
+                "total_symbols": 0,
+                "price_date": str(today),
+                "failed_symbols": [],
                 "message": "No crypto symbols found"
             }
 
@@ -194,7 +199,7 @@ def update_crypto_prices(self):
     retry_backoff_max=600,
     retry_jitter=True
 )
-def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
+def update_crypto_price_for_symbol(self, symbol: str, price_date: Optional[str] = None):
     """
     Update and store the price for a single cryptocurrency symbol for a given date.
     
@@ -317,7 +322,7 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
     autoretry_for=(Exception,),
     retry_kwargs={'max_retries': 2, 'countdown': 60}
 )
-def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = None):
+def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optional[str] = None):
     """
     Backfill historical EUR-denominated prices for a crypto symbol over a date range.
     
@@ -360,9 +365,17 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
         )
 
         if not historical_prices:
-            logger.warning(f"No historical crypto data for {symbol}")
-            return {"status": "no_data", "symbol": symbol}
-
+            logger.warning("No historical crypto data for %s", symbol)
+            return {
+                "status": "no_data",
+                "symbol": symbol,
+                "start_date": str(start),
+                "end_date": str(end),
+                "prices_added": 0,
+                "prices_updated": 0,
+                "prices_skipped": 0,
+                "total_fetched": 0
+            }
         # Fetch USD→EUR rate once for all historical prices
         try:
             usd_to_eur_rate = get_exchange_rate("USD", "EUR")
