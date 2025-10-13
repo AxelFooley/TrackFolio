@@ -95,7 +95,7 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
                             : 'bg-danger/10 text-danger'
                         }`}
                       >
-                        {transaction.transaction_type ?? 'N/A'}
+                        {transaction.transaction_type?.toUpperCase() ?? 'N/A'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right font-mono">
