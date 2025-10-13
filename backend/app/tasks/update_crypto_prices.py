@@ -7,6 +7,7 @@ Runs every 5 minutes to keep crypto prices current.
 from celery import shared_task
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 import logging
@@ -18,7 +19,6 @@ from app.database import SyncSessionLocal
 from app.models import PriceHistory, CryptoTransaction, CryptoTransactionType
 from app.services.price_fetcher import PriceFetcher
 from app.services.currency_converter import get_exchange_rate
-
 logger = logging.getLogger(__name__)
 
 
