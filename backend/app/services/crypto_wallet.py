@@ -647,7 +647,34 @@ class CryptoWalletService:
                 "total_transactions": total_transactions,
                 "total_volume": float(total_volume),
                 "transaction_counts_by_type": transaction_counts,
-                "average_daily_transactions": round(total_transactions / days_back, 2),
+    async def get_wallet_transaction_summary(
+        self,
+        portfolio_id: int,
+        days_back: int = 30
+    ) -> Dict[str, Any]:
+        """
+        Produce an aggregated transaction summary for a portfolio's Bitcoin wallet over a lookback period.
+        
+        Parameters:
+            portfolio_id (int): ID of the crypto portfolio to summarize.
+            days_back (int): Number of days to include in the summary (default 30).
+        
+        Returns:
+            A dict with transaction stats or an error message.
+        """
+        try:
+            if days_back <= 0:
+                return {
+                    "success": False,
+                    "error": "days_back must be greater than 0",
+                    "portfolio_id": portfolio_id
+                }
+
+            # Get portfolio
+            portfolio_result = await self.db.execute(
+                select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+            )
+            ...
                 "summary_period": {
                     "start_date": since_date.isoformat(),
                     "end_date": datetime.utcnow().isoformat()

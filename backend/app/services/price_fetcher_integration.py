@@ -167,7 +167,7 @@ class UnifiedPriceFetcher:
                 return result
             else:
                 # Use Yahoo Finance for stocks, ETFs, etc.
-                result = self.yahoo_fetcher.fetch_historical_prices_sync(ticker, start_date=start_date, end_date=end_date)
+                result = await self.yahoo_fetcher.fetch_historical_prices(ticker, start_date=start_date, end_date=end_date)
                 logger.info(f"Fetched {len(result)} stock price points for {ticker}")
 
                 # Convert to target currency if needed
@@ -220,8 +220,8 @@ class UnifiedPriceFetcher:
         if ticker.upper() in crypto_symbols:
             return "crypto"
 
-        # Check for common ETF patterns
-        if ticker.endswith('.L') or ticker.startswith('I') or ticker.startswith('VTI') or ticker.startswith('SPY'):
+        # Check for common ETF patterns (London-listed or specific major ETFs)
+        if ticker.endswith('.L') or ticker in {'VTI', 'SPY', 'VOO', 'IVV', 'QQQ'}:
             return "etf"
 
         # Default to stock

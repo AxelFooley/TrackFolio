@@ -437,8 +437,9 @@ class BlockchainFetcherService:
             # TODO: replace with market price at timestamp
             estimated_price = Decimal("1.0")
 
-            # Detect transaction type
-            tx_type = self._detect_transaction_type(tx_data, wallet_address)
+            return {
+                ...
+            }
 
             return {
                 'transaction_hash': txid,
