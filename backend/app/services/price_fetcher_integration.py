@@ -167,7 +167,7 @@ class UnifiedPriceFetcher:
                 return result
             else:
                 # Use Yahoo Finance for stocks, ETFs, etc.
-                result = self.yahoo_fetcher.fetch_historical_prices_sync(ticker, start_date=start_date, end_date=end_date)
+                result = await self.yahoo_fetcher.fetch_historical_prices(ticker, start_date=start_date, end_date=end_date)
                 logger.info(f"Fetched {len(result)} stock price points for {ticker}")
 
                 # Convert to target currency if needed
