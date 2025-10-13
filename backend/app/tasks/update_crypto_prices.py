@@ -321,7 +321,7 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: Optional[str] 
     autoretry_for=(Exception,),
     retry_kwargs={'max_retries': 2, 'countdown': 60}
 )
-def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = None):
+def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optional[str] = None):
     """
     Backfill historical EUR-denominated prices for a crypto symbol over a date range.
     
