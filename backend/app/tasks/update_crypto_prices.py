@@ -364,9 +364,17 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
         )
 
         if not historical_prices:
-            logger.warning(f"No historical crypto data for {symbol}")
-            return {"status": "no_data", "symbol": symbol}
-
+            logger.warning("No historical crypto data for %s", symbol)
+            return {
+                "status": "no_data",
+                "symbol": symbol,
+                "start_date": str(start),
+                "end_date": str(end),
+                "prices_added": 0,
+                "prices_updated": 0,
+                "prices_skipped": 0,
+                "total_fetched": 0
+            }
         # Fetch USD→EUR rate once for all historical prices
         try:
             usd_to_eur_rate = get_exchange_rate("USD", "EUR")
