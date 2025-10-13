@@ -108,7 +108,7 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
                       {formatCurrency(amount, transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(Number(transaction.fees ?? 0), transaction.currency)}
+                      {formatCurrency(Number(transaction.fee ?? 0), transaction.currency)}
                     </TableCell>
                     <TableCell>{transaction.currency}</TableCell>
                   </TableRow>
