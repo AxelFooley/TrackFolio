@@ -81,7 +81,7 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
             </TableHeader>
             <TableBody>
               {transactions.map((transaction) => {
-                const price = Number(transaction.price ?? 0);
+                const price = Number(transaction.amount ?? 0);
                 const qty = Number(transaction.quantity ?? 0);
                 const amount = price * qty;
                 return (
