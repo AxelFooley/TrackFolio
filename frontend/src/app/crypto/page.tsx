@@ -615,7 +615,7 @@ export default function CryptoPortfoliosPage() {
             <DialogHeader>
               <DialogTitle>Delete Portfolio</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete "{deletingPortfolio?.name}"? This action cannot be undone and will permanently delete all transactions and data associated with this portfolio.
+                Are you sure you want to delete &quot;{deletingPortfolio?.name}&quot;? This action cannot be undone and will permanently delete all transactions and data associated with this portfolio.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>

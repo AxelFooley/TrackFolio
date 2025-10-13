@@ -68,6 +68,7 @@ export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesRetu
       setError(err instanceof Error ? err : new Error('Failed to fetch realtime prices'));
       setIsLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbolsKey, symbols.length]);
 
   const startPolling = useCallback(() => {

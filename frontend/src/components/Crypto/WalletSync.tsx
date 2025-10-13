@@ -122,7 +122,7 @@ export function WalletSync({ portfolioId, walletAddress }: WalletSyncProps) {
 
                 {syncStatus.status === 'never' && (
                   <div className="text-gray-500 text-xs">
-                    This wallet has never been synced. Click "Sync Now" to import your Bitcoin transactions.
+                    This wallet has never been synced. Click &quot;Sync Now&quot; to import your Bitcoin transactions.
                   </div>
                 )}
 
