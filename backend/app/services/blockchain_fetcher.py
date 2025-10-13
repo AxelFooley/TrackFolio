@@ -135,7 +135,8 @@ class BlockchainFetcherService:
         try:
             cached_data = self._redis_client.get(key)
             if cached_data:
-                return json.loads(cached_data)
+                data = json.loads(cached_data)
+                return self._restore_cached_types(data)
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(f"Error decoding cached data for key {key}: {e}")
         except redis.RedisError as e:
@@ -187,6 +188,45 @@ class BlockchainFetcherService:
             return obj
         else:
             return str(obj)
+
+    def _restore_cached_types(self, obj: Any) -> Any:
+        """
+        Restore Python types from JSON-serialized cached data.
+
+        Recursively converts string representations back to their original types:
+        - Converts ISO format strings to datetime objects for 'timestamp' fields
+        - Converts string representations to Decimal for numeric fields
+
+        Args:
+            obj: JSON-deserialized object (dict, list, or primitive)
+
+        Returns:
+            Object with restored types
+        """
+        if isinstance(obj, dict):
+            # Restore timestamp
+            if 'timestamp' in obj and isinstance(obj['timestamp'], str):
+                try:
+                    obj['timestamp'] = datetime.fromisoformat(obj['timestamp'])
+                except Exception:
+                    pass
+
+            # Restore Decimal fields
+            for k in ('quantity', 'price_at_execution', 'total_amount', 'fee'):
+                if k in obj and isinstance(obj[k], str):
+                    try:
+                        obj[k] = Decimal(obj[k])
+                    except Exception:
+                        pass
+
+            # Recursively process nested dicts
+            return {k: self._restore_cached_types(v) for k, v in obj.items()}
+
+        if isinstance(obj, list):
+            # Recursively process list items
+            return [self._restore_cached_types(it) for it in obj]
+
+        return obj
 
     def _rate_limit(self, api_name: str) -> None:
         """
