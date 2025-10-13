@@ -260,7 +260,13 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
 
         # Convert to EUR if needed (Yahoo returns USD)
         price_usd = price_data["current_price"]
-        price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
+        # Convert to EUR using dynamic exchange rate
+        try:
+            usd_to_eur_rate = get_exchange_rate("USD", "EUR")
+            price_eur = price_usd * usd_to_eur_rate
+        except Exception as e:
+            logger.warning(f"Failed to fetch USD→EUR rate for {symbol}: {e}. Using fallback rate.")
+            price_eur = price_usd * Decimal("0.92")  # Fallback conversion rate
 
         # Create price record
         price_record = PriceHistory(
@@ -357,6 +363,14 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
             logger.warning(f"No historical crypto data for {symbol}")
             return {"status": "no_data", "symbol": symbol}
 
+        # Fetch USD→EUR rate once for all historical prices
+        try:
+            usd_to_eur_rate = get_exchange_rate("USD", "EUR")
+            logger.info(f"Using dynamic USD→EUR rate: {usd_to_eur_rate}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch USD→EUR rate for backfill: {e}. Using fallback rate.")
+            usd_to_eur_rate = Decimal("0.92")
+
         # Save prices to database
         prices_added = 0
         prices_updated = 0
@@ -366,7 +380,7 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: str = N
             try:
                 # Convert to EUR if needed (Yahoo returns USD)
                 price_usd = price_data["close"]
-                price_eur = price_usd * Decimal("0.92")  # Use fallback conversion rate
+                price_eur = price_usd * usd_to_eur_rate
 
                 # Check if price already exists
                 existing = db.execute(
