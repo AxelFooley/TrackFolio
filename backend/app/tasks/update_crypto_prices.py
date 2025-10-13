@@ -276,7 +276,7 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: str = None):
             high=price_eur,
             low=price_eur,
             close=price_eur,
-            volume=Decimal("0"),  # Yahoo Finance real-time endpoint doesn't provide volume
+            volume=int(price_data.get("volume", 0)),
             source="yahoo"
         )
 
