@@ -404,15 +404,12 @@ export function CryptoTransactionTable({
             {editingTransaction && (
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="edit-symbol">Symbol</Label>
+                  <Label htmlFor="edit-symbol">Symbol (cannot be changed)</Label>
                   <Input
                     id="edit-symbol"
                     value={editingTransaction.symbol}
-                    onChange={(e) => setEditingTransaction({
-                      ...editingTransaction,
-                      symbol: e.target.value.toUpperCase(),
-                    })}
-                    required
+                    disabled
+                    className="bg-gray-50 cursor-not-allowed"
                   />
                 </div>
                 <div>
