@@ -80,6 +80,11 @@ export default function CryptoTransactionsPage() {
     }
 
     try {
+      // Convert timestamp to ISO string
+      const timestamp = newTransaction.timestamp
+        ? new Date(newTransaction.timestamp).toISOString()
+        : new Date().toISOString();
+
       await createTransactionMutation.mutateAsync({
         portfolioId,
         data: {
@@ -89,7 +94,7 @@ export default function CryptoTransactionsPage() {
           price_at_execution: newTransaction.price_at_execution,
           fee: newTransaction.fee,
           currency: newTransaction.currency,
-          timestamp: newTransaction.timestamp,
+          timestamp: timestamp,
         },
       });
 
