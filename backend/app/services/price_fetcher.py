@@ -228,16 +228,16 @@ class PriceFetcher:
             
             # Check if we're in an async context
             try:
-            loop = asyncio.get_running_loop()
-            # We're in an async context - use run_coroutine_threadsafe or create new loop
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                return pool.submit(
-                lambda: asyncio.run(self.fetch_stock_price(resolved_ticker))
-                ).result()
+                loop = asyncio.get_running_loop()
+                # We're in an async context - use run_coroutine_threadsafe or create new loop
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(
+                    lambda: asyncio.run(self.fetch_stock_price(resolved_ticker))
+                    ).result()
             except RuntimeError:
-            # No running loop - safe to use asyncio.run
-            return asyncio.run(self.fetch_stock_price(resolved_ticker))
+                # No running loop - safe to use asyncio.run
+                return asyncio.run(self.fetch_stock_price(resolved_ticker))
         except Exception as e:
             logger.error(f"Error fetching latest price for {ticker}: {str(e)}")
             return None
