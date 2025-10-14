@@ -18,6 +18,7 @@ from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransact
 from app.models.crypto_portfolio_snapshot import CryptoPortfolioSnapshot
 from app.models.price_history import PriceHistory
 from app.services.price_fetcher import PriceFetcher
+from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
@@ -425,9 +426,7 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
             price_eur = Decimal(str(price_record.close))
             # Derive USD via dynamic FX if available
             try:
-                fx = PriceFetcher()
-                import asyncio
-                eur_usd = asyncio.run(fx.fetch_fx_rate("EUR", "USD"))  # EURUSD=X
+                eur_usd = get_exchange_rate("EUR", "USD")
                 if eur_usd and eur_usd > 0:
                     price_usd = price_eur * eur_usd
                 else:
@@ -445,8 +444,7 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
                 price_usd = price_data["current_price"]
                 # Convert with dynamic FX
                 try:
-                    import asyncio
-                    usd_eur = asyncio.run(price_fetcher.fetch_fx_rate("USD", "EUR"))  # USDEUR=X
+                    usd_eur = get_exchange_rate("USD", "EUR")
                     if usd_eur and usd_eur > 0:
                         price_eur = price_usd * usd_eur
                     else:

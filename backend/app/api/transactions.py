@@ -27,6 +27,7 @@ from app.services.deduplication import DeduplicationService
 from app.services.position_manager import PositionManager
 from app.services.price_fetcher import PriceFetcher
 from app.services.calculations import FinancialCalculations
+from app.services.currency_converter import get_exchange_rate
 import yfinance as yf
 from decimal import Decimal
 
@@ -214,7 +215,7 @@ async def create_transaction(
         else:
             # For non-EUR currencies, fetch FX rate and convert
             try:
-                fx_rate = await PriceFetcher.fetch_fx_rate(transaction_data.currency, "EUR")
+                fx_rate = get_exchange_rate(transaction_data.currency, "EUR")
                 if fx_rate is None:
                     raise HTTPException(
                         status_code=400,
@@ -440,7 +441,7 @@ async def update_transaction(
         else:
             # For non-EUR currencies, fetch FX rate and convert
             try:
-                fx_rate = await PriceFetcher.fetch_fx_rate(transaction.currency, "EUR")
+                fx_rate = get_exchange_rate(transaction.currency, "EUR")
                 if fx_rate is None:
                     raise HTTPException(
                         status_code=400,

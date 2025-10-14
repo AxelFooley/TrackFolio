@@ -39,23 +39,22 @@ from app.schemas.crypto import (
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
 from app.services.price_history_manager import price_history_manager
+from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/crypto", tags=["crypto"])
 
 
-async def _get_usd_to_eur_rate() -> Optional[Decimal]:
+def _get_usd_to_eur_rate() -> Optional[Decimal]:
     """
-    Obtain the USD→EUR conversion rate, using PriceFetcher and falling back to Decimal('0.92') when unavailable.
-    
+    Obtain the USD→EUR conversion rate using cached currency converter.
+
     Returns:
         Decimal: Conversion rate from USD to EUR; returns Decimal('0.92') if fetching fails or no rate is available.
     """
     try:
-        price_fetcher = PriceFetcher()
-        import asyncio
-        rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
+        rate = get_exchange_rate("USD", "EUR")
         if rate:
             return rate
         else:
@@ -957,7 +956,7 @@ async def get_crypto_prices(
 
     eur_rate = None
     if currency.lower() == "eur":
-        eur_rate = await _get_usd_to_eur_rate()
+        eur_rate = _get_usd_to_eur_rate()
 
     prices: list[CryptoPriceData] = []
     for s in symbol_list:
@@ -1049,7 +1048,7 @@ async def get_crypto_price_history(
 
         eur_rate = None
         if currency.lower() == "eur":
-            eur_rate = await _get_usd_to_eur_rate()
+            eur_rate = _get_usd_to_eur_rate()
 
         prices = []
         for dp in historical_prices:

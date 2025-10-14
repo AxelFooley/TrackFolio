@@ -63,12 +63,30 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
             del _rate_cache[cache_key]
 
     try:
-        # Use PriceFetcher to get exchange rate
+        # Use PriceFetcher to get exchange rate synchronously
         # Note: Yahoo Finance uses base/quote format, so we need to call it with from_currency as base
         logger.info(f"Fetching exchange rate: {from_currency} -> {to_currency}")
 
-        # Run the async function in a sync context
-        rate = asyncio.run(_fetch_rate_async(from_currency, to_currency))
+        # Use PriceFetcher directly to get the FX rate
+        price_fetcher = PriceFetcher()
+        ticker = f"{from_currency}{to_currency}=X"
+        price_data = price_fetcher.fetch_realtime_price(ticker)
+
+        if price_data and price_data.get('current_price'):
+            rate = price_data['current_price']
+        else:
+            # Try the reverse rate if the direct one fails
+            reverse_ticker = f"{to_currency}{from_currency}=X"
+            reverse_price_data = price_fetcher.fetch_realtime_price(reverse_ticker)
+            if reverse_price_data and reverse_price_data.get('current_price'):
+                # Calculate the reciprocal
+                reverse_rate = reverse_price_data['current_price']
+                if reverse_rate > 0:
+                    rate = Decimal("1") / reverse_rate
+                else:
+                    raise ValueError(f"Invalid reverse rate for {from_currency}/{to_currency}")
+            else:
+                raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}")
 
         if rate is None:
             raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}")

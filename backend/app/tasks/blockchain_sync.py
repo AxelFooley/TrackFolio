@@ -19,6 +19,7 @@ from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransact
 from app.services.blockchain_fetcher import blockchain_fetcher
 from app.services.blockchain_deduplication import blockchain_deduplication
 from app.services.price_fetcher import PriceFetcher
+from app.services.currency_converter import get_exchange_rate
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -26,27 +27,20 @@ logger = logging.getLogger(__name__)
 
 def get_usd_to_eur_rate() -> Optional[Decimal]:
     """
-    Retrieve the USD-to-EUR exchange rate using Yahoo Finance FX data.
-    
-    Fetches the EUR/USD rate and returns its reciprocal so the result represents how many EUR equal 1 USD.
-    
+    Retrieve the USD-to-EUR exchange rate using cached currency converter.
+
+    Uses the cached currency converter service which provides 1-hour caching.
+
     Returns:
         Decimal: Amount of EUR per 1 USD (e.g., Decimal('0.92')), or `None` if the rate could not be obtained.
     """
     try:
-        price_fetcher = PriceFetcher()
-
-        # Get EUR/USD rate from Yahoo Finance (EURUSD=X)
-        # This gives us 1 EUR = X USD, so we need to invert it
-        import asyncio
-        eur_usd_rate = asyncio.run(price_fetcher.fetch_fx_rate("EUR", "USD"))
-
-        if eur_usd_rate and eur_usd_rate > 0:
-            usd_to_eur_rate = Decimal("1") / eur_usd_rate
+        usd_to_eur_rate = get_exchange_rate("USD", "EUR")
+        if usd_to_eur_rate:
             logger.debug(f"Fetched USD to EUR rate: {usd_to_eur_rate}")
             return usd_to_eur_rate
         else:
-            logger.warning("Could not fetch EUR/USD rate from Yahoo Finance")
+            logger.warning("Could not get USD to EUR rate from currency converter")
             return None
 
     except Exception as e:

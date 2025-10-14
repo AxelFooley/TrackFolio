@@ -27,6 +27,7 @@ from app.schemas.crypto import (
 )
 from app.services.price_fetcher import PriceFetcher
 from app.services.price_history_manager import price_history_manager
+from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
@@ -470,7 +471,7 @@ class CryptoCalculationService:
                     # Convert to target currency if needed (Yahoo returns USD)
                     if currency.lower() == 'eur':
                         # Get USD to EUR conversion rate
-                        eur_rate = await self._get_usd_to_eur_rate()
+                        eur_rate = self._get_usd_to_eur_rate()
                         if eur_rate:
                             price = price * eur_rate
                         else:
@@ -554,7 +555,7 @@ class CryptoCalculationService:
                 if price_data:
                     # Convert to target currency if needed (Yahoo returns USD)
                     if currency.lower() == 'eur':
-                        eur_rate = await self._get_usd_to_eur_rate()
+                        eur_rate = self._get_usd_to_eur_rate()
                         if eur_rate:
                             for data_point in price_data:
                                 data_point['price'] = Decimal(str(data_point['close'])) * eur_rate
@@ -589,19 +590,18 @@ class CryptoCalculationService:
 
         return prices
 
-    async def _get_usd_to_eur_rate(self) -> Optional[Decimal]:
+    def _get_usd_to_eur_rate(self) -> Optional[Decimal]:
         """
-        Retrieve the USD to EUR conversion rate from Yahoo Finance.
-        
-        Attempts to fetch the FX rate and returns it; if no rate is available or an error occurs, returns a fallback Decimal("0.92").
-        
+        Retrieve the USD to EUR conversion rate using cached currency converter.
+
+        Uses the cached currency converter service which provides 1-hour caching.
+        If no rate is available or an error occurs, returns a fallback Decimal("0.92").
+
         Returns:
             Decimal: USD→EUR conversion rate, or Decimal("0.92") as a fallback when the fetched rate is unavailable or an error occurs.
         """
         try:
-            price_fetcher = PriceFetcher()
-            import asyncio
-            rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
+            rate = get_exchange_rate("USD", "EUR")
             if rate:
                 return rate
             else:
