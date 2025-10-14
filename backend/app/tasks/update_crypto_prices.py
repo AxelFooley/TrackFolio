@@ -155,10 +155,17 @@ def update_crypto_prices(self):
                 updated += 1
 
             except IntegrityError as e:
-                # Race condition: another process already inserted this price
                 db.rollback()
-                logger.debug(f"Price already exists for {symbol} (race condition)")
-                skipped += 1
+                # Check if this is the expected unique constraint violation
+                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                if 'uix_ticker_date' in error_msg or 'duplicate key' in error_msg.lower():
+                    # Race condition: another process already inserted this price
+                    logger.debug(f"Price already exists for {symbol} (race condition)")
+                    skipped += 1
+                else:
+                    # Unexpected integrity error - re-raise
+                    logger.error(f"Unexpected IntegrityError for {symbol}: {error_msg}")
+                    raise
 
             except Exception as e:
                 db.rollback()
@@ -301,15 +308,23 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: Optional[str] 
             "currency": "EUR"
         }
 
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        logger.debug(f"Price already exists for {symbol} (race condition)")
-        return {
-            "status": "skipped",
-            "symbol": symbol,
-            "price_date": str(target_date),
-            "reason": "Price already exists"
-        }
+        # Check if this is the expected unique constraint violation
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        if 'uix_ticker_date' in error_msg or 'duplicate key' in error_msg.lower():
+            # Race condition: another process already inserted this price
+            logger.debug(f"Price already exists for {symbol} (race condition)")
+            return {
+                "status": "skipped",
+                "symbol": symbol,
+                "price_date": str(target_date),
+                "reason": "Price already exists"
+            }
+        else:
+            # Unexpected integrity error - re-raise
+            logger.error(f"Unexpected IntegrityError for {symbol}: {error_msg}")
+            raise
 
     except Exception as e:
         db.rollback()
@@ -433,11 +448,18 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
                     db.add(price_record)
                     prices_added += 1
 
-            except IntegrityError:
-                # Race condition - price was inserted by another process
+            except IntegrityError as e:
                 db.rollback()
-                prices_skipped += 1
-                continue
+                # Check if this is the expected unique constraint violation
+                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                if 'uix_ticker_date' in error_msg or 'duplicate key' in error_msg.lower():
+                    # Race condition - price was inserted by another process
+                    prices_skipped += 1
+                    continue
+                else:
+                    # Unexpected integrity error - re-raise
+                    logger.error(f"Unexpected IntegrityError for {symbol} on {price_data['date']}: {error_msg}")
+                    raise
 
         # Commit all changes
         db.commit()
