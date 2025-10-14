@@ -269,9 +269,21 @@ class PriceFetcher:
             # Resolve ticker using ISIN if provided
             resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
             logger.info(f"Fetching historical prices for {ticker} (resolved: {resolved_ticker})")
-            return asyncio.run(
-                self.fetch_historical_prices(resolved_ticker, start_date, end_date)
-            )
+
+            # Check if we're in an async context
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an async context - use run_coroutine_threadsafe or create new loop
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(
+                        lambda: asyncio.run(self.fetch_historical_prices(resolved_ticker, start_date, end_date))
+                    ).result()
+            except RuntimeError:
+                # No running loop - safe to use asyncio.run
+                return asyncio.run(
+                    self.fetch_historical_prices(resolved_ticker, start_date, end_date)
+                )
         except Exception as e:
             logger.error(f"Error fetching historical prices for {ticker}: {str(e)}")
             return []
