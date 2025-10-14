@@ -1027,10 +1027,10 @@ async def get_crypto_portfolio_holdings(
 ):
     """
     Retrieve current crypto holdings for a portfolio.
-    
+
     Returns:
         List[CryptoHolding]: Current holdings for the specified portfolio.
-    
+
     Raises:
         HTTPException: 404 if the portfolio does not exist; 500 if holdings calculation fails.
     """
@@ -1047,6 +1047,50 @@ async def get_crypto_portfolio_holdings(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to calculate holdings: {str(e)}")
+
+
+@router.get("/portfolios/{portfolio_id}/holdings/{symbol}", response_model=CryptoHolding)
+async def get_crypto_holding(
+    portfolio_id: int,
+    symbol: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve a specific crypto holding by symbol for a portfolio.
+
+    Parameters:
+        portfolio_id (int): ID of the portfolio.
+        symbol (str): Crypto symbol (e.g., "BTC", "ETH").
+
+    Returns:
+        CryptoHolding: The holding details for the specified symbol.
+
+    Raises:
+        HTTPException: 404 if the portfolio or holding is not found; 500 if calculation fails.
+    """
+    try:
+        calc_service = CryptoCalculationService(db)
+        holdings = await calc_service.calculate_holdings(portfolio_id)
+
+        if holdings is None:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # Find the specific holding by symbol
+        symbol_upper = symbol.upper()
+        holding = next((h for h in holdings if h.symbol == symbol_upper), None)
+
+        if not holding:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No holding found for symbol {symbol_upper} in this portfolio"
+            )
+
+        return holding
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get holding: {str(e)}")
 
 
 @router.get("/portfolios/{portfolio_id}/performance")
