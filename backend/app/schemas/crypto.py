@@ -49,12 +49,20 @@ class CryptoPortfolioResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # Optional computed fields
+    # Optional computed fields (legacy)
     total_value: Optional[Decimal] = None
     total_cost_basis: Optional[Decimal] = None
     total_profit_loss: Optional[Decimal] = None
     total_profit_loss_pct: Optional[float] = None
     transaction_count: Optional[int] = None
+
+    # Frontend-compatible fields
+    total_value_usd: Optional[float] = None
+    total_value_eur: Optional[float] = None
+    total_profit_usd: Optional[float] = None
+    total_profit_eur: Optional[float] = None
+    profit_percentage_usd: Optional[float] = None
+    profit_percentage_eur: Optional[float] = None
 
     # Wallet sync status
     wallet_sync_status: Optional[Dict[str, Any]] = None

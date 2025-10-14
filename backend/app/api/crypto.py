@@ -107,6 +107,30 @@ async def create_crypto_portfolio(
         await db.commit()
         await db.refresh(portfolio)
 
+        # If wallet address is provided, trigger immediate blockchain sync
+        if portfolio.wallet_address:
+            try:
+                from app.tasks.blockchain_sync import sync_wallet_manually
+
+                # Start background sync task with extended lookback to get full history
+                task = sync_wallet_manually.delay(
+                    wallet_address=portfolio.wallet_address,
+                    portfolio_id=portfolio.id,
+                    max_transactions=100,  # Get up to 100 transactions
+                    days_back=800  # Look back over 2 years for complete history
+                )
+
+                logger.info(
+                    f"Started automatic blockchain sync task {task.id} for new portfolio "
+                    f"{portfolio.id} with wallet {portfolio.wallet_address}"
+                )
+
+            except Exception as sync_error:
+                # Log the error but don't fail the portfolio creation
+                logger.warning(
+                    f"Failed to start automatic blockchain sync for portfolio {portfolio.id}: {sync_error}"
+                )
+
         return portfolio
 
     except HTTPException:
@@ -196,6 +220,56 @@ async def list_crypto_portfolios(
                     "wallet_configured": False
                 }
 
+            # Calculate values in both currencies for frontend compatibility
+            usd_to_eur_rate = _get_usd_to_eur_rate()
+
+            # Base currency values (from metrics)
+            base_total_value = metrics.total_value if metrics else None
+            base_total_cost_basis = metrics.total_cost_basis if metrics else None
+            base_total_profit_loss = metrics.total_profit_loss if metrics else None
+
+            # Calculate portfolio values in both USD and EUR
+            if base_total_value is not None:
+                if portfolio.base_currency == 'USD':
+                    total_value_usd = base_total_value
+                    total_value_eur = base_total_value * usd_to_eur_rate
+                else:
+                    total_value_usd = base_total_value / usd_to_eur_rate
+                    total_value_eur = base_total_value
+            else:
+                total_value_usd = None
+                total_value_eur = None
+
+            if base_total_cost_basis is not None:
+                if portfolio.base_currency == 'USD':
+                    total_cost_basis_usd = base_total_cost_basis
+                    total_cost_basis_eur = base_total_cost_basis * usd_to_eur_rate
+                else:
+                    total_cost_basis_usd = base_total_cost_basis / usd_to_eur_rate
+                    total_cost_basis_eur = base_total_cost_basis
+            else:
+                total_cost_basis_usd = None
+                total_cost_basis_eur = None
+
+            if base_total_profit_loss is not None:
+                if portfolio.base_currency == 'USD':
+                    total_profit_usd = base_total_profit_loss
+                    total_profit_eur = base_total_profit_loss * usd_to_eur_rate
+                else:
+                    total_profit_usd = base_total_profit_loss / usd_to_eur_rate
+                    total_profit_eur = base_total_profit_loss
+            else:
+                total_profit_usd = None
+                total_profit_eur = None
+
+            # Calculate profit percentages for both currencies
+            profit_percentage_usd = None
+            profit_percentage_eur = None
+            if total_profit_usd is not None and total_cost_basis_usd is not None and total_cost_basis_usd > 0:
+                profit_percentage_usd = float((total_profit_usd / total_cost_basis_usd) * 100)
+            if total_profit_eur is not None and total_cost_basis_eur is not None and total_cost_basis_eur > 0:
+                profit_percentage_eur = float((total_profit_eur / total_cost_basis_eur) * 100)
+
             portfolio_dict = {
                 "id": portfolio.id,
                 "name": portfolio.name,
@@ -205,10 +279,13 @@ async def list_crypto_portfolios(
                 "wallet_address": portfolio.wallet_address,
                 "created_at": portfolio.created_at,
                 "updated_at": portfolio.updated_at,
-                "total_value": metrics.total_value if metrics else None,
-                "total_cost_basis": metrics.total_cost_basis if metrics else None,
-                "total_profit_loss": metrics.total_profit_loss if metrics else None,
-                "total_profit_loss_pct": metrics.total_profit_loss_pct if metrics else None,
+                # Frontend-compatible fields
+                "total_value_usd": float(total_value_usd) if total_value_usd else None,
+                "total_value_eur": float(total_value_eur) if total_value_eur else None,
+                "total_profit_usd": float(total_profit_usd) if total_profit_usd else None,
+                "total_profit_eur": float(total_profit_eur) if total_profit_eur else None,
+                "profit_percentage_usd": profit_percentage_usd,
+                "profit_percentage_eur": profit_percentage_eur,
                 "transaction_count": metrics.transaction_count if metrics else 0,
                 "wallet_sync_status": wallet_sync_status
             }
@@ -221,6 +298,113 @@ async def list_crypto_portfolios(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list portfolios: {str(e)}")
+
+
+@router.get("/portfolios/{portfolio_id}/wallet-sync-status")
+async def get_wallet_sync_status(
+    portfolio_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get wallet synchronization status for a crypto portfolio.
+
+    Returns detailed information about the wallet sync state including:
+    - Current sync status (synced, syncing, error, never, disabled)
+    - Last sync timestamp
+    - Transaction counts (total and recent)
+    - Error messages if applicable
+
+    Parameters:
+        portfolio_id (int): ID of the portfolio to check wallet sync status for.
+
+    Returns:
+        dict: Wallet sync status information with keys:
+            - status: Current sync state
+            - last_sync: ISO timestamp of last successful sync (optional)
+            - transaction_count: Total blockchain transactions synced (optional)
+            - error_message: Error details if status is 'error' (optional)
+
+    Raises:
+        HTTPException: 404 if the portfolio does not exist; 500 for unexpected errors.
+    """
+    try:
+        # Verify portfolio exists
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # If no wallet address configured, return disabled status
+        if not portfolio.wallet_address:
+            return {
+                "status": "disabled",
+                "last_sync": None,
+                "transaction_count": None,
+                "error_message": None
+            }
+
+        try:
+            # Get total blockchain transactions for this portfolio
+            total_blockchain_tx_count = await db.execute(
+                select(func.count(CryptoTransaction.id))
+                .where(
+                    and_(
+                        CryptoTransaction.portfolio_id == portfolio_id,
+                        CryptoTransaction.exchange == 'Bitcoin Blockchain'
+                    )
+                )
+            )
+            total_blockchain_txs = total_blockchain_tx_count.scalar() or 0
+
+            # Get last blockchain transaction date
+            last_blockchain_tx_result = await db.execute(
+                select(CryptoTransaction.timestamp)
+                .where(
+                    and_(
+                        CryptoTransaction.portfolio_id == portfolio_id,
+                        CryptoTransaction.exchange == 'Bitcoin Blockchain'
+                    )
+                )
+                .order_by(CryptoTransaction.timestamp.desc())
+                .limit(1)
+            )
+            last_blockchain_tx = last_blockchain_tx_result.scalar_one_or_none()
+
+            # Determine sync status based on transaction data
+            if total_blockchain_txs == 0:
+                status = "never"
+            else:
+                # Check if there are recent transactions (within last 7 days)
+                recent_threshold = datetime.utcnow() - timedelta(days=7)
+                if last_blockchain_tx and last_blockchain_tx >= recent_threshold:
+                    status = "synced"
+                else:
+                    status = "synced"  # Has transactions but not recent
+
+            return {
+                "status": status,
+                "last_sync": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
+                "transaction_count": total_blockchain_txs,
+                "error_message": None
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching wallet sync status for portfolio {portfolio_id}: {e}")
+            return {
+                "status": "error",
+                "last_sync": None,
+                "transaction_count": None,
+                "error_message": f"Failed to retrieve wallet sync status: {str(e)}"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get wallet sync status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get wallet sync status: {str(e)}")
 
 
 @router.get("/portfolios/{portfolio_id}", response_model=CryptoPortfolioSummary)
@@ -313,11 +497,76 @@ async def get_crypto_portfolio(
                 "wallet_configured": False
             }
 
-        # Add wallet sync status to the portfolio object
+        # Calculate values in both currencies for frontend compatibility
+        usd_to_eur_rate = _get_usd_to_eur_rate()
+
+        # Get metrics from the summary
+        metrics = summary.get('metrics')
+        base_total_value = metrics.total_value if metrics else None
+        base_total_cost_basis = metrics.total_cost_basis if metrics else None
+        base_total_profit_loss = metrics.total_profit_loss if metrics else None
+
+        # Calculate portfolio values in both USD and EUR
+        if base_total_value is not None:
+            if portfolio.base_currency == 'USD':
+                total_value_usd = base_total_value
+                total_value_eur = base_total_value * usd_to_eur_rate
+            else:
+                total_value_usd = base_total_value / usd_to_eur_rate
+                total_value_eur = base_total_value
+        else:
+            total_value_usd = None
+            total_value_eur = None
+
+        if base_total_cost_basis is not None:
+            if portfolio.base_currency == 'USD':
+                total_cost_basis_usd = base_total_cost_basis
+                total_cost_basis_eur = base_total_cost_basis * usd_to_eur_rate
+            else:
+                total_cost_basis_usd = base_total_cost_basis / usd_to_eur_rate
+                total_cost_basis_eur = base_total_cost_basis
+        else:
+            total_cost_basis_usd = None
+            total_cost_basis_eur = None
+
+        if base_total_profit_loss is not None:
+            if portfolio.base_currency == 'USD':
+                total_profit_usd = base_total_profit_loss
+                total_profit_eur = base_total_profit_loss * usd_to_eur_rate
+            else:
+                total_profit_usd = base_total_profit_loss / usd_to_eur_rate
+                total_profit_eur = base_total_profit_loss
+        else:
+            total_profit_usd = None
+            total_profit_eur = None
+
+        # Calculate profit percentages for both currencies
+        profit_percentage_usd = None
+        profit_percentage_eur = None
+        if total_profit_usd is not None and total_cost_basis_usd is not None and total_cost_basis_usd > 0:
+            profit_percentage_usd = float((total_profit_usd / total_cost_basis_usd) * 100)
+        if total_profit_eur is not None and total_cost_basis_eur is not None and total_cost_basis_eur > 0:
+            profit_percentage_eur = float((total_profit_eur / total_cost_basis_eur) * 100)
+
+        # Add frontend-compatible fields to the portfolio object
         if hasattr(portfolio, '__dict__'):
-            portfolio.__dict__['wallet_sync_status'] = wallet_sync_status
+            portfolio.__dict__.update({
+                'total_value_usd': float(total_value_usd) if total_value_usd else None,
+                'total_value_eur': float(total_value_eur) if total_value_eur else None,
+                'total_profit_usd': float(total_profit_usd) if total_profit_usd else None,
+                'total_profit_eur': float(total_profit_eur) if total_profit_eur else None,
+                'profit_percentage_usd': profit_percentage_usd,
+                'profit_percentage_eur': profit_percentage_eur,
+                'wallet_sync_status': wallet_sync_status
+            })
         else:
             # For SQLAlchemy objects, we'll add this in the response serialization
+            summary['portfolio_total_value_usd'] = float(total_value_usd) if total_value_usd else None
+            summary['portfolio_total_value_eur'] = float(total_value_eur) if total_value_eur else None
+            summary['portfolio_total_profit_usd'] = float(total_profit_usd) if total_profit_usd else None
+            summary['portfolio_total_profit_eur'] = float(total_profit_eur) if total_profit_eur else None
+            summary['portfolio_profit_percentage_usd'] = profit_percentage_usd
+            summary['portfolio_profit_percentage_eur'] = profit_percentage_eur
             summary['wallet_sync_status'] = wallet_sync_status
 
         return summary
@@ -381,13 +630,45 @@ async def update_crypto_portfolio(
 
         # Update portfolio fields
         update_data = portfolio_update.dict(exclude_unset=True)
+        wallet_address_changed = False
+        old_wallet_address = portfolio.wallet_address
+
         for field, value in update_data.items():
             setattr(portfolio, field, value)
+
+        # Check if wallet address was added or changed
+        if 'wallet_address' in update_data:
+            wallet_address_changed = True
 
         portfolio.updated_at = datetime.utcnow()
 
         await db.commit()
         await db.refresh(portfolio)
+
+        # If wallet address was added or changed, trigger immediate blockchain sync
+        if wallet_address_changed and portfolio.wallet_address:
+            try:
+                from app.tasks.blockchain_sync import sync_wallet_manually
+
+                # Start background sync task with extended lookback to get full history
+                task = sync_wallet_manually.delay(
+                    wallet_address=portfolio.wallet_address,
+                    portfolio_id=portfolio.id,
+                    max_transactions=100,  # Get up to 100 transactions
+                    days_back=800  # Look back over 2 years for complete history
+                )
+
+                logger.info(
+                    f"Started automatic blockchain sync task {task.id} for updated portfolio "
+                    f"{portfolio.id} with wallet {portfolio.wallet_address} "
+                    f"(previous: {old_wallet_address})"
+                )
+
+            except Exception as sync_error:
+                # Log the error but don't fail the portfolio update
+                logger.warning(
+                    f"Failed to start automatic blockchain sync for portfolio {portfolio.id}: {sync_error}"
+                )
 
         return portfolio
 

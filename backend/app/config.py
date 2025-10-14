@@ -86,7 +86,7 @@ class Settings(BaseSettings):
 
     # Blockchain API endpoints (can be overridden)
     blockstream_api_url: HttpUrl = Field(
-        "https://blockstream.info/api",
+        "https://blockstream.info/api/",
         env="BLOCKSTREAM_API_URL",
         description="Blockstream API endpoint"
     )

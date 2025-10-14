@@ -265,7 +265,7 @@ class BlockchainFetcherService:
         api_config = self.APIS[api_name]
         session = self._sessions[api_name]
 
-        url = urljoin(api_config['base_url'], endpoint)
+        url = urljoin(str(api_config['base_url']), endpoint)
 
         for attempt in range(api_config['max_retries']):
             try:
@@ -418,18 +418,19 @@ class BlockchainFetcherService:
             # Convert timestamp to datetime
             timestamp = datetime.fromtimestamp(block_time)
 
-            # Calculate the value for this wallet address
-            # Blockstream API returns vout.value in satoshis (not BTC)
+            # Calculate the value for this wallet address ONLY
+            # Blockstream API returns vout.value in satoshis, and we need to sum only outputs to our address
             total_satoshis = 0
-            # Sum outputs; tolerate BTC vs satoshis in test/mocks
-            v_values = [v.get('value', 0) for v in tx_data.get('vout', [])]
-            if any(isinstance(v, float) for v in v_values) or any(0 < float(v) < 1 for v in v_values):
-                # Treat as BTC values
-                quantity = sum(Decimal(str(v)) for v in v_values)
-            else:
-                # Treat as satoshis
-                total_satoshis = sum(int(v) for v in v_values)
-                quantity = Decimal(total_satoshis) / Decimal("100000000")
+
+            # Look through outputs to find those belonging to our wallet address
+            for vout in tx_data.get('vout', []):
+                # Check if this output goes to our wallet address
+                scriptpubkey = vout.get('scriptpubkey_address', '')
+                if scriptpubkey == wallet_address:
+                    total_satoshis += int(vout.get('value', 0))
+
+            # Convert from satoshis to BTC
+            quantity = Decimal(total_satoshis) / Decimal("100000000")
 
             # Detect transaction type
             tx_type = self._detect_transaction_type(tx_data, wallet_address)
@@ -708,7 +709,7 @@ class BlockchainFetcherService:
 
             while len(transactions) < max_transactions:
                 # Build request URL
-                endpoint = f"/address/{wallet_address}/txs"
+                endpoint = f"address/{wallet_address}/txs"
                 params = {
                     'limit': min(self.MAX_TRANSACTIONS_PER_REQUEST, max_transactions - len(transactions))
                 }
@@ -779,7 +780,7 @@ class BlockchainFetcherService:
             threshold_timestamp = int(date_threshold.timestamp())  # Blockchain.info uses seconds
 
             # Build request URL - use the correct rawaddr endpoint structure
-            endpoint = f"/rawaddr/{wallet_address}"
+            endpoint = f"rawaddr/{wallet_address}"
             params = {
                 'limit': min(max_transactions, 50)  # Blockchain.info has a 50 transaction limit
             }
@@ -832,7 +833,7 @@ class BlockchainFetcherService:
         """
         try:
             # Get current chain info from BlockCypher
-            chain_data = self._make_request('blockcypher', '/v1/btc/main')
+            chain_data = self._make_request('blockcypher', '')
 
             if not chain_data:
                 logger.warning("Failed to get chain data from BlockCypher for block height calculation")
@@ -897,7 +898,7 @@ class BlockchainFetcherService:
             block_height = self._get_block_height_at_timestamp(date_threshold)
 
             # Build request URL
-            endpoint = f"/addrs/{wallet_address}/full"
+            endpoint = f"addrs/{wallet_address}/full"
             params = {
                 'limit': min(max_transactions, 50),  # BlockCypher has a 50 transaction limit
             }
@@ -981,15 +982,15 @@ class BlockchainFetcherService:
             try:
                 if api_name == 'blockstream':
                     # Test with a simple request
-                    data = self._make_request('blockstream', '/blocks')
+                    data = self._make_request('blockstream', 'blocks')
                     results[api_name] = data is not None
                 elif api_name == 'blockchain_com':
                     # Test with a simple request using the correct rawaddr endpoint
-                    data = self._make_request('blockchain_com', '/rawaddr/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')  # Satoshi's address
+                    data = self._make_request('blockchain_com', 'rawaddr/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')  # Satoshi's address
                     results[api_name] = data is not None
                 elif api_name == 'blockcypher':
                     # Test with a simple request
-                    data = self._make_request('blockcypher', '/blocks')
+                    data = self._make_request('blockcypher', 'blocks')
                     results[api_name] = data is not None
 
             except Exception as e:
