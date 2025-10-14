@@ -817,6 +817,59 @@ class BlockchainFetcherService:
             logger.error(f"Error fetching from Blockchain.info API: {e}")
             return self._build_result([], 'error', str(e))
 
+    def _get_block_height_at_timestamp(self, target_datetime: datetime) -> Optional[int]:
+        """
+        Get the approximate block height at a given timestamp using BlockCypher API.
+
+        Uses the current chain height and Bitcoin's ~10 minute average block time
+        to estimate the block height at the target timestamp.
+
+        Args:
+            target_datetime: The datetime to convert to block height
+
+        Returns:
+            Estimated block height as integer, or None if calculation fails
+        """
+        try:
+            # Get current chain info from BlockCypher
+            chain_data = self._make_request('blockcypher', '/v1/btc/main')
+
+            if not chain_data:
+                logger.warning("Failed to get chain data from BlockCypher for block height calculation")
+                return None
+
+            current_height = chain_data.get('height')
+            current_time_str = chain_data.get('time')
+
+            if not current_height or not current_time_str:
+                logger.warning(f"Missing height or time in chain data: {chain_data}")
+                return None
+
+            # Parse current blockchain time (ISO format with Z suffix)
+            current_time = datetime.fromisoformat(current_time_str.replace('Z', '+00:00'))
+
+            # Calculate time difference in seconds
+            time_diff_seconds = (current_time - target_datetime).total_seconds()
+
+            # Bitcoin's average block time is ~10 minutes (600 seconds)
+            BITCOIN_BLOCK_TIME_SECONDS = 600
+            blocks_diff = int(time_diff_seconds / BITCOIN_BLOCK_TIME_SECONDS)
+
+            # Calculate estimated block height
+            estimated_height = current_height - blocks_diff
+
+            # Ensure the height is positive
+            if estimated_height < 0:
+                logger.warning(f"Calculated negative block height: {estimated_height}, using 0 instead")
+                return 0
+
+            logger.info(f"Estimated block height for {target_datetime}: {estimated_height}")
+            return estimated_height
+
+        except Exception as e:
+            logger.warning(f"Error calculating block height at timestamp {target_datetime}: {e}")
+            return None
+
     def _fetch_from_blockcypher(
         self,
         wallet_address: str,
@@ -840,12 +893,21 @@ class BlockchainFetcherService:
             # Calculate date threshold
             date_threshold = datetime.utcnow() - timedelta(days=days_back)
 
+            # Get block height for the date threshold
+            block_height = self._get_block_height_at_timestamp(date_threshold)
+
             # Build request URL
             endpoint = f"/addrs/{wallet_address}/full"
             params = {
                 'limit': min(max_transactions, 50),  # BlockCypher has a 50 transaction limit
-                'before': date_threshold.isoformat()
             }
+
+            # Add 'before' parameter only if we successfully got a block height
+            if block_height is not None and isinstance(block_height, int):
+                params['before'] = block_height
+                logger.info(f"Using block height {block_height} for date threshold {date_threshold}")
+            else:
+                logger.warning(f"Could not determine block height for date threshold, fetching without 'before' parameter")
 
             # Make request
             data = self._make_request('blockcypher', endpoint, params)
