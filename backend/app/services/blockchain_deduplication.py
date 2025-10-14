@@ -68,8 +68,8 @@ class BlockchainDeduplicationService:
         db = SyncSessionLocal()
         try:
             result = db.execute(
-                "SELECT transaction_hash FROM crypto_transactions "
-                "WHERE portfolio_id = :portfolio_id AND transaction_hash IS NOT NULL",
+                text("SELECT transaction_hash FROM crypto_transactions "
+                "WHERE portfolio_id = :portfolio_id AND transaction_hash IS NOT NULL"),
                 {"portfolio_id": portfolio_id}
             )
             return {row[0] for row in result.all() if row[0]}
@@ -329,13 +329,13 @@ class BlockchainDeduplicationService:
             since_date = datetime.utcnow() - timedelta(days=recent_days)
 
             result = db.execute(
-                """
+                text("""
                 SELECT symbol, timestamp, quantity, transaction_type, exchange, transaction_hash
                 FROM crypto_transactions
                 WHERE portfolio_id = :portfolio_id
                 AND timestamp >= :since_date
                 ORDER BY timestamp DESC
-                """,
+                """),
                 {"portfolio_id": portfolio_id, "since_date": since_date}
             )
             existing_txs = result.all()

@@ -348,7 +348,7 @@ class BlockchainFetcherService:
             str: SHA-256 hex digest of the concatenation of the transaction's key fields.
         """
         # Create a string with key fields for hashing
-        hash_string = f"{tx_data.get('txid', '')}{tx_data.get('timestamp', '')}{tx_data.get('value', '')}{tx_data.get('address', '')}"
+        hash_string = f"{str(tx_data.get('txid', ''))}{str(tx_data.get('timestamp', ''))}{str(tx_data.get('value', ''))}{str(tx_data.get('address', ''))}"
 
         return hashlib.sha256(hash_string.encode()).hexdigest()
 

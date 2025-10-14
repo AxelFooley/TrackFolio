@@ -76,3 +76,32 @@ class RealtimePricesResponse(BaseModel):
                 "timestamp": "2025-10-03T14:30:00Z"
             }
         }
+
+
+class PriceHistoryResponse(BaseModel):
+    """Schema for price history response."""
+    symbol: str = Field(..., description="Asset ticker symbol")
+    data: List[dict] = Field(..., description="List of price data points")
+    count: int = Field(..., description="Number of data points returned")
+    fetching: bool = Field(..., description="Whether data is currently being fetched")
+    message: Optional[str] = Field(None, description="Optional message about the fetch status")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "symbol": "AAPL",
+                "data": [
+                    {
+                        "date": "2025-10-01",
+                        "open": 174.50,
+                        "high": 176.00,
+                        "low": 173.80,
+                        "close": 175.43,
+                        "volume": 50000000
+                    }
+                ],
+                "count": 1,
+                "fetching": False,
+                "message": None
+            }
+        }

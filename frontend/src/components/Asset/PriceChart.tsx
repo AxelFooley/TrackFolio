@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAssetPrices } from '@/hooks/useAsset';
+import { PriceRefreshButton } from './PriceRefreshButton';
 import {
   LineChart,
   Line,
@@ -68,19 +69,29 @@ export function PriceChart({ ticker, position }: PriceChartProps) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <CardTitle>Price History</CardTitle>
-          <div className="flex gap-1">
-            {timeRanges.map((range) => (
-              <Button
-                key={range}
-                variant={selectedRange === range ? 'default' : 'outline'}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex gap-1">
+              {timeRanges.map((range) => (
+                <Button
+                  key={range}
+                  variant={selectedRange === range ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSelectedRange(range)}
+                >
+                  {range}
+                </Button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <PriceRefreshButton
+                symbols={[ticker]}
+                showFullRefresh={true}
+                variant="outline"
                 size="sm"
-                onClick={() => setSelectedRange(range)}
-              >
-                {range}
-              </Button>
-            ))}
+              />
+            </div>
           </div>
         </div>
       </CardHeader>

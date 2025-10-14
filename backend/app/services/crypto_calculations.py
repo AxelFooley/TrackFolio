@@ -26,6 +26,7 @@ from app.schemas.crypto import (
     CryptoCurrency
 )
 from app.services.price_fetcher import PriceFetcher
+from app.services.price_history_manager import price_history_manager
 
 logger = logging.getLogger(__name__)
 
@@ -528,12 +529,27 @@ class CryptoCalculationService:
                 # Add appropriate suffix for crypto symbols on Yahoo Finance
                 yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
 
-                # Use Yahoo Finance to fetch historical prices
-                price_data = price_fetcher.fetch_historical_prices_sync(
-                    yahoo_symbol,
+                # Use PriceHistoryManager to get historical prices from database
+                price_data = price_history_manager.get_price_history(
+                    symbol=yahoo_symbol,
                     start_date=start_date,
                     end_date=end_date
                 )
+
+                # If no data exists, fetch it
+                if not price_data:
+                    logger.info(f"No historical data found for {yahoo_symbol}, fetching from API")
+                    price_history_manager.fetch_and_store_complete_history(
+                        symbol=yahoo_symbol,
+                        start_date=start_date,
+                        force_update=False
+                    )
+                    # Try to get it again
+                    price_data = price_history_manager.get_price_history(
+                        symbol=yahoo_symbol,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
 
                 if price_data:
                     # Convert to target currency if needed (Yahoo returns USD)
@@ -541,15 +557,15 @@ class CryptoCalculationService:
                         eur_rate = await self._get_usd_to_eur_rate()
                         if eur_rate:
                             for data_point in price_data:
-                                data_point['price'] = data_point['close'] * eur_rate
+                                data_point['price'] = Decimal(str(data_point['close'])) * eur_rate
                                 data_point['currency'] = 'EUR'
                         else:
                             for data_point in price_data:
-                                data_point['price'] = data_point['close']
+                                data_point['price'] = Decimal(str(data_point['close']))
                                 data_point['currency'] = 'USD'
                     else:
                         for data_point in price_data:
-                            data_point['price'] = data_point['close']
+                            data_point['price'] = Decimal(str(data_point['close']))
                             data_point['currency'] = 'USD'
 
                     # Format to match expected structure

@@ -38,6 +38,7 @@ from app.schemas.crypto import (
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
+from app.services.price_history_manager import price_history_manager
 
 logger = logging.getLogger(__name__)
 
@@ -1023,12 +1024,28 @@ async def get_crypto_price_history(
         if days_diff > 365:
             raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
 
-        # Get historical prices from Yahoo Finance (USD)
-        price_fetcher = PriceFetcher()
+        # Get historical prices from PriceHistoryManager database (USD)
         yahoo_symbol = f"{symbol}-USD"
-        historical_prices = await price_fetcher.fetch_historical_prices(
-            yahoo_symbol, start_date=start_date, end_date=end_date
+        historical_prices = price_history_manager.get_price_history(
+            symbol=yahoo_symbol,
+            start_date=start_date,
+            end_date=end_date
         )
+
+        # If no data exists, fetch it
+        if not historical_prices:
+            logger.info(f"No historical data found for {yahoo_symbol}, fetching from API")
+            price_history_manager.fetch_and_store_complete_history(
+                symbol=yahoo_symbol,
+                start_date=start_date,
+                force_update=False
+            )
+            # Try to get it again
+            historical_prices = price_history_manager.get_price_history(
+                symbol=yahoo_symbol,
+                start_date=start_date,
+                end_date=end_date
+            )
 
         eur_rate = None
         if currency.lower() == "eur":
