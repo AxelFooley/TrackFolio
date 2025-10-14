@@ -100,6 +100,7 @@ export interface CryptoPortfolio {
   id: number;
   name: string;
   description: string | null;
+  is_active: boolean;
   base_currency: 'USD' | 'EUR';
   created_at: string;
   updated_at: string;

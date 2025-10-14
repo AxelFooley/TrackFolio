@@ -290,10 +290,11 @@ export async function getCryptoPortfolios(): Promise<CryptoPortfolioList> {
 }
 
 export async function getCryptoPortfolio(id: number): Promise<CryptoPortfolio> {
-  return apiRequest<CryptoPortfolio>({
+  const response = await apiRequest<{ portfolio: CryptoPortfolio; metrics: any; holdings: any; recent_transactions: any }>({
     method: 'GET',
     url: `/crypto/portfolios/${id}`,
   });
+  return response.portfolio;
 }
 
 export async function createCryptoPortfolio(data: CryptoPortfolioCreate): Promise<CryptoPortfolio> {
