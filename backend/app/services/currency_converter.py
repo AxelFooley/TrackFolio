@@ -8,15 +8,17 @@ from decimal import Decimal
 from typing import Optional
 import logging
 import asyncio
+import threading
 from datetime import datetime, timedelta
 
 from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
 
-# Simple in-memory cache for exchange rates
+# Thread-safe in-memory cache for exchange rates
 # Cache format: {('USD', 'EUR'): {'rate': Decimal('0.92'), 'timestamp': datetime}}
 _rate_cache = {}
+_cache_lock = threading.Lock()
 _cache_duration = timedelta(hours=1)  # Cache rates for 1 hour
 
 
@@ -52,15 +54,16 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
     cache_key = (from_currency, to_currency)
     current_time = datetime.now()
 
-    # Check if we have a cached rate that's still valid
-    if cache_key in _rate_cache:
-        cached_data = _rate_cache[cache_key]
-        if current_time - cached_data['timestamp'] < _cache_duration:
-            logger.debug(f"Using cached exchange rate for {from_currency}/{to_currency}: {cached_data['rate']}")
-            return cached_data['rate']
-        else:
-            logger.debug(f"Cache expired for {from_currency}/{to_currency}, fetching fresh rate")
-            del _rate_cache[cache_key]
+    # Check if we have a cached rate that's still valid (thread-safe)
+    with _cache_lock:
+        if cache_key in _rate_cache:
+            cached_data = _rate_cache[cache_key]
+            if current_time - cached_data['timestamp'] < _cache_duration:
+                logger.debug(f"Using cached exchange rate for {from_currency}/{to_currency}: {cached_data['rate']}")
+                return cached_data['rate']
+            else:
+                logger.debug(f"Cache expired for {from_currency}/{to_currency}, fetching fresh rate")
+                del _rate_cache[cache_key]
 
     try:
         # Use PriceFetcher to get exchange rate synchronously
@@ -91,11 +94,12 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
         if rate is None:
             raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}")
 
-        # Cache the rate
-        _rate_cache[cache_key] = {
-            'rate': rate,
-            'timestamp': current_time
-        }
+        # Cache the rate (thread-safe)
+        with _cache_lock:
+            _rate_cache[cache_key] = {
+                'rate': rate,
+                'timestamp': current_time
+            }
 
         logger.info(f"Exchange rate {from_currency}/{to_currency}: {rate} (cached)")
         return rate
@@ -132,8 +136,9 @@ def clear_exchange_rate_cache():
     at the start of a new trading day.
     """
     global _rate_cache
-    cache_size = len(_rate_cache)
-    _rate_cache.clear()
+    with _cache_lock:
+        cache_size = len(_rate_cache)
+        _rate_cache.clear()
     logger.info(f"Cleared exchange rate cache (removed {cache_size} entries)")
 
 
