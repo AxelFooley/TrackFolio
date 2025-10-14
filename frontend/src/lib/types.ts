@@ -86,6 +86,7 @@ export interface TransactionCreate {
 }
 
 export interface TransactionUpdate {
+  transaction_type?: 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE';
   quantity?: number | null;
   amount?: number | null;
   fees?: number;
