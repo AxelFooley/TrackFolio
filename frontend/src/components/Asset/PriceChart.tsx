@@ -25,6 +25,16 @@ interface PriceChartProps {
   position: Position;
 }
 
+/**
+ * Render a price history chart for a given ticker and position.
+ *
+ * Displays a selectable time-range toolbar, a responsive line chart of historical prices,
+ * and a dashed reference line labeled "Avg Cost" when the position includes an average cost.
+ *
+ * @param ticker - The asset ticker symbol to fetch and display price data for.
+ * @param position - The position object providing currency and optional average_cost used for formatting and the reference line.
+ * @returns A React element containing the price history card and chart UI.
+ */
 export function PriceChart({ ticker, position }: PriceChartProps) {
   const [selectedRange, setSelectedRange] = useState('1Y');
   const { data: priceData, isLoading } = useAssetPrices(ticker, selectedRange);
@@ -98,12 +108,14 @@ export function PriceChart({ ticker, position }: PriceChartProps) {
               labelFormatter={(label) => new Date(label).toLocaleDateString()}
             />
             <Legend />
-            <ReferenceLine
-              y={position.average_cost}
-              stroke="#F59E0B"
-              strokeDasharray="5 5"
-              label="Avg Cost"
-            />
+            {position.average_cost && (
+              <ReferenceLine
+                y={position.average_cost}
+                stroke="#F59E0B"
+                strokeDasharray="5 5"
+                label="Avg Cost"
+              />
+            )}
             <Line
               type="monotone"
               dataKey="close"

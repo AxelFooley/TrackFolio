@@ -9,6 +9,7 @@ const navLinks = [
   { href: '/', label: 'Dashboard' },
   { href: '/holdings', label: 'Holdings' },
   { href: '/import', label: 'Import' },
+  { href: '/crypto', label: 'Crypto' },
   { href: '/settings', label: 'Settings' },
 ];
 

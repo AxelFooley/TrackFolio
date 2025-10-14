@@ -1,5 +1,5 @@
 """
-Price fetcher service for Yahoo Finance and CoinGecko APIs.
+Price fetcher service for Yahoo Finance API.
 
 From PRD Section 3 - Data Sources and Section 4.5 - Price Updates.
 """
@@ -8,12 +8,10 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 import logging
 import yfinance as yf
-import requests
 from time import sleep
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-from app.config import settings
 from app.services.ticker_mapper import TickerMapper
 
 logger = logging.getLogger(__name__)
@@ -55,11 +53,7 @@ class RealtimePriceCache:
 
 
 class PriceFetcher:
-    """Fetch prices from Yahoo Finance and CoinGecko APIs."""
-
-    # CoinGecko free tier: 50 calls/minute
-    COINGECKO_API_URL = "https://api.coingecko.com/api/v3"
-    COINGECKO_RATE_LIMIT_DELAY = 1.5  # seconds between requests
+    """Fetch prices from Yahoo Finance API."""
 
     # Real-time price fetching configuration
     REALTIME_RATE_LIMIT_DELAY = 0.15  # seconds between Yahoo Finance requests
@@ -73,13 +67,20 @@ class PriceFetcher:
     @staticmethod
     async def fetch_stock_price(ticker: str) -> Optional[Dict[str, Decimal]]:
         """
-        Fetch current price for stock/ETF from Yahoo Finance.
-
-        Args:
-            ticker: Stock ticker symbol
-
+        Fetch the latest OHLCV price for a stock or ETF from Yahoo Finance.
+        
+        Parameters:
+            ticker (str): The Yahoo Finance ticker symbol to query.
+        
         Returns:
-            Dict with price data (open, high, low, close, volume) or None
+            Optional[Dict[str, Decimal | int | str]]: A dictionary with keys:
+                - `open` (Decimal): Opening price for the latest trading period.
+                - `high` (Decimal): Highest price for the latest trading period.
+                - `low` (Decimal): Lowest price for the latest trading period.
+                - `close` (Decimal): Closing price for the latest trading period.
+                - `volume` (int): Traded volume for the latest trading period.
+                - `source` (str): Data source identifier (always "yahoo").
+            Returns `None` if no data is available or an error occurs.
         """
         try:
             stock = yf.Ticker(ticker)
@@ -104,87 +105,25 @@ class PriceFetcher:
             logger.error(f"Error fetching price for {ticker} from Yahoo Finance: {str(e)}")
             return None
 
-    @staticmethod
-    async def fetch_crypto_price(ticker: str) -> Optional[Dict[str, Decimal]]:
-        """
-        Fetch current price for cryptocurrency from CoinGecko.
-
-        Args:
-            ticker: Crypto symbol (e.g., BTC, ETH)
-
-        Returns:
-            Dict with price data or None
-        """
-        try:
-            # Map common ticker symbols to CoinGecko IDs
-            coin_id = PriceFetcher._map_ticker_to_coingecko_id(ticker)
-
-            headers = {}
-            if settings.coingecko_api_key:
-                headers["x-cg-pro-api-key"] = settings.coingecko_api_key
-
-            # Fetch current price
-            url = f"{PriceFetcher.COINGECKO_API_URL}/simple/price"
-            params = {
-                "ids": coin_id,
-                "vs_currencies": "eur,usd",
-                "include_24hr_vol": "true",
-                "include_24hr_change": "true"
-            }
-
-            response = requests.get(url, params=params, headers=headers, timeout=10)
-            response.raise_for_status()
-
-            data = response.json()
-
-            if coin_id not in data:
-                logger.warning(f"No price data for {ticker} ({coin_id}) from CoinGecko")
-                return None
-
-            price_data = data[coin_id]
-            close_price = Decimal(str(price_data.get("eur", 0)))
-
-            # CoinGecko doesn't provide OHLC for current day in free tier
-            # Use close price for all OHLC values
-            return {
-                "open": close_price,
-                "high": close_price,
-                "low": close_price,
-                "close": close_price,
-                "volume": int(price_data.get("eur_24h_vol", 0)),
-                "source": "coingecko"
-            }
-
-        except requests.RequestException as e:
-            logger.error(f"Error fetching price for {ticker} from CoinGecko: {str(e)}")
-            return None
-        except (KeyError, ValueError) as e:
-            logger.error(f"Error parsing CoinGecko response for {ticker}: {str(e)}")
-            return None
-
+  
     @staticmethod
     async def fetch_historical_prices(
         ticker: str,
         start_date: date,
-        end_date: date,
-        is_crypto: bool = False
+        end_date: date
     ) -> List[Dict]:
         """
-        Fetch historical price data.
-
-        Args:
-            ticker: Asset ticker symbol
-            start_date: Start date
-            end_date: End date
-            is_crypto: Whether ticker is cryptocurrency
-
+        Retrieve historical OHLCV price records for the given ticker between start_date and end_date.
+        
+        Parameters:
+            ticker (str): Asset ticker symbol to fetch.
+            start_date (date): Inclusive start date for the historical range.
+            end_date (date): Inclusive end date for the historical range.
+        
         Returns:
-            List of price dictionaries
+            List[Dict]: A list of price records, each containing keys `date`, `open`, `high`, `low`, `close`, `volume`, and `source`; returns an empty list if no data is available or on failure.
         """
-        if is_crypto:
-            return await PriceFetcher._fetch_crypto_historical(ticker, start_date, end_date)
-        else:
-            return await PriceFetcher._fetch_stock_historical(ticker, start_date, end_date)
+        return await PriceFetcher._fetch_stock_historical(ticker, start_date, end_date)
 
     @staticmethod
     async def _fetch_stock_historical(
@@ -192,7 +131,25 @@ class PriceFetcher:
         start_date: date,
         end_date: date
     ) -> List[Dict]:
-        """Fetch historical stock prices from Yahoo Finance."""
+        """
+        Retrieve historical OHLCV records for a ticker between two dates.
+        
+        Parameters:
+            ticker (str): Ticker symbol to query on Yahoo Finance.
+            start_date (date): Inclusive start date for the historical range.
+            end_date (date): Exclusive end date for the historical range.
+        
+        Returns:
+            List[Dict]: A list of price records. Each record contains:
+                - `date` (date): The trading date.
+                - `open` (Decimal): Opening price.
+                - `high` (Decimal): Highest price.
+                - `low` (Decimal): Lowest price.
+                - `close` (Decimal): Closing price.
+                - `volume` (int): Traded volume.
+                - `source` (str): Data source identifier ("yahoo").
+            Returns an empty list if no data is available or an error occurs.
+        """
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(start=start_date, end=end_date)
@@ -219,74 +176,18 @@ class PriceFetcher:
             logger.error(f"Error fetching historical data for {ticker}: {str(e)}")
             return []
 
-    @staticmethod
-    async def _fetch_crypto_historical(
-        ticker: str,
-        start_date: date,
-        end_date: date
-    ) -> List[Dict]:
-        """Fetch historical crypto prices from CoinGecko."""
-        try:
-            coin_id = PriceFetcher._map_ticker_to_coingecko_id(ticker)
-
-            headers = {}
-            if settings.coingecko_api_key:
-                headers["x-cg-pro-api-key"] = settings.coingecko_api_key
-
-            # CoinGecko historical data endpoint
-            url = f"{PriceFetcher.COINGECKO_API_URL}/coins/{coin_id}/market_chart/range"
-
-            # Convert dates to UNIX timestamps
-            from_timestamp = int(datetime.combine(start_date, datetime.min.time()).timestamp())
-            to_timestamp = int(datetime.combine(end_date, datetime.max.time()).timestamp())
-
-            params = {
-                "vs_currency": "eur",
-                "from": from_timestamp,
-                "to": to_timestamp
-            }
-
-            # Rate limiting for free tier
-            sleep(PriceFetcher.COINGECKO_RATE_LIMIT_DELAY)
-
-            response = requests.get(url, params=params, headers=headers, timeout=30)
-            response.raise_for_status()
-
-            data = response.json()
-            prices_data = data.get("prices", [])
-
-            prices = []
-            for timestamp, price in prices_data:
-                price_date = datetime.fromtimestamp(timestamp / 1000).date()
-                price_decimal = Decimal(str(price))
-
-                prices.append({
-                    "date": price_date,
-                    "open": price_decimal,
-                    "high": price_decimal,
-                    "low": price_decimal,
-                    "close": price_decimal,
-                    "volume": 0,  # Not available in this endpoint
-                    "source": "coingecko"
-                })
-
-            return prices
-
-        except Exception as e:
-            logger.error(f"Error fetching historical crypto data for {ticker}: {str(e)}")
-            return []
-
+    
     @staticmethod
     async def fetch_fx_rate(base: str = "EUR", quote: str = "USD") -> Optional[Decimal]:
         """
-        Fetch currency exchange rate from Yahoo Finance.
-
-        Args:
-            base: Base currency (default: EUR)
-            quote: Quote currency (default: USD)
-
+        Fetch the FX exchange rate for a currency pair from Yahoo Finance.
+        
+        Parameters:
+        	base (str): Base currency code (default "EUR").
+        	quote (str): Quote currency code (default "USD").
+        
         Returns:
-            Exchange rate (e.g., 1.10 for EUR/USD) or None
+        	Decimal: Exchange rate expressing how many units of `quote` equal one unit of `base` (e.g., 1.10 for EUR/USD), or `None` if the rate is unavailable.
         """
         try:
             # Yahoo Finance FX ticker format: EURUSD=X
@@ -311,7 +212,6 @@ class PriceFetcher:
         """
         Synchronous wrapper to fetch latest price (for Celery tasks).
 
-        Automatically detects if ticker is crypto and uses appropriate API.
         If ISIN is provided, resolves to correct Yahoo Finance ticker.
 
         Args:
@@ -321,20 +221,22 @@ class PriceFetcher:
         Returns:
             Dict with OHLCV data or None
         """
-        import asyncio
-
-        # Detect if crypto (simple heuristic)
-        is_crypto = ticker.upper() in ["BTC", "ETH", "USDT", "BNB", "SOL", "XRP",
-                                        "ADA", "DOGE", "DOT", "MATIC", "SHIB",
-                                        "AVAX", "LINK", "UNI", "ATOM"]
-
         try:
-            if is_crypto:
-                return asyncio.run(self.fetch_crypto_price(ticker))
-            else:
-                # Resolve ticker using ISIN if provided
-                resolved_ticker = TickerMapper.resolve_ticker(ticker, isin)
-                logger.info(f"Fetching price for {ticker} (resolved: {resolved_ticker})")
+            # Resolve ticker using ISIN if provided
+            resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
+            logger.info(f"Fetching price for {ticker} (resolved: {resolved_ticker})")
+            
+            # Check if we're in an async context
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an async context - use run_coroutine_threadsafe or create new loop
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(
+                    lambda: asyncio.run(self.fetch_stock_price(resolved_ticker))
+                    ).result()
+            except RuntimeError:
+                # No running loop - safe to use asyncio.run
                 return asyncio.run(self.fetch_stock_price(resolved_ticker))
         except Exception as e:
             logger.error(f"Error fetching latest price for {ticker}: {str(e)}")
@@ -350,7 +252,6 @@ class PriceFetcher:
         """
         Synchronous wrapper to fetch historical prices (for Celery tasks).
 
-        Automatically detects if ticker is crypto and uses appropriate API.
         If ISIN is provided, resolves to correct Yahoo Finance ticker.
 
         Args:
@@ -364,23 +265,13 @@ class PriceFetcher:
         """
         import asyncio
 
-        # Detect if crypto (simple heuristic)
-        is_crypto = ticker.upper() in ["BTC", "ETH", "USDT", "BNB", "SOL", "XRP",
-                                        "ADA", "DOGE", "DOT", "MATIC", "SHIB",
-                                        "AVAX", "LINK", "UNI", "ATOM"]
-
         try:
-            if is_crypto:
-                return asyncio.run(
-                    self.fetch_historical_prices(ticker, start_date, end_date, is_crypto=True)
-                )
-            else:
-                # Resolve ticker using ISIN if provided
-                resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
-                logger.info(f"Fetching historical prices for {ticker} (resolved: {resolved_ticker})")
-                return asyncio.run(
-                    self.fetch_historical_prices(resolved_ticker, start_date, end_date, is_crypto=False)
-                )
+            # Resolve ticker using ISIN if provided
+            resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
+            logger.info(f"Fetching historical prices for {ticker} (resolved: {resolved_ticker})")
+            return asyncio.run(
+                self.fetch_historical_prices(resolved_ticker, start_date, end_date)
+            )
         except Exception as e:
             logger.error(f"Error fetching historical prices for {ticker}: {str(e)}")
             return []
@@ -471,14 +362,12 @@ class PriceFetcher:
     ) -> List[Dict]:
         """
         Fetch real-time prices for multiple tickers in parallel.
-
-        Uses ThreadPoolExecutor for concurrent fetching with rate limiting.
-
-        Args:
-            tickers: List of (ticker, isin) tuples
-
+        
+        Parameters:
+            tickers (List[Tuple[str, Optional[str]]]): List of (ticker, isin) pairs to fetch.
+        
         Returns:
-            List of price dictionaries (successful fetches only)
+            List[Dict]: Price dictionaries for tickers that were successfully fetched.
         """
         if not tickers:
             return []
@@ -506,34 +395,4 @@ class PriceFetcher:
         logger.info(f"Successfully fetched {len(results)} out of {len(tickers)} real-time prices")
         return results
 
-    @staticmethod
-    def _map_ticker_to_coingecko_id(ticker: str) -> str:
-        """
-        Map common ticker symbols to CoinGecko IDs.
-
-        Args:
-            ticker: Ticker symbol
-
-        Returns:
-            CoinGecko ID
-        """
-        # Common mappings
-        ticker_map = {
-            "BTC": "bitcoin",
-            "ETH": "ethereum",
-            "USDT": "tether",
-            "BNB": "binancecoin",
-            "SOL": "solana",
-            "XRP": "ripple",
-            "ADA": "cardano",
-            "DOGE": "dogecoin",
-            "DOT": "polkadot",
-            "MATIC": "matic-network",
-            "SHIB": "shiba-inu",
-            "AVAX": "avalanche-2",
-            "LINK": "chainlink",
-            "UNI": "uniswap",
-            "ATOM": "cosmos",
-        }
-
-        return ticker_map.get(ticker.upper(), ticker.lower())
+    

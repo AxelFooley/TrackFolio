@@ -16,6 +16,17 @@ interface TransactionHistoryProps {
   ticker: string;
 }
 
+/**
+ * Render a transaction history card for the provided asset ticker.
+ *
+ * Shows loading skeletons while transactions are being fetched, displays a "No transactions found"
+ * message when there are no entries, and otherwise presents a horizontally scrollable table of
+ * transactions with columns: Date, Type, Quantity, Price, Amount, Fees, and Currency.
+ * Numeric cells are right-aligned and use a monospaced font; dates and monetary values are formatted.
+ *
+ * @param ticker - The asset ticker symbol whose transactions should be displayed.
+ * @returns A React element containing the transaction history card with loading, empty, and populated states.
+ */
 export function TransactionHistory({ ticker }: TransactionHistoryProps) {
   const { data: transactions, isLoading } = useAssetTransactions(ticker);
 
@@ -70,32 +81,34 @@ export function TransactionHistory({ ticker }: TransactionHistoryProps) {
             </TableHeader>
             <TableBody>
               {transactions.map((transaction) => {
-                const amount = transaction.price_per_share * transaction.quantity;
+                const price = Number(transaction.price_per_share ?? 0);
+                const qty = Number(transaction.quantity ?? 0);
+                const amount = price * qty;
                 return (
                   <TableRow key={transaction.id}>
                     <TableCell>{formatDate(transaction.operation_date)}</TableCell>
                     <TableCell>
                       <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          transaction.transaction_type === 'buy'
+                          transaction.transaction_type?.toUpperCase() === 'BUY'
                             ? 'bg-success/10 text-success'
                             : 'bg-danger/10 text-danger'
                         }`}
                       >
-                        {transaction.transaction_type?.toUpperCase() || 'N/A'}
+                        {transaction.transaction_type?.toUpperCase() ?? 'N/A'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {transaction.quantity || '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(transaction.price_per_share, transaction.currency)}
+                      {formatCurrency(price, transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {formatCurrency(amount, transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(transaction.fees, transaction.currency)}
+                      {formatCurrency(Number(transaction.fees ?? 0), transaction.currency)}
                     </TableCell>
                     <TableCell>{transaction.currency}</TableCell>
                   </TableRow>

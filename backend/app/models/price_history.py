@@ -14,7 +14,7 @@ class PriceHistory(Base):
     PriceHistory model storing historical OHLCV data for assets.
 
     Based on PRD Section 6 - Database Schema.
-    Data fetched from Yahoo Finance and CoinGecko APIs.
+    Data fetched from Yahoo Finance API.
     """
     __tablename__ = "price_history"
 
@@ -73,7 +73,7 @@ class PriceHistory(Base):
     source: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
-        comment="Data source: yahoo or coingecko"
+        comment="Data source: yahoo"
     )
 
     # Metadata

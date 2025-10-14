@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { getRealtimePrices } from '@/lib/api';
 import type { RealtimePrice } from '@/lib/types';
 
@@ -12,7 +12,17 @@ interface UseRealtimePricesReturn {
   lastUpdate: Date | null;
 }
 
-export function useRealtimePrices(): UseRealtimePricesReturn {
+/**
+ * Subscribes to and polls real-time prices for the provided symbols, exposing the latest prices and status.
+ *
+ * @param symbols - Array of asset symbols to fetch and poll; pass an empty array to disable polling.
+ * @returns An object containing:
+ *  - `realtimePrices`: Map<string, RealtimePrice> mapping symbol to the latest price data,
+ *  - `isLoading`: `true` while the initial fetch is pending, `false` otherwise,
+ *  - `error`: the most recent fetch `Error` or `null` if none,
+ *  - `lastUpdate`: `Date` of the most recent successful update or `null` if no update has occurred.
+ */
+export function useRealtimePrices(symbols: string[] = []): UseRealtimePricesReturn {
   const [realtimePrices, setRealtimePrices] = useState<Map<string, RealtimePrice>>(new Map());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
@@ -22,9 +32,14 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isVisibleRef = useRef<boolean>(true);
 
+  // Memoize symbols to prevent unnecessary re-fetches when array reference changes
+  const symbolsKey = useMemo(() => [...symbols].sort().join(','), [symbols]);
+
   const fetchPrices = useCallback(async () => {
+    if (symbols.length === 0) return;
+
     try {
-      const response = await getRealtimePrices();
+      const response = await getRealtimePrices(symbols);
 
       // Debounce the state update to prevent UI flickering
       if (debounceTimerRef.current) {
@@ -33,9 +48,15 @@ export function useRealtimePrices(): UseRealtimePricesReturn {
 
       debounceTimerRef.current = setTimeout(() => {
         const priceMap = new Map<string, RealtimePrice>();
-response.prices.forEach((price) => {
-          priceMap.set(price.ticker, price);
-        });
+
+        // Extract prices from response structure
+        const prices = response?.prices || [];
+
+        if (Array.isArray(prices)) {
+          prices.forEach((price) => {
+            priceMap.set(price.symbol, price);
+          });
+        }
 
         setRealtimePrices(priceMap);
         setLastUpdate(new Date());
@@ -47,7 +68,8 @@ response.prices.forEach((price) => {
       setError(err instanceof Error ? err : new Error('Failed to fetch realtime prices'));
       setIsLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbolsKey, symbols.length]);
 
   const startPolling = useCallback(() => {
     // Clear existing interval
@@ -114,14 +136,19 @@ response.prices.forEach((price) => {
     };
   }, [fetchPrices]);
 
-  // Start polling on mount
+  // Start polling on mount or when symbolsKey changes
   useEffect(() => {
+    if (symbols.length === 0) {
+      setIsLoading(false);
+      return;
+    }
+
     startPolling();
 
     return () => {
       stopPolling();
     };
-  }, [startPolling, stopPolling]);
+  }, [symbolsKey, startPolling, stopPolling, symbols.length]);
 
   return {
     realtimePrices,
