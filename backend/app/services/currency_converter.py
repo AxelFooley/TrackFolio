@@ -101,8 +101,8 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
         return rate
 
     except Exception as e:
-        logger.error(f"Error fetching exchange rate {from_currency}/{to_currency}: {e}")
-        raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}: {e}")
+        logger.exception("Error fetching exchange rate %s/%s", from_currency, to_currency)
+        raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}: {e}") from e
 
 
 async def _fetch_rate_async(from_currency: str, to_currency: str) -> Optional[Decimal]:
