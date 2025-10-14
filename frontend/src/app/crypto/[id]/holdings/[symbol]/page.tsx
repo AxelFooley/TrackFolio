@@ -274,13 +274,13 @@ export default function CryptoHoldingDetailPage() {
                         <TableCell>
                           <Badge
                             variant={
-                              tx.transaction_type === 'buy' || tx.transaction_type === 'transfer_in'
+                              tx.transaction_type === 'BUY' || tx.transaction_type === 'TRANSFER_IN'
                                 ? 'default'
                                 : 'secondary'
                             }
                             className="text-xs"
                           >
-                            {tx.transaction_type.replace('_', ' ').toUpperCase()}
+                            {tx.transaction_type.replace('_', ' ')}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-mono">
