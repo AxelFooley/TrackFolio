@@ -253,6 +253,7 @@ class PriceFetcher:
         Synchronous wrapper to fetch historical prices (for Celery tasks).
 
         If ISIN is provided, resolves to correct Yahoo Finance ticker.
+        Calls yfinance directly without going through async methods.
 
         Args:
             ticker: Asset ticker symbol (broker format)
@@ -263,27 +264,33 @@ class PriceFetcher:
         Returns:
             List of price dictionaries with keys: date, open, high, low, close, volume, source
         """
-        import asyncio
-
         try:
             # Resolve ticker using ISIN if provided
             resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
             logger.info(f"Fetching historical prices for {ticker} (resolved: {resolved_ticker})")
 
-            # Check if we're in an async context
-            try:
-                loop = asyncio.get_running_loop()
-                # We're in an async context - use run_coroutine_threadsafe or create new loop
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(
-                        lambda: asyncio.run(self.fetch_historical_prices(resolved_ticker, start_date, end_date))
-                    ).result()
-            except RuntimeError:
-                # No running loop - safe to use asyncio.run
-                return asyncio.run(
-                    self.fetch_historical_prices(resolved_ticker, start_date, end_date)
-                )
+            # Fetch directly from yfinance (synchronous)
+            stock = yf.Ticker(resolved_ticker)
+            hist = stock.history(start=start_date, end=end_date)
+
+            if hist.empty:
+                logger.warning(f"No historical data for {resolved_ticker}")
+                return []
+
+            prices = []
+            for idx, row in hist.iterrows():
+                prices.append({
+                    "date": idx.date(),
+                    "open": Decimal(str(row["Open"])),
+                    "high": Decimal(str(row["High"])),
+                    "low": Decimal(str(row["Low"])),
+                    "close": Decimal(str(row["Close"])),
+                    "volume": int(row["Volume"]),
+                    "source": "yahoo"
+                })
+
+            return prices
+
         except Exception as e:
             logger.error(f"Error fetching historical prices for {ticker}: {str(e)}")
             return []
