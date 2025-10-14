@@ -78,6 +78,7 @@ def create_daily_crypto_snapshots(self):
         # Track results
         created = 0
         updated = 0
+        skipped = 0
         failed = 0
         failed_portfolios = []
 
@@ -135,7 +136,7 @@ def create_daily_crypto_snapshots(self):
                 # Race condition: another process already created this snapshot
                 db.rollback()
                 logger.debug(f"Snapshot already exists for portfolio {portfolio.name} on {snapshot_date} (race condition)")
-                created += 1  # Count as success since the snapshot exists
+                skipped += 1  # Count as skipped since snapshot already exists
 
             except Exception as e:
                 db.rollback()
@@ -170,6 +171,7 @@ def create_daily_crypto_snapshots(self):
             "status": "success",
             "created": created,
             "updated": updated,
+            "skipped": skipped,
             "failed": failed,
             "total_portfolios": len(active_portfolios),
             "snapshot_date": str(snapshot_date)
@@ -179,7 +181,7 @@ def create_daily_crypto_snapshots(self):
             summary["failed_portfolios"] = failed_portfolios
 
         logger.info(
-            f"Crypto snapshot creation complete: {created} created, {updated} updated, "
+            f"Crypto snapshot creation complete: {created} created, {updated} updated, {skipped} skipped, "
             f"{failed} failed out of {len(active_portfolios)} portfolios"
         )
 
