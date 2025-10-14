@@ -77,10 +77,13 @@ export default function CryptoHoldingDetailPage() {
     );
   }
 
-  const isPositive = position.unrealized_gain >= 0;
-  const returnPct = position.return_percentage !== null && position.return_percentage !== undefined
-    ? position.return_percentage * 100
+  const isPositive = position.unrealized_gain_loss >= 0;
+  const returnPct = position.unrealized_gain_loss_pct !== null && position.unrealized_gain_loss_pct !== undefined
+    ? position.unrealized_gain_loss_pct
     : null;
+
+  // Use portfolio currency if position doesn't have currency field
+  const currency = position.currency || portfolio.base_currency;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -101,7 +104,9 @@ export default function CryptoHoldingDetailPage() {
                 <Bitcoin className="h-8 w-8 text-orange-500" />
                 {position.symbol}
               </h1>
-              <p className="text-gray-600 mt-1">{position.asset_name}</p>
+              {position.asset_name && (
+                <p className="text-gray-600 mt-1">{position.asset_name}</p>
+              )}
             </div>
           </div>
           <Badge variant="outline" className="text-sm">
@@ -135,7 +140,7 @@ export default function CryptoHoldingDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {formatCurrency(position.average_cost, position.currency)}
+                {formatCurrency(position.average_cost, currency)}
               </div>
               <p className="text-xs text-gray-500 mt-1">per {position.symbol}</p>
             </CardContent>
@@ -150,7 +155,7 @@ export default function CryptoHoldingDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {formatCurrency(position.current_price, position.currency)}
+                {formatCurrency(position.current_price, currency)}
               </div>
               <p className="text-xs text-gray-500 mt-1">per {position.symbol}</p>
             </CardContent>
@@ -164,7 +169,7 @@ export default function CryptoHoldingDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {formatCurrency(position.current_value, position.currency)}
+                {formatCurrency(position.current_value, currency)}
               </div>
             </CardContent>
           </Card>
@@ -183,7 +188,7 @@ export default function CryptoHoldingDetailPage() {
               <div>
                 <p className="text-sm font-medium text-gray-600 mb-2">Cost Basis</p>
                 <div className="text-xl font-bold">
-                  {formatCurrency(position.cost_basis, position.currency)}
+                  {formatCurrency(position.cost_basis, currency)}
                 </div>
               </div>
               <div>
@@ -196,7 +201,7 @@ export default function CryptoHoldingDetailPage() {
                   ) : (
                     <TrendingDown className="h-5 w-5" />
                   )}
-                  {formatCurrency(position.unrealized_gain, position.currency)}
+                  {formatCurrency(position.unrealized_gain_loss, currency)}
                 </div>
               </div>
               <div>

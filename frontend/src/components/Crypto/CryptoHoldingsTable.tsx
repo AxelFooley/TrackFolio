@@ -169,7 +169,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('unrealized_gain')}
+                onClick={() => handleSort('unrealized_gain_loss')}
               >
                 <div className="flex items-center justify-end gap-2">
                   Profit
@@ -178,7 +178,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('return_percentage')}
+                onClick={() => handleSort('unrealized_gain_loss_pct')}
               >
                 <div className="flex items-center justify-end gap-2">
                   Return %
@@ -189,8 +189,8 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
           </TableHeader>
           <TableBody>
             {sortedHoldings.map((holding) => {
-              const isPositive = holding.unrealized_gain >= 0;
-              const rawPct = holding.return_percentage;
+              const isPositive = holding.unrealized_gain_loss >= 0;
+              const rawPct = holding.unrealized_gain_loss_pct;
               const hasPct = rawPct !== null && rawPct !== undefined;
               const returnPercentage = hasPct ? rawPct * 100 : null;
               return (
@@ -231,7 +231,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
                       ) : (
                         <TrendingDown className="h-4 w-4" />
                       )}
-                      {formatCurrency(holding.unrealized_gain, holding.currency)}
+                      {formatCurrency(holding.unrealized_gain_loss, holding.currency)}
                     </div>
                   </TableCell>
                   <TableCell
