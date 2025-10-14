@@ -3,10 +3,11 @@ Crypto portfolio snapshot model - Daily snapshots of crypto portfolio value for 
 """
 from datetime import datetime, date
 from decimal import Decimal
-from sqlalchemy import String, Numeric, Date, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Numeric, Date, DateTime, ForeignKey, UniqueConstraint, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.models.crypto import CryptoCurrency
 
 
 class CryptoPortfolioSnapshot(Base):
@@ -57,9 +58,10 @@ class CryptoPortfolioSnapshot(Base):
     )
 
     # Currency information
-    base_currency: Mapped[str] = mapped_column(
-        String(3),
+    base_currency: Mapped[CryptoCurrency] = mapped_column(
+        SQLEnum(CryptoCurrency, native_enum=False),
         nullable=False,
+        default=CryptoCurrency.EUR,
         comment="Portfolio base currency (EUR/USD)"
     )
 

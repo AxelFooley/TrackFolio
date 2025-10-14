@@ -14,6 +14,7 @@ from app.models.crypto import (
     CryptoTransactionType,
     CryptoCurrency,
 )
+from app.models.crypto_portfolio_snapshot import CryptoPortfolioSnapshot
 
 __all__ = [
     "Transaction",
@@ -29,4 +30,5 @@ __all__ = [
     "CryptoTransaction",
     "CryptoTransactionType",
     "CryptoCurrency",
+    "CryptoPortfolioSnapshot",
 ]
