@@ -74,7 +74,7 @@ class PriceHistoryManager:
             return symbols
 
         except Exception as e:
-            logger.error(f"Error getting active symbols: {e}")
+            logger.exception("Error getting active symbols")
             return set()
         finally:
             db.close()
