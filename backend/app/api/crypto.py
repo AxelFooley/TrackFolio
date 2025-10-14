@@ -1521,16 +1521,8 @@ async def refresh_all_crypto_prices(
                 symbol = ticker.split("-")[0]
 
                 try:
-                    # Store the price in the price history manager
-                    price_data = {
-                        "symbol": ticker,
-                        "close": result["current_price"],
-                        "date": datetime.utcnow().date(),
-                        "source": "yahoo"
-                    }
-
-                    # Use price_history_manager to store the data
-                    # Note: This would require extending the manager to handle real-time data
+                    # TODO: Use price_history_manager to store real-time data
+                    # This would require extending the manager to handle real-time updates
                     successful_updates += 1
                     logger.info(f"Updated price for {symbol}: ${result['current_price']}")
 
@@ -1619,16 +1611,8 @@ async def refresh_portfolio_crypto_prices(
                 symbol = ticker.split("-")[0]
 
                 try:
-                    # Store the price in the price history manager
-                    price_data = {
-                        "symbol": ticker,
-                        "close": result["current_price"],
-                        "date": datetime.utcnow().date(),
-                        "source": "yahoo"
-                    }
-
-                    # Use price_history_manager to store the data
-                    # Note: This would require extending the manager to handle real-time data
+                    # TODO: Use price_history_manager to store real-time data
+                    # This would require extending the manager to handle real-time updates
                     successful_updates += 1
                     updated_symbols.append(symbol)
                     logger.info(f"Updated price for {symbol}: ${result['current_price']}")
