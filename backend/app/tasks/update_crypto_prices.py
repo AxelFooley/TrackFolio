@@ -22,6 +22,9 @@ from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
+# Fallback USD→EUR conversion rate when dynamic rate fetch fails
+FALLBACK_USD_TO_EUR_RATE = Decimal("0.92")
+
 
 @shared_task(
     bind=True,
@@ -129,7 +132,7 @@ def update_crypto_prices(self):
                     price_eur = price_usd * usd_to_eur_rate
                 except Exception as e:
                     logger.warning(f"Failed to fetch USD→EUR rate for {symbol}: {e}. Using fallback rate.")
-                    price_eur = price_usd * Decimal("0.92")  # Fallback conversion rate
+                    price_eur = price_usd * FALLBACK_USD_TO_EUR_RATE
 
                 # Create price record
                 price_record = PriceHistory(
