@@ -322,7 +322,8 @@ export function CryptoTransactionTable({
                 color: 'text-gray-600',
                 bgColor: 'bg-gray-50'
               };
-              const typeConfig = transactionTypeConfig[transaction.transaction_type] ?? fallback;
+              const key = (transaction.transaction_type || '').toUpperCase() as keyof typeof transactionTypeConfig;
+              const typeConfig = transactionTypeConfig[key] ?? fallback;
               const TypeIcon = typeConfig.icon;
               const total = Number(transaction.quantity) * Number(transaction.price_at_execution);
 
