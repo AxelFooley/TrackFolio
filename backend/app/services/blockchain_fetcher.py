@@ -352,13 +352,12 @@ class BlockchainFetcherService:
 
         return hashlib.sha256(hash_string.encode()).hexdigest()
 
-    def _detect_transaction_type(self, tx_data: Dict, wallet_address: str) -> CryptoTransactionType:
+    def _detect_transaction_type(self, tx_data: Dict) -> CryptoTransactionType:
         """
         Detect transaction type based on transaction flow.
 
         Args:
             tx_data: Transaction data from blockchain API
-            wallet_address: The wallet address being tracked
 
         Returns:
             Detected transaction type
@@ -433,7 +432,7 @@ class BlockchainFetcherService:
             quantity = Decimal(total_satoshis) / Decimal("100000000")
 
             # Detect transaction type
-            tx_type = self._detect_transaction_type(tx_data, wallet_address)
+            tx_type = self._detect_transaction_type(tx_data)
 
             # TODO: replace with market price at timestamp
             estimated_price = Decimal("1.0")
@@ -567,7 +566,7 @@ class BlockchainFetcherService:
             estimated_price = Decimal("1.0")  # Placeholder
 
             # Detect transaction type
-            tx_type = self._detect_transaction_type(tx_data, wallet_address)
+            tx_type = self._detect_transaction_type(tx_data)
 
             return {
                 'transaction_hash': tx_hash,
