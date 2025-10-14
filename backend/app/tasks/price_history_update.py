@@ -265,7 +265,7 @@ def refresh_current_prices(self, symbols: List[str] = None):
                 time.sleep(0.15)
 
             except Exception as e:
-                logger.error(f"Failed to refresh {symbol}: {e}")
+                logger.exception("Failed to refresh %s", symbol)
                 failed_symbols.append(symbol)
 
         summary = {
