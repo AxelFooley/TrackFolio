@@ -77,7 +77,7 @@ export interface TransactionCreate {
   ticker: string;
   transaction_type: 'BUY' | 'SELL' | 'DIVIDEND' | 'FEE';
   quantity: number | null;
-  price: number | null;
+  amount: number | null;
   fees: number;
   date: string;
   currency: string;
@@ -87,7 +87,7 @@ export interface TransactionCreate {
 
 export interface TransactionUpdate {
   quantity?: number | null;
-  price?: number | null;
+  amount?: number | null;
   fees?: number;
   date?: string;
   broker?: string | null;

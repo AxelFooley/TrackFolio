@@ -50,7 +50,7 @@ export function AddTransactionModal({
     ticker: '',
     transaction_type: 'BUY',
     quantity: 0,
-    price: 0,
+    amount: 0,
     currency: 'EUR',
     fees: 0,
     date: new Date().toISOString().split('T')[0],
@@ -83,7 +83,7 @@ export function AddTransactionModal({
       return;
     }
 
-    if (!formData.price || formData.price <= 0) {
+    if (!formData.amount || formData.amount <= 0) {
       toast({
         title: 'Validation error',
         description: 'Price per share must be greater than 0',
@@ -114,7 +114,7 @@ export function AddTransactionModal({
         ticker: '',
         transaction_type: 'BUY',
         quantity: 0,
-        price: 0,
+        amount: 0,
         currency: 'EUR',
         fees: 0,
         date: new Date().toISOString().split('T')[0],
@@ -217,14 +217,14 @@ export function AddTransactionModal({
 
             {/* Price per Share */}
             <div className="space-y-2">
-              <Label htmlFor="price">Price per Share</Label>
+              <Label htmlFor="amount">Price per Share</Label>
               <Input
-                id="price"
+                id="amount"
                 type="number"
                 step="0.01"
                 min="0.01"
-                value={formData.price || ''}
-                onChange={(e) => handleFieldChange('price', parseFloat(e.target.value) || 0)}
+                value={formData.amount || ''}
+                onChange={(e) => handleFieldChange('amount', parseFloat(e.target.value) || 0)}
                 placeholder="0.00"
                 required
               />
@@ -269,7 +269,7 @@ export function AddTransactionModal({
                 <div className="flex justify-between">
                   <span>Subtotal:</span>
                   <span className="font-mono">
-                    {((formData.quantity || 0) * (formData.price || 0)).toFixed(2)} {formData.currency}
+                    {((formData.quantity || 0) * (formData.amount || 0)).toFixed(2)} {formData.currency}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -281,7 +281,7 @@ export function AddTransactionModal({
                 <div className="flex justify-between font-medium text-gray-900 pt-1 border-t">
                   <span>Total:</span>
                   <span className="font-mono">
-                    {((formData.quantity || 0) * (formData.price || 0) + (formData.fees || 0)).toFixed(2)} {formData.currency}
+                    {((formData.quantity || 0) * (formData.amount || 0) + (formData.fees || 0)).toFixed(2)} {formData.currency}
                   </span>
                 </div>
               </div>
