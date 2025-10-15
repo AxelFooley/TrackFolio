@@ -310,7 +310,7 @@ export default function CryptoTransactionsPage() {
               <SelectItem value="">All symbols</SelectItem>
               {/* Generate unique symbols from transactions */}
               {transactionsData?.items
-                .map((t) => t.symbol)
+                ?.map((t) => t.symbol)
                 .filter((symbol, index, arr) => arr.indexOf(symbol) === index)
                 .map((symbol) => (
                   <SelectItem key={symbol} value={symbol}>
@@ -322,7 +322,7 @@ export default function CryptoTransactionsPage() {
         </div>
 
         {/* Transaction Summary */}
-        {transactionsData && transactionsData.items.length > 0 && (
+        {transactionsData && transactionsData.items && transactionsData.items.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card>
               <CardHeader className="pb-2">

@@ -247,7 +247,7 @@ export default function CryptoHoldingDetailPage() {
                   <div key={i} className="h-16 bg-gray-200 rounded animate-pulse"></div>
                 ))}
               </div>
-            ) : !transactionsData || transactionsData.items.length === 0 ? (
+            ) : !transactionsData || !transactionsData.items || transactionsData.items.length === 0 ? (
               <div className="text-center py-8">
                 <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
