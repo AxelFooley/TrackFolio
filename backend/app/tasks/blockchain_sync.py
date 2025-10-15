@@ -636,3 +636,98 @@ def test_blockchain_connection(self):
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 2, 'countdown': 60}
+)
+def update_portfolio_transaction_currencies(
+    self,
+    portfolio_id: int,
+    new_currency: str
+):
+    """
+    Update all transaction currencies for a portfolio to match the portfolio's base currency.
+
+    This task is called when a portfolio's base currency is changed to ensure
+    all existing transactions display the correct currency label to the user.
+
+    Args:
+        portfolio_id (int): ID of the portfolio to update
+        new_currency (str): New currency code ('USD' or 'EUR')
+
+    Returns:
+        dict: Summary of the update operation including:
+            - status (str): 'success' or 'error'
+            - message (str): Human-readable summary
+            - updated_count (int): Number of transactions updated
+            - portfolio_id (int): Portfolio ID that was processed
+            - timestamp (str): ISO timestamp of the operation
+    """
+    logger.info(f"Updating transaction currencies for portfolio {portfolio_id} to {new_currency}")
+
+    db = SyncSessionLocal()
+
+    try:
+        # Validate currency
+        if new_currency not in ['USD', 'EUR']:
+            raise ValueError(f"Invalid currency: {new_currency}. Must be 'USD' or 'EUR'")
+
+        # Verify portfolio exists
+        portfolio = db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        ).scalar_one_or_none()
+
+        if not portfolio:
+            raise ValueError(f"Portfolio {portfolio_id} not found")
+
+        # Update all transactions for this portfolio
+        from sqlalchemy import update
+        from app.models.crypto import CryptoTransaction, CryptoCurrency
+
+        # Convert string to enum
+        currency_enum = CryptoCurrency.USD if new_currency == 'USD' else CryptoCurrency.EUR
+
+        # Update all transactions
+        update_stmt = (
+            update(CryptoTransaction)
+            .where(CryptoTransaction.portfolio_id == portfolio_id)
+            .values(currency=currency_enum)
+        )
+
+        result = db.execute(update_stmt)
+        updated_count = result.rowcount
+        db.commit()
+
+        logger.info(f"Updated {updated_count} transactions for portfolio {portfolio_id} to {new_currency}")
+
+        summary = {
+            "status": "success",
+            "message": f"Updated {updated_count} transactions to {new_currency} for portfolio '{portfolio.name}'",
+            "updated_count": updated_count,
+            "portfolio_id": portfolio_id,
+            "portfolio_name": portfolio.name,
+            "new_currency": new_currency,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        logger.info(f"Transaction currency update completed: {summary}")
+        return summary
+
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Error updating transaction currencies for portfolio {portfolio_id}: {e}")
+
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": f"Failed to update transaction currencies for portfolio {portfolio_id}",
+            "updated_count": 0,
+            "portfolio_id": portfolio_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    finally:
+        db.close()

@@ -661,7 +661,9 @@ async def update_crypto_portfolio(
         # Update portfolio fields
         update_data = portfolio_update.dict(exclude_unset=True)
         wallet_address_changed = False
+        base_currency_changed = False
         old_wallet_address = portfolio.wallet_address
+        old_base_currency = portfolio.base_currency
 
         for field, value in update_data.items():
             setattr(portfolio, field, value)
@@ -669,6 +671,10 @@ async def update_crypto_portfolio(
         # Check if wallet address was added or changed
         if 'wallet_address' in update_data:
             wallet_address_changed = True
+
+        # Check if base currency was changed
+        if 'base_currency' in update_data and update_data['base_currency'] != old_base_currency:
+            base_currency_changed = True
 
         portfolio.updated_at = datetime.utcnow()
 
@@ -698,6 +704,28 @@ async def update_crypto_portfolio(
                 # Log the error but don't fail the portfolio update
                 logger.warning(
                     f"Failed to start automatic blockchain sync for portfolio {portfolio.id}: {sync_error}"
+                )
+
+        # If base currency was changed, trigger transaction currency update
+        if base_currency_changed:
+            try:
+                from app.tasks.blockchain_sync import update_portfolio_transaction_currencies
+
+                # Start background task to update all transaction currencies
+                task = update_portfolio_transaction_currencies.delay(
+                    portfolio_id=portfolio.id,
+                    new_currency=portfolio.base_currency.value
+                )
+
+                logger.info(
+                    f"Started transaction currency update task {task.id} for portfolio "
+                    f"{portfolio.id}: {old_base_currency} -> {portfolio.base_currency.value}"
+                )
+
+            except Exception as currency_error:
+                # Log the error but don't fail the portfolio update
+                logger.warning(
+                    f"Failed to start transaction currency update for portfolio {portfolio.id}: {currency_error}"
                 )
 
         return portfolio
