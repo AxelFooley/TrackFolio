@@ -27,6 +27,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/blockchain", tags=["blockchain"])
 
 
+def validate_wallet_address(value: str) -> str:
+    """
+    Validate and normalize a wallet address string.
+
+    Strips surrounding whitespace and ensures the resulting address is not empty.
+
+    Parameters:
+        value (str): Wallet address input to validate.
+
+    Returns:
+        str: The wallet address with surrounding whitespace removed.
+
+    Raises:
+        ValueError: If the wallet address is empty or contains only whitespace.
+    """
+    if not value or not value.strip():
+        raise ValueError('Wallet address cannot be empty')
+    return value.strip()
+
+
 # Pydantic models for requests and responses
 class WalletSyncRequest(BaseModel):
     """Request model for manual wallet synchronization."""
@@ -36,24 +56,9 @@ class WalletSyncRequest(BaseModel):
     days_back: Optional[int] = Field(30, description="Number of days to look back", ge=1, le=365)
 
     @validator('wallet_address')
-    def validate_wallet_address(cls, v):
-        """
-        Validate and normalize a wallet address string.
-        
-        Strips surrounding whitespace and ensures the resulting address is not empty.
-        
-        Parameters:
-            v (str): Wallet address input to validate.
-        
-        Returns:
-            str: The wallet address with surrounding whitespace removed.
-        
-        Raises:
-            ValueError: If the wallet address is empty or contains only whitespace.
-        """
-        if not v or not v.strip():
-            raise ValueError('Wallet address cannot be empty')
-        return v.strip()
+    def validate_wallet_address_field(cls, v):
+        """Validate wallet address using shared validator function."""
+        return validate_wallet_address(v)
 
 
 class WalletConfigRequest(BaseModel):
@@ -62,24 +67,9 @@ class WalletConfigRequest(BaseModel):
     wallet_address: str = Field(..., description="Bitcoin wallet address to configure")
 
     @validator('wallet_address')
-    def validate_wallet_address(cls, v):
-        """
-        Validate and normalize a wallet address string.
-        
-        Strips surrounding whitespace and ensures the resulting address is not empty.
-        
-        Parameters:
-            v (str): Wallet address input to validate.
-        
-        Returns:
-            str: The wallet address with surrounding whitespace removed.
-        
-        Raises:
-            ValueError: If the wallet address is empty or contains only whitespace.
-        """
-        if not v or not v.strip():
-            raise ValueError('Wallet address cannot be empty')
-        return v.strip()
+    def validate_wallet_address_field(cls, v):
+        """Validate wallet address using shared validator function."""
+        return validate_wallet_address(v)
 
 
 class TransactionResponse(BaseModel):

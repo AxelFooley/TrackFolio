@@ -237,6 +237,24 @@ def sync_single_wallet(
     logger.info(f"Syncing Bitcoin wallet {wallet_address} (portfolio {portfolio_id})")
 
     try:
+        # Get portfolio information to determine base currency
+        portfolio = db_session.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        ).scalar_one_or_none()
+
+        if not portfolio:
+            logger.error(f"Portfolio {portfolio_id} not found")
+            return {
+                "status": "error",
+                "error": f"Portfolio {portfolio_id} not found",
+                "transactions_added": 0,
+                "transactions_skipped": 0,
+                "transactions_failed": 0
+            }
+
+        portfolio_base_currency = portfolio.base_currency.value
+        logger.info(f"Using portfolio base currency: {portfolio_base_currency}")
+
         # Get existing transaction hashes for this portfolio using deduplication service
         existing_hashes = blockchain_deduplication.get_portfolio_transaction_hashes(portfolio_id)
         logger.info(f"Found {len(existing_hashes)} existing transactions for wallet {wallet_address}")
@@ -280,13 +298,13 @@ def sync_single_wallet(
                 price_at_time = get_historical_price_at_time(
                     symbol='BTC',
                     timestamp=tx_data['timestamp'],
-                    base_currency='EUR'
+                    base_currency=portfolio_base_currency
                 )
 
                 if price_at_time:
                     tx_data['price_at_execution'] = price_at_time
                     tx_data['total_amount'] = tx_data['quantity'] * price_at_time
-                    tx_data['currency'] = CryptoCurrency.EUR
+                    tx_data['currency'] = CryptoCurrency.USD if portfolio_base_currency == 'USD' else CryptoCurrency.EUR
                 else:
                     # Fallback to current price if historical price not available
                     logger.warning(f"Could not get historical price for transaction {tx_hash}, using current price from Yahoo Finance")
@@ -297,19 +315,26 @@ def sync_single_wallet(
                         if current_price_data and current_price_data.get('current_price'):
                             current_price_usd = current_price_data['current_price']
 
-                            # Convert USD to EUR
-                            eur_rate = get_usd_to_eur_rate()
-                            if eur_rate:
-                                current_price_eur = current_price_usd * eur_rate
-                                logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price_eur} EUR (converted from {current_price_usd} USD)")
-                                tx_data['price_at_execution'] = current_price_eur
-                            else:
-                                logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {current_price_usd}")
+                            # Convert to portfolio base currency if needed
+                            if portfolio_base_currency == 'USD':
+                                # No conversion needed for USD portfolios
+                                logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price_usd} USD")
                                 tx_data['price_at_execution'] = current_price_usd
                                 tx_data['currency'] = CryptoCurrency.USD
+                            else:
+                                # Convert USD to EUR for EUR portfolios
+                                eur_rate = get_usd_to_eur_rate()
+                                if eur_rate:
+                                    current_price_eur = current_price_usd * eur_rate
+                                    logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price_eur} EUR (converted from {current_price_usd} USD)")
+                                    tx_data['price_at_execution'] = current_price_eur
+                                    tx_data['currency'] = CryptoCurrency.EUR
+                                else:
+                                    logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {current_price_usd}")
+                                    tx_data['price_at_execution'] = current_price_usd
+                                    tx_data['currency'] = CryptoCurrency.USD
 
                             tx_data['total_amount'] = tx_data['quantity'] * tx_data['price_at_execution']
-                            tx_data['currency'] = CryptoCurrency.EUR if eur_rate else CryptoCurrency.USD
                         else:
                             raise Exception("Yahoo Finance returned no price data")
 

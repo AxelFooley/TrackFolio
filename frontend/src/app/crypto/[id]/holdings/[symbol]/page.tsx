@@ -292,10 +292,10 @@ export default function CryptoHoldingDetailPage() {
                           {formatCryptoQuantity(tx.quantity)}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {formatCurrency(tx.price_at_execution, tx.currency)}
+                          {formatCurrency(tx.price_at_execution, currency)}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {formatCurrency(tx.total_amount, tx.currency)}
+                          {formatCurrency(tx.total_amount, currency)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-gray-600">
                           {tx.fee > 0 ? formatCryptoQuantity(tx.fee) : '—'}

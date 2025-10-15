@@ -25,7 +25,7 @@ class CryptoPortfolioCreate(BaseModel):
     """Schema for creating a crypto portfolio."""
     name: str = Field(..., min_length=1, max_length=100, description="Portfolio name")
     description: Optional[str] = Field(None, max_length=500, description="Portfolio description")
-    base_currency: CryptoCurrency = Field(CryptoCurrency.EUR, description="Base currency")
+    base_currency: CryptoCurrency = Field(CryptoCurrency.USD, description="Base currency")
     wallet_address: Optional[str] = Field(None, max_length=100, description="Bitcoin wallet address for paper wallet integration")
 
 
@@ -162,6 +162,7 @@ class CryptoHolding(BaseModel):
     realized_gain_loss: Optional[Decimal] = None
     first_purchase_date: Optional[date] = None
     last_transaction_date: Optional[date] = None
+    currency: str  # Currency of the holding values (matches portfolio base_currency)
 
 
 class CryptoPortfolioMetrics(BaseModel):
@@ -246,7 +247,7 @@ class CryptoPortfolioPerformance(BaseModel):
 class CryptoPriceRequest(BaseModel):
     """Schema for crypto price request."""
     symbols: List[str] = Field(..., min_items=1, max_items=100, description="List of crypto symbols")
-    currency: CryptoCurrency = Field(CryptoCurrency.EUR, description="Target currency")
+    currency: CryptoCurrency = Field(CryptoCurrency.USD, description="Target currency")
 
 
 class CryptoPriceResponse(BaseModel):
@@ -261,7 +262,7 @@ class CryptoPriceHistoryRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=20, description="Crypto symbol")
     start_date: date = Field(..., description="Start date for historical data")
     end_date: date = Field(..., description="End date for historical data")
-    currency: CryptoCurrency = Field(CryptoCurrency.EUR, description="Target currency")
+    currency: CryptoCurrency = Field(CryptoCurrency.USD, description="Target currency")
 
 
 class CryptoPriceHistoryResponse(BaseModel):
@@ -283,7 +284,6 @@ class CryptoError(BaseModel):
 # Import/Export Schemas
 class CryptoImportResult(BaseModel):
     """Schema for crypto transaction import result."""
-    imported_count: int
     imported_count: int
     skipped_count: int
     error_count: int

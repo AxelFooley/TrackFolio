@@ -7,6 +7,7 @@ from celery import shared_task
 from datetime import date, timedelta
 from typing import List, Dict, Any
 import logging
+import time
 
 from app.celery_app import celery_app
 from app.services.price_history_manager import price_history_manager
@@ -79,11 +80,10 @@ def update_price_history_daily(self):
                 logger.debug(f"Updated {symbol}: {result}")
 
                 # Rate limiting between symbols
-                import time
                 time.sleep(0.2)  # 200ms delay
 
             except Exception as e:
-                logger.error(f"Failed to update {symbol}: {e}")
+                logger.exception(f"Failed to update {symbol}: {e}")
                 failed_symbols.append(symbol)
                 results[symbol] = {
                     'added': 0,
@@ -124,7 +124,7 @@ def update_price_history_daily(self):
         return summary
 
     except Exception as e:
-        logger.error(f"Fatal error in daily price history update: {e}")
+        logger.exception(f"Fatal error in daily price history update: {e}")
         raise
 
 
@@ -170,7 +170,7 @@ def ensure_complete_coverage(self, symbols: List[str] = None):
         return summary
 
     except Exception as e:
-        logger.error(f"Error in price coverage check: {e}")
+        logger.exception(f"Error in price coverage check: {e}")
         raise
 
 
@@ -221,7 +221,7 @@ def backfill_missing_history(self, symbols: List[str] = None):
         return summary
 
     except Exception as e:
-        logger.error(f"Error in backfill task: {e}")
+        logger.exception(f"Error in backfill task: {e}")
         raise
 
 
@@ -261,7 +261,6 @@ def refresh_current_prices(self, symbols: List[str] = None):
                 total_updated += result.get('added', 0) + result.get('updated', 0)
 
                 # Rate limiting
-                import time
                 time.sleep(0.15)
 
             except Exception as e:
@@ -283,5 +282,5 @@ def refresh_current_prices(self, symbols: List[str] = None):
         return summary
 
     except Exception as e:
-        logger.error(f"Error in current prices refresh: {e}")
+        logger.exception(f"Error in current prices refresh: {e}")
         raise

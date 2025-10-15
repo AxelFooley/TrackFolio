@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -41,13 +41,23 @@ export default function CryptoTransactionsPage() {
     quantity: 0,
     price_at_execution: 0,
     fee: 0,
-    currency: 'USD' as 'USD' | 'EUR',
+    currency: (portfolio?.base_currency || 'USD') as 'USD' | 'EUR',
     timestamp: new Date().toISOString().split('T')[0],
   });
 
   // Search and filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [symbolFilter, setSymbolFilter] = useState('all');
+
+  // Update default currency when portfolio data is available
+  useEffect(() => {
+    if (portfolio?.base_currency) {
+      setNewTransaction(prev => ({
+        ...prev,
+        currency: portfolio.base_currency as 'USD' | 'EUR'
+      }));
+    }
+  }, [portfolio?.base_currency]);
 
   const handleCreateTransaction = async (e: React.FormEvent) => {
     e.preventDefault();

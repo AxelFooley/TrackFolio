@@ -66,6 +66,35 @@ def _get_usd_to_eur_rate() -> Optional[Decimal]:
         return Decimal("0.92")  # Fallback rate
 
 
+def _store_real_time_price(symbol: str, price: Decimal, timestamp: Optional[datetime] = None) -> bool:
+    """
+    Store real-time price data using price_history_manager.
+
+    Args:
+        symbol (str): Crypto symbol (e.g., "BTC")
+        price (Decimal): Current price to store
+        timestamp (Optional[datetime]): Timestamp for the price data, defaults to current UTC time
+
+    Returns:
+        bool: True if price was stored successfully, False otherwise
+    """
+    try:
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+
+        # Store price using price_history_manager
+        price_history_manager.store_price(
+            symbol=f"{symbol}-USD",
+            price=price,
+            timestamp=timestamp
+        )
+        logger.info(f"Stored real-time price for {symbol}: ${price}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store real-time price for {symbol}: {e}")
+        return False
+
+
 # Portfolio Management Endpoints
 
 @router.post("/portfolios", response_model=CryptoPortfolioResponse, status_code=201)
@@ -1566,10 +1595,13 @@ async def refresh_all_crypto_prices(
                 symbol = ticker.split("-")[0]
 
                 try:
-                    # TODO: Use price_history_manager to store real-time data
-                    # This would require extending the manager to handle real-time updates
-                    successful_updates += 1
-                    logger.info(f"Updated price for {symbol}: ${result['current_price']}")
+                    # Store real-time price using price_history_manager
+                    price = Decimal(str(result['current_price']))
+                    timestamp = result.get('timestamp', datetime.utcnow())
+                    if _store_real_time_price(symbol, price, timestamp):
+                        successful_updates += 1
+                    else:
+                        failed_updates += 1
 
                 except Exception as e:
                     failed_updates += 1
@@ -1656,11 +1688,14 @@ async def refresh_portfolio_crypto_prices(
                 symbol = ticker.split("-")[0]
 
                 try:
-                    # TODO: Use price_history_manager to store real-time data
-                    # This would require extending the manager to handle real-time updates
-                    successful_updates += 1
-                    updated_symbols.append(symbol)
-                    logger.info(f"Updated price for {symbol}: ${result['current_price']}")
+                    # Store real-time price using price_history_manager
+                    price = Decimal(str(result['current_price']))
+                    timestamp = result.get('timestamp', datetime.utcnow())
+                    if _store_real_time_price(symbol, price, timestamp):
+                        successful_updates += 1
+                        updated_symbols.append(symbol)
+                    else:
+                        failed_updates += 1
 
                 except Exception as e:
                     failed_updates += 1

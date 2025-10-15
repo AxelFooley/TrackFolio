@@ -27,7 +27,7 @@ def upgrade() -> None:
     sa.Column('total_value_eur', sa.Numeric(precision=20, scale=2), nullable=False, comment='Total portfolio value in EUR'),
     sa.Column('total_value_usd', sa.Numeric(precision=20, scale=2), nullable=False, comment='Total portfolio value in USD'),
     sa.Column('total_cost_basis', sa.Numeric(precision=20, scale=2), nullable=False, comment='Total cost basis in portfolio base currency'),
-    sa.Column('base_currency', sa.Enum('EUR', 'USD', name='cryptocurrency', native_enum=False), nullable=False, comment='Portfolio base currency (EUR/USD)'),
+    sa.Column('base_currency', sa.Enum('EUR', 'USD', name='portfolio_base_currency', native_enum=False), nullable=False, comment='Portfolio base currency (EUR/USD)'),
     sa.Column('holdings_breakdown', sa.String(length=2000), nullable=True, comment='JSON string of holdings breakdown by symbol'),
     sa.Column('total_return_pct', sa.Numeric(precision=10, scale=4), nullable=True, comment='Total return percentage'),
     sa.Column('created_at', sa.DateTime(), nullable=False, comment='When the snapshot was created'),

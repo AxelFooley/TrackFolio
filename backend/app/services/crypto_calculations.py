@@ -275,7 +275,8 @@ class CryptoCalculationService:
                         ((current_value - data['cost_basis']) / data['cost_basis']) * 100
                     ) if current_value and data['cost_basis'] > 0 else None,
                     first_purchase_date=data['first_purchase_date'],
-                    last_transaction_date=data['last_transaction_date']
+                    last_transaction_date=data['last_transaction_date'],
+                    currency=portfolio.base_currency.value
                 )
                 holdings.append(holding)
 
