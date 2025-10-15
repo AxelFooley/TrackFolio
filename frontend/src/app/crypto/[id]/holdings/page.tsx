@@ -65,7 +65,7 @@ export default function CryptoHoldingsPage() {
   // Filter and sort holdings
   let filteredHoldings = holdings?.filter((holding) =>
     holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase())
+    (holding.asset_name?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false)
   ) || [];
 
   const sortedHoldings = [...filteredHoldings].sort((a, b) => {

@@ -78,7 +78,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
 
   let filteredHoldings = holdings.filter((holding) =>
     holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase())
+    (holding.asset_name?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false)
   );
 
   // Apply limit if specified
