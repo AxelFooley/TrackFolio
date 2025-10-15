@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -41,23 +41,13 @@ export default function CryptoTransactionsPage() {
     quantity: 0,
     price_at_execution: 0,
     fee: 0,
-    currency: (portfolio?.base_currency || 'USD') as 'USD' | 'EUR',
+    currency: 'USD' as 'USD' | 'EUR',
     timestamp: new Date().toISOString().split('T')[0],
   });
 
   // Search and filter state
   const [searchTerm, setSearchTerm] = useState('');
-  const [symbolFilter, setSymbolFilter] = useState('all');
-
-  // Update default currency when portfolio data is available
-  useEffect(() => {
-    if (portfolio?.base_currency) {
-      setNewTransaction(prev => ({
-        ...prev,
-        currency: portfolio.base_currency as 'USD' | 'EUR'
-      }));
-    }
-  }, [portfolio?.base_currency]);
+  const [symbolFilter, setSymbolFilter] = useState('');
 
   const handleCreateTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -317,12 +307,11 @@ export default function CryptoTransactionsPage() {
               <SelectValue placeholder="All symbols" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All symbols</SelectItem>
+              <SelectItem value="">All symbols</SelectItem>
               {/* Generate unique symbols from transactions */}
               {transactionsData?.items
-                ?.map((t) => t.symbol)
-                .filter((symbol) => symbol && symbol.trim() !== '') // Filter out empty, null, undefined, and whitespace-only symbols
-                .filter((symbol, index, arr) => arr.indexOf(symbol) === index) // Get unique symbols
+                .map((t) => t.symbol)
+                .filter((symbol, index, arr) => arr.indexOf(symbol) === index)
                 .map((symbol) => (
                   <SelectItem key={symbol} value={symbol}>
                     {symbol}
@@ -333,7 +322,7 @@ export default function CryptoTransactionsPage() {
         </div>
 
         {/* Transaction Summary */}
-        {transactionsData && transactionsData.items && transactionsData.items.length > 0 && (
+        {transactionsData && transactionsData.items.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card>
               <CardHeader className="pb-2">

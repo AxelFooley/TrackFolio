@@ -410,15 +410,14 @@ export function useWalletSyncStatus(portfolioId: number) {
  *
  * Optimistically sets the portfolio's wallet-sync-status to `syncing`, snapshots the previous status for rollback on error, and on success replaces the status with the server response and invalidates related portfolio queries (portfolio, holdings, transactions, metrics).
  *
- * @returns A React Query mutation object that accepts `{ portfolioId: number, walletAddress: string }` to start synchronization and manages optimistic updates, rollback on error, and cache invalidation on success.
+ * @returns A React Query mutation object that accepts a `portfolioId: number` to start synchronization and manages optimistic updates, rollback on error, and cache invalidation on success.
  */
 export function useSyncWallet() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ portfolioId, walletAddress }: { portfolioId: number; walletAddress: string }) =>
-      syncWallet(portfolioId, walletAddress),
-    onMutate: async ({ portfolioId }) => {
+    mutationFn: (portfolioId: number) => syncWallet(portfolioId),
+    onMutate: async (portfolioId) => {
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'wallet-sync-status'] });
 
@@ -435,13 +434,13 @@ export function useSyncWallet() {
 
       return { previousStatus };
     },
-    onError: (err, { portfolioId }, context) => {
+    onError: (err, portfolioId, context) => {
       // If the mutation fails, use the context returned from onMutate to roll back
       if (context?.previousStatus) {
         queryClient.setQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status'], context.previousStatus);
       }
     },
-    onSuccess: (data, { portfolioId }) => {
+    onSuccess: (data, portfolioId) => {
       // Update with the full response data from the server
       queryClient.setQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status'], data);
 

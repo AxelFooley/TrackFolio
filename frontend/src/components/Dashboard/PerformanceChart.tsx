@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { usePerformanceData, usePortfolioOverview } from '@/hooks/usePortfolio';
+import { usePerformanceData } from '@/hooks/usePortfolio';
 import { useBenchmark } from '@/hooks/useBenchmark';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { formatCurrency, formatChartDate, formatDate } from '@/lib/utils';
@@ -24,7 +24,6 @@ export function PerformanceChart() {
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y');
   const { data: performanceData, isLoading, error, refetch } = usePerformanceData(selectedRange);
   const { data: benchmark } = useBenchmark();
-  const { data: portfolioOverview } = usePortfolioOverview();
 
   // Error state
   if (error) {
@@ -146,8 +145,8 @@ export function PerformanceChart() {
   // Determine if we have a single data point (special case for rendering)
   const isSinglePoint = chartData.length === 1;
 
-  // Get portfolio currency from overview data, fallback to EUR if not available
-  const portfolioCurrency = portfolioOverview?.currency || 'EUR';
+  // Portfolio currency (currently hardcoded to EUR as API doesn't return currency with performance data)
+  const portfolioCurrency = 'EUR';
 
   return (
     <Card>

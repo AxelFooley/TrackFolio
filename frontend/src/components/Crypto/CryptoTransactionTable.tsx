@@ -33,7 +33,6 @@ interface CryptoTransactionTableProps {
   searchTerm?: string;
   symbolFilter?: string;
   limit?: number;
-  baseCurrency?: 'USD' | 'EUR';
 }
 
 const transactionTypeConfig = {
@@ -215,7 +214,7 @@ export function CryptoTransactionTable({
   const filteredTransactions = transactionsData.items.filter((transaction) => {
     const matchesSearch = searchTerm === '' ||
       transaction.symbol.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesSymbol = symbolFilter === '' || symbolFilter === 'all' || transaction.symbol === symbolFilter;
+    const matchesSymbol = symbolFilter === '' || transaction.symbol === symbolFilter;
     return matchesSearch && matchesSymbol;
   });
 

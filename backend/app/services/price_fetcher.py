@@ -253,7 +253,6 @@ class PriceFetcher:
         Synchronous wrapper to fetch historical prices (for Celery tasks).
 
         If ISIN is provided, resolves to correct Yahoo Finance ticker.
-        Calls yfinance directly without going through async methods.
 
         Args:
             ticker: Asset ticker symbol (broker format)
@@ -264,49 +263,15 @@ class PriceFetcher:
         Returns:
             List of price dictionaries with keys: date, open, high, low, close, volume, source
         """
+        import asyncio
+
         try:
             # Resolve ticker using ISIN if provided
             resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
-            logger.info(f"Fetching historical prices for {ticker} (resolved: {resolved_ticker}) from {start_date} to {end_date}")
-
-            # Fix for yfinance: if start_date == end_date, add 1 day to end_date
-            # Otherwise yfinance returns empty data
-            fetch_end_date = end_date
-            if start_date and end_date and start_date == end_date:
-                from datetime import timedelta
-                fetch_end_date = end_date + timedelta(days=1)
-                logger.debug(f"Single-day request detected, adjusting end_date to {fetch_end_date}")
-
-            # Fetch directly from yfinance (synchronous)
-            stock = yf.Ticker(resolved_ticker)
-            hist = stock.history(start=start_date, end=fetch_end_date)
-
-            if hist.empty:
-                logger.warning(f"No historical data for {resolved_ticker} between {start_date} and {end_date}")
-                return []
-
-            prices = []
-            for idx, row in hist.iterrows():
-                row_date = idx.date()
-                # Filter to only include dates in the requested range
-                # (needed because we may have adjusted end_date for single-day requests)
-                if start_date and row_date < start_date:
-                    continue
-                if end_date and row_date > end_date:
-                    continue
-
-                prices.append({
-                    "date": row_date,
-                    "open": Decimal(str(row["Open"])),
-                    "high": Decimal(str(row["High"])),
-                    "low": Decimal(str(row["Low"])),
-                    "close": Decimal(str(row["Close"])),
-                    "volume": int(row["Volume"]),
-                    "source": "yahoo"
-                })
-
-            return prices
-
+            logger.info(f"Fetching historical prices for {ticker} (resolved: {resolved_ticker})")
+            return asyncio.run(
+                self.fetch_historical_prices(resolved_ticker, start_date, end_date)
+            )
         except Exception as e:
             logger.error(f"Error fetching historical prices for {ticker}: {str(e)}")
             return []

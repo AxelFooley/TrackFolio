@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, validator
 import logging
 
 from app.database import SyncSessionLocal
@@ -27,26 +27,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/blockchain", tags=["blockchain"])
 
 
-def validate_wallet_address(value: str) -> str:
-    """
-    Validate and normalize a wallet address string.
-
-    Strips surrounding whitespace and ensures the resulting address is not empty.
-
-    Parameters:
-        value (str): Wallet address input to validate.
-
-    Returns:
-        str: The wallet address with surrounding whitespace removed.
-
-    Raises:
-        ValueError: If the wallet address is empty or contains only whitespace.
-    """
-    if not value or not value.strip():
-        raise ValueError('Wallet address cannot be empty')
-    return value.strip()
-
-
 # Pydantic models for requests and responses
 class WalletSyncRequest(BaseModel):
     """Request model for manual wallet synchronization."""
@@ -55,11 +35,25 @@ class WalletSyncRequest(BaseModel):
     max_transactions: Optional[int] = Field(100, description="Maximum number of transactions to fetch", ge=1, le=500)
     days_back: Optional[int] = Field(30, description="Number of days to look back", ge=1, le=365)
 
-    @field_validator('wallet_address')
-    @classmethod
-    def validate_wallet_address_field(cls, v):
-        """Validate wallet address using shared validator function."""
-        return validate_wallet_address(v)
+    @validator('wallet_address')
+    def validate_wallet_address(cls, v):
+        """
+        Validate and normalize a wallet address string.
+        
+        Strips surrounding whitespace and ensures the resulting address is not empty.
+        
+        Parameters:
+            v (str): Wallet address input to validate.
+        
+        Returns:
+            str: The wallet address with surrounding whitespace removed.
+        
+        Raises:
+            ValueError: If the wallet address is empty or contains only whitespace.
+        """
+        if not v or not v.strip():
+            raise ValueError('Wallet address cannot be empty')
+        return v.strip()
 
 
 class WalletConfigRequest(BaseModel):
@@ -67,11 +61,25 @@ class WalletConfigRequest(BaseModel):
     portfolio_id: int = Field(..., description="Portfolio ID")
     wallet_address: str = Field(..., description="Bitcoin wallet address to configure")
 
-    @field_validator('wallet_address')
-    @classmethod
-    def validate_wallet_address_field(cls, v):
-        """Validate wallet address using shared validator function."""
-        return validate_wallet_address(v)
+    @validator('wallet_address')
+    def validate_wallet_address(cls, v):
+        """
+        Validate and normalize a wallet address string.
+        
+        Strips surrounding whitespace and ensures the resulting address is not empty.
+        
+        Parameters:
+            v (str): Wallet address input to validate.
+        
+        Returns:
+            str: The wallet address with surrounding whitespace removed.
+        
+        Raises:
+            ValueError: If the wallet address is empty or contains only whitespace.
+        """
+        if not v or not v.strip():
+            raise ValueError('Wallet address cannot be empty')
+        return v.strip()
 
 
 class TransactionResponse(BaseModel):
@@ -91,7 +99,8 @@ class TransactionResponse(BaseModel):
     transaction_hash: Optional[str]
     notes: Optional[str]
 
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
 class WalletSyncResponse(BaseModel):
@@ -145,14 +154,14 @@ async def sync_wallet(
 ):
     """
     Manually trigger synchronization for a Bitcoin wallet and start a background task to fetch transactions.
-
+    
     Parameters:
         request (WalletSyncRequest): Sync parameters including portfolio_id, wallet_address, max_transactions, and days_back.
         db (Session): Database session dependency.
-
+    
     Returns:
         WalletSyncResponse: Status and metadata indicating the sync task was started, with initial transaction counts and a timestamp.
-
+    
     Raises:
         HTTPException: 404 if the portfolio does not exist; 400 if the provided wallet address does not match the portfolio; 500 on unexpected errors when starting the sync.
     """
@@ -210,80 +219,6 @@ async def sync_wallet(
         )
 
 
-@router.post("/sync/wallet/immediate", response_model=WalletSyncResponse)
-async def sync_wallet_immediately(
-    request: WalletSyncRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Immediately trigger synchronization for a Bitcoin wallet with extended history and start a background task.
-
-    This endpoint is designed for immediate wallet setup with extended lookback to ensure complete transaction history.
-
-    Parameters:
-        request (WalletSyncRequest): Sync parameters including portfolio_id, wallet_address.
-                                    max_transactions and days_back will be overridden for complete history.
-        db (Session): Database session dependency.
-
-    Returns:
-        WalletSyncResponse: Status and metadata indicating the sync task was started with extended parameters.
-
-    Raises:
-        HTTPException: 404 if the portfolio does not exist; 400 if the provided wallet address does not match the portfolio; 500 on unexpected errors when starting the sync.
-    """
-    try:
-        # Verify portfolio exists
-        portfolio = db.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.id == request.portfolio_id)
-        ).scalar_one_or_none()
-
-        if not portfolio:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Portfolio with ID {request.portfolio_id} not found"
-            )
-
-        # Update portfolio wallet address if not set
-        if not portfolio.wallet_address or portfolio.wallet_address != request.wallet_address:
-            portfolio.wallet_address = request.wallet_address
-            db.commit()
-            logger.info(f"Updated portfolio {request.portfolio_id} with wallet address {request.wallet_address}")
-
-        # Clear deduplication cache for this portfolio to ensure fresh sync
-        blockchain_deduplication.clear_portfolio_cache(request.portfolio_id)
-
-        # Start background sync task with extended parameters for complete history
-        task = sync_wallet_manually.delay(
-            wallet_address=request.wallet_address,
-            portfolio_id=request.portfolio_id,
-            max_transactions=100,  # Get up to 100 transactions
-            days_back=800  # Look back over 2 years for complete history
-        )
-
-        logger.info(
-            f"Started immediate sync task {task.id} for wallet {request.wallet_address} "
-            f"(portfolio {request.portfolio_id}) with extended history (800 days, 100 transactions)"
-        )
-
-        return WalletSyncResponse(
-            status="started",
-            message=f"Immediate sync started for wallet {request.wallet_address}. This may take a few minutes to complete as we fetch your complete transaction history.",
-            transactions_added=0,
-            transactions_skipped=0,
-            transactions_failed=0,
-            sync_timestamp=datetime.utcnow()
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error starting immediate wallet sync: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to start immediate wallet sync: {str(e)}"
-        )
-
-
 @router.post("/config/wallet")
 async def configure_wallet(
     request: WalletConfigRequest,
@@ -328,34 +263,9 @@ async def configure_wallet(
             f"Configured wallet address {request.wallet_address} for portfolio {request.portfolio_id}"
         )
 
-        # Trigger immediate blockchain sync after wallet configuration
-        try:
-            # Start background sync task with extended lookback to get full history
-            task = sync_wallet_manually.delay(
-                wallet_address=request.wallet_address,
-                portfolio_id=request.portfolio_id,
-                max_transactions=100,  # Get up to 100 transactions
-                days_back=800  # Look back over 2 years for complete history
-            )
-
-            logger.info(
-                f"Started automatic blockchain sync task {task.id} after wallet configuration "
-                f"for portfolio {request.portfolio_id} with wallet {request.wallet_address}"
-            )
-
-            sync_message = f"Wallet address configured successfully and blockchain sync started"
-
-        except Exception as sync_error:
-            # Log the error but don't fail the wallet configuration
-            logger.warning(
-                f"Failed to start automatic blockchain sync after wallet configuration "
-                f"for portfolio {request.portfolio_id}: {sync_error}"
-            )
-            sync_message = f"Wallet address configured successfully (blockchain sync failed to start)"
-
         return {
             "status": "success",
-            "message": sync_message,
+            "message": f"Wallet address configured successfully",
             "portfolio_id": request.portfolio_id,
             "wallet_address": request.wallet_address,
             "timestamp": datetime.utcnow()

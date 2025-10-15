@@ -100,7 +100,7 @@ class CryptoWalletService:
 
         except Exception as e:
             await self.db.rollback()
-            logger.exception("Error configuring wallet for portfolio %s", portfolio_id)
+            logger.error(f"Error configuring wallet for portfolio {portfolio_id}: {e}")
             return {
                 "success": False,
                 "error": f"Failed to configure wallet: {str(e)}",
@@ -230,7 +230,7 @@ class CryptoWalletService:
             }
 
         except Exception as e:
-            logger.exception("Error getting wallet status for portfolio %s", portfolio_id)
+            logger.error(f"Error getting wallet status for portfolio {portfolio_id}: {e}")
             return {
                 "success": False,
                 "error": f"Failed to get wallet status: {str(e)}",
@@ -332,7 +332,7 @@ class CryptoWalletService:
             }
 
         except Exception as e:
-            logger.exception("Error getting wallet balance history for portfolio %s", portfolio_id)
+            logger.error(f"Error getting wallet balance history for portfolio {portfolio_id}: {e}")
             return {
                 "success": False,
                 "error": f"Failed to get balance history: {str(e)}",
@@ -456,7 +456,7 @@ class CryptoWalletService:
 
         except Exception as e:
             await self.db.rollback()
-            logger.exception("Error syncing wallet for portfolio %s", portfolio_id)
+            logger.error(f"Error syncing wallet for portfolio {portfolio_id}: {e}")
             return {
                 "success": False,
                 "error": f"Failed to sync wallet: {str(e)}",
@@ -517,7 +517,7 @@ class CryptoWalletService:
 
         except Exception as e:
             await self.db.rollback()
-            logger.exception("Error removing wallet configuration for portfolio %s", portfolio_id)
+            logger.error(f"Error removing wallet configuration for portfolio {portfolio_id}: {e}")
             return {
                 "success": False,
                 "error": f"Failed to remove wallet configuration: {str(e)}",
@@ -652,7 +652,7 @@ class CryptoWalletService:
             }
 
         except Exception as e:
-            logger.exception("Error getting wallet transaction summary for portfolio %s", portfolio_id)
+            logger.error(f"Error getting wallet transaction summary for portfolio {portfolio_id}: {e}")
             return {
                 "success": False,
                 "error": f"Failed to get transaction summary: {str(e)}",

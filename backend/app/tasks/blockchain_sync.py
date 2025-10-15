@@ -5,7 +5,7 @@ This module handles automatic synchronization of Bitcoin wallet transactions
 from blockchain APIs to the crypto portfolio system.
 """
 from celery import shared_task
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +19,6 @@ from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransact
 from app.services.blockchain_fetcher import blockchain_fetcher
 from app.services.blockchain_deduplication import blockchain_deduplication
 from app.services.price_fetcher import PriceFetcher
-from app.services.currency_converter import get_exchange_rate
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -27,20 +26,27 @@ logger = logging.getLogger(__name__)
 
 def get_usd_to_eur_rate() -> Optional[Decimal]:
     """
-    Retrieve the USD-to-EUR exchange rate using cached currency converter.
-
-    Uses the cached currency converter service which provides 1-hour caching.
-
+    Retrieve the USD-to-EUR exchange rate using Yahoo Finance FX data.
+    
+    Fetches the EUR/USD rate and returns its reciprocal so the result represents how many EUR equal 1 USD.
+    
     Returns:
         Decimal: Amount of EUR per 1 USD (e.g., Decimal('0.92')), or `None` if the rate could not be obtained.
     """
     try:
-        usd_to_eur_rate = get_exchange_rate("USD", "EUR")
-        if usd_to_eur_rate:
+        price_fetcher = PriceFetcher()
+
+        # Get EUR/USD rate from Yahoo Finance (EURUSD=X)
+        # This gives us 1 EUR = X USD, so we need to invert it
+        import asyncio
+        eur_usd_rate = asyncio.run(price_fetcher.fetch_fx_rate("EUR", "USD"))
+
+        if eur_usd_rate and eur_usd_rate > 0:
+            usd_to_eur_rate = Decimal("1") / eur_usd_rate
             logger.debug(f"Fetched USD to EUR rate: {usd_to_eur_rate}")
             return usd_to_eur_rate
         else:
-            logger.warning("Could not get USD to EUR rate from currency converter")
+            logger.warning("Could not fetch EUR/USD rate from Yahoo Finance")
             return None
 
     except Exception as e:
@@ -186,7 +192,7 @@ def _sync_bitcoin_wallets_impl():
             "total_transactions_added": total_transactions,
             "total_transactions_skipped": total_skipped,
             "total_wallets_failed": total_failed,
-            "sync_timestamp": datetime.now(timezone.utc).isoformat(),
+            "sync_timestamp": datetime.utcnow().isoformat(),
             "wallet_results": wallet_results
         }
 
@@ -237,24 +243,6 @@ def sync_single_wallet(
     logger.info(f"Syncing Bitcoin wallet {wallet_address} (portfolio {portfolio_id})")
 
     try:
-        # Get portfolio information to determine base currency
-        portfolio = db_session.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        ).scalar_one_or_none()
-
-        if not portfolio:
-            logger.error(f"Portfolio {portfolio_id} not found")
-            return {
-                "status": "error",
-                "error": f"Portfolio {portfolio_id} not found",
-                "transactions_added": 0,
-                "transactions_skipped": 0,
-                "transactions_failed": 0
-            }
-
-        portfolio_base_currency = portfolio.base_currency.value
-        logger.info(f"Using portfolio base currency: {portfolio_base_currency}")
-
         # Get existing transaction hashes for this portfolio using deduplication service
         existing_hashes = blockchain_deduplication.get_portfolio_transaction_hashes(portfolio_id)
         logger.info(f"Found {len(existing_hashes)} existing transactions for wallet {wallet_address}")
@@ -298,13 +286,13 @@ def sync_single_wallet(
                 price_at_time = get_historical_price_at_time(
                     symbol='BTC',
                     timestamp=tx_data['timestamp'],
-                    base_currency=portfolio_base_currency
+                    base_currency='EUR'
                 )
 
                 if price_at_time:
                     tx_data['price_at_execution'] = price_at_time
                     tx_data['total_amount'] = tx_data['quantity'] * price_at_time
-                    tx_data['currency'] = CryptoCurrency.USD if portfolio_base_currency == 'USD' else CryptoCurrency.EUR
+                    tx_data['currency'] = CryptoCurrency.EUR
                 else:
                     # Fallback to current price if historical price not available
                     logger.warning(f"Could not get historical price for transaction {tx_hash}, using current price from Yahoo Finance")
@@ -315,26 +303,19 @@ def sync_single_wallet(
                         if current_price_data and current_price_data.get('current_price'):
                             current_price_usd = current_price_data['current_price']
 
-                            # Convert to portfolio base currency if needed
-                            if portfolio_base_currency == 'USD':
-                                # No conversion needed for USD portfolios
-                                logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price_usd} USD")
+                            # Convert USD to EUR
+                            eur_rate = get_usd_to_eur_rate()
+                            if eur_rate:
+                                current_price_eur = current_price_usd * eur_rate
+                                logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price_eur} EUR (converted from {current_price_usd} USD)")
+                                tx_data['price_at_execution'] = current_price_eur
+                            else:
+                                logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {current_price_usd}")
                                 tx_data['price_at_execution'] = current_price_usd
                                 tx_data['currency'] = CryptoCurrency.USD
-                            else:
-                                # Convert USD to EUR for EUR portfolios
-                                eur_rate = get_usd_to_eur_rate()
-                                if eur_rate:
-                                    current_price_eur = current_price_usd * eur_rate
-                                    logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price_eur} EUR (converted from {current_price_usd} USD)")
-                                    tx_data['price_at_execution'] = current_price_eur
-                                    tx_data['currency'] = CryptoCurrency.EUR
-                                else:
-                                    logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {current_price_usd}")
-                                    tx_data['price_at_execution'] = current_price_usd
-                                    tx_data['currency'] = CryptoCurrency.USD
 
                             tx_data['total_amount'] = tx_data['quantity'] * tx_data['price_at_execution']
+                            tx_data['currency'] = CryptoCurrency.EUR if eur_rate else CryptoCurrency.USD
                         else:
                             raise Exception("Yahoo Finance returned no price data")
 
@@ -623,7 +604,7 @@ def test_blockchain_connection(self):
             "status": "success",
             "message": f"Connected to {success_count}/{total_count} blockchain APIs",
             "api_results": results,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
         logger.info(f"Blockchain API connection test: {summary}")
@@ -634,100 +615,5 @@ def test_blockchain_connection(self):
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
-
-
-@shared_task(
-    bind=True,
-    autoretry_for=(Exception,),
-    retry_kwargs={'max_retries': 2, 'countdown': 60}
-)
-def update_portfolio_transaction_currencies(
-    self,
-    portfolio_id: int,
-    new_currency: str
-):
-    """
-    Update all transaction currencies for a portfolio to match the portfolio's base currency.
-
-    This task is called when a portfolio's base currency is changed to ensure
-    all existing transactions display the correct currency label to the user.
-
-    Args:
-        portfolio_id (int): ID of the portfolio to update
-        new_currency (str): New currency code ('USD' or 'EUR')
-
-    Returns:
-        dict: Summary of the update operation including:
-            - status (str): 'success' or 'error'
-            - message (str): Human-readable summary
-            - updated_count (int): Number of transactions updated
-            - portfolio_id (int): Portfolio ID that was processed
-            - timestamp (str): ISO timestamp of the operation
-    """
-    logger.info(f"Updating transaction currencies for portfolio {portfolio_id} to {new_currency}")
-
-    db = SyncSessionLocal()
-
-    try:
-        # Validate currency
-        if new_currency not in ['USD', 'EUR']:
-            raise ValueError(f"Invalid currency: {new_currency}. Must be 'USD' or 'EUR'")
-
-        # Verify portfolio exists
-        portfolio = db.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        ).scalar_one_or_none()
-
-        if not portfolio:
-            raise ValueError(f"Portfolio {portfolio_id} not found")
-
-        # Update all transactions for this portfolio
-        from sqlalchemy import update
-        from app.models.crypto import CryptoTransaction, CryptoCurrency
-
-        # Convert string to enum
-        currency_enum = CryptoCurrency.USD if new_currency == 'USD' else CryptoCurrency.EUR
-
-        # Update all transactions
-        update_stmt = (
-            update(CryptoTransaction)
-            .where(CryptoTransaction.portfolio_id == portfolio_id)
-            .values(currency=currency_enum)
-        )
-
-        result = db.execute(update_stmt)
-        updated_count = result.rowcount
-        db.commit()
-
-        logger.info(f"Updated {updated_count} transactions for portfolio {portfolio_id} to {new_currency}")
-
-        summary = {
-            "status": "success",
-            "message": f"Updated {updated_count} transactions to {new_currency} for portfolio '{portfolio.name}'",
-            "updated_count": updated_count,
-            "portfolio_id": portfolio_id,
-            "portfolio_name": portfolio.name,
-            "new_currency": new_currency,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
-        logger.info(f"Transaction currency update completed: {summary}")
-        return summary
-
-    except Exception as e:
-        db.rollback()
-        logger.exception(f"Error updating transaction currencies for portfolio {portfolio_id}: {e}")
-
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": f"Failed to update transaction currencies for portfolio {portfolio_id}",
-            "updated_count": 0,
-            "portfolio_id": portfolio_id,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
-    finally:
-        db.close()

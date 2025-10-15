@@ -209,57 +209,10 @@ export async function setBenchmark(data: {
 }
 
 // Price Updates
-export async function refreshPrices(currentOnly: boolean = true, symbols?: string[]): Promise<{ message: string; type: string; timestamp: string }> {
-  const params = new URLSearchParams();
-  params.append('current_only', currentOnly.toString());
-  if (symbols) {
-    params.append('symbols', symbols.join(','));
-  }
-
-  return apiRequest<{ message: string; type: string; timestamp: string }>({
+export async function refreshPrices(): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>({
     method: 'POST',
-    url: `/prices/refresh?${params.toString()}`,
-  });
-}
-
-export async function getPriceHistory(
-  symbol: string,
-  days?: number,
-  startDate?: string,
-  endDate?: string,
-  limit?: number
-): Promise<{
-  symbol: string;
-  data: Array<{
-    date: string;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume: number;
-  }>;
-  count: number;
-  fetching: boolean;
-  message?: string;
-}> {
-  const params = new URLSearchParams();
-  if (days) params.append('days', days.toString());
-  if (startDate) params.append('start_date', startDate);
-  if (endDate) params.append('end_date', endDate);
-  if (limit) params.append('limit', limit.toString());
-
-  return apiRequest<any>({
-    method: 'GET',
-    url: `/prices/history/${symbol}?${params.toString()}`,
-  });
-}
-
-export async function ensurePriceCoverage(symbols?: string[]): Promise<{ message: string; symbols: string | string[]; timestamp: string }> {
-  const params = symbols ? `?symbols=${symbols.join(',')}` : '';
-
-  return apiRequest<{ message: string; symbols: string | string[]; timestamp: string }>({
-    method: 'POST',
-    url: `/prices/ensure-coverage${params}`,
+    url: '/prices/refresh',
   });
 }
 
@@ -290,11 +243,10 @@ export async function getCryptoPortfolios(): Promise<CryptoPortfolioList> {
 }
 
 export async function getCryptoPortfolio(id: number): Promise<CryptoPortfolio> {
-  const response = await apiRequest<{ portfolio: CryptoPortfolio; metrics: any; holdings: any; recent_transactions: any }>({
+  return apiRequest<CryptoPortfolio>({
     method: 'GET',
     url: `/crypto/portfolios/${id}`,
   });
-  return response.portfolio;
 }
 
 export async function createCryptoPortfolio(data: CryptoPortfolioCreate): Promise<CryptoPortfolio> {
@@ -484,14 +436,11 @@ export async function refreshCryptoPrices(portfolioId?: number): Promise<{ messa
 // === Blockchain / Wallet APIs ===
 
 // Wallet Sync
-export async function syncWallet(portfolioId: number, walletAddress: string): Promise<{ message: string; status: WalletSyncStatus }> {
+export async function syncWallet(portfolioId: number): Promise<{ message: string; status: WalletSyncStatus }> {
   return apiRequest<{ message: string; status: WalletSyncStatus }>({
     method: 'POST',
     url: `/blockchain/sync/wallet`,
-    data: {
-      portfolio_id: portfolioId,
-      wallet_address: walletAddress
-    },
+    data: { portfolio_id: portfolioId },
   });
 }
 

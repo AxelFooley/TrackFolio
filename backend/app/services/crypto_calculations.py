@@ -26,8 +26,6 @@ from app.schemas.crypto import (
     CryptoCurrency
 )
 from app.services.price_fetcher import PriceFetcher
-from app.services.price_history_manager import price_history_manager
-from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
@@ -213,32 +211,22 @@ class CryptoCalculationService:
             )
 
         except Exception as e:
-            logger.exception(f"Error calculating portfolio metrics for {portfolio_id}: {e}")
+            logger.error(f"Error calculating portfolio metrics for {portfolio_id}: {e}")
             return None
 
     async def calculate_holdings(self, portfolio_id: int) -> List[CryptoHolding]:
         """
         Build current crypto holdings for a portfolio and enrich each holding with current price and unrealized P/L.
-
+        
         Parameters:
             portfolio_id (int): ID of the portfolio to compute holdings for.
-
+        
         Returns:
             List[CryptoHolding]: A list of holdings where each entry includes symbol, quantity, average cost, cost basis,
             current price (if available), current value (if price available), unrealized gain/loss and unrealized gain/loss
-            percentage (if calculable), first purchase date, and last transaction date.
+            percentage (if calculable), first purchase date, and last transaction date. 
         """
         try:
-            # Get portfolio to access base_currency
-            portfolio_result = await self.db.execute(
-                select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-            )
-            portfolio = portfolio_result.scalar_one_or_none()
-
-            if not portfolio:
-                logger.warning(f"Portfolio {portfolio_id} not found")
-                return []
-
             # Get all transactions
             transactions_result = await self.db.execute(
                 select(CryptoTransaction)
@@ -253,9 +241,9 @@ class CryptoCalculationService:
             # Calculate holdings
             holdings_data = await self._calculate_holdings(transactions)
 
-            # Get current prices using portfolio's base currency
+            # Get current prices
             symbols = list(holdings_data.keys())
-            current_prices = await self._get_current_prices(symbols, portfolio.base_currency.value)
+            current_prices = await self._get_current_prices(symbols, "EUR")  # Default to EUR
 
             # Convert to CryptoHolding objects
             holdings = []
@@ -275,15 +263,14 @@ class CryptoCalculationService:
                         ((current_value - data['cost_basis']) / data['cost_basis']) * 100
                     ) if current_value and data['cost_basis'] > 0 else None,
                     first_purchase_date=data['first_purchase_date'],
-                    last_transaction_date=data['last_transaction_date'],
-                    currency=portfolio.base_currency.value
+                    last_transaction_date=data['last_transaction_date']
                 )
                 holdings.append(holding)
 
             return holdings
 
         except Exception as e:
-            logger.exception(f"Error calculating holdings for portfolio {portfolio_id}: {e}")
+            logger.error(f"Error calculating holdings for portfolio {portfolio_id}: {e}")
             return []
 
     async def calculate_performance_history(
@@ -372,7 +359,7 @@ class CryptoCalculationService:
             return performance_data
 
         except Exception as e:
-            logger.exception(f"Error calculating performance history for portfolio {portfolio_id}: {e}")
+            logger.error(f"Error calculating performance history for portfolio {portfolio_id}: {e}")
             return []
 
     async def _calculate_holdings(self, transactions: List[CryptoTransaction]) -> Dict[str, Dict]:
@@ -447,67 +434,58 @@ class CryptoCalculationService:
 
     async def _get_current_prices(self, symbols: List[str], currency: str) -> Dict[str, Dict]:
         """
-        Fetch current market prices for the provided crypto symbols in the requested currency directly from Yahoo Finance.
-
+        Fetch current market prices for the provided crypto symbols and return per-symbol price metadata converted to the requested currency.
+        
         Parameters:
             symbols (List[str]): Crypto symbols to query (e.g., "BTC", "ETH").
             currency (str): Target currency code for returned prices (e.g., "EUR" or "USD").
-
+        
         Returns:
             Dict[str, Dict]: Mapping from symbol to a metadata dictionary containing:
                 - `symbol`: the queried symbol
                 - `price`: current price expressed in `currency`
                 - `currency`: the `currency` code used
-                - `price_usd`: source price in USD (for reference, fetched separately if currency is EUR)
+                - `price_usd`: source price in USD as returned by the provider
                 - `timestamp`: UTC timestamp when the price was recorded
                 - `source`: price data source identifier
-
+        
         Notes:
             Symbols for which no price could be obtained are omitted from the returned dictionary.
-            Queries Yahoo Finance with the correct ticker (BTC-USD or BTC-EUR) based on the requested currency.
         """
         prices = {}
         price_fetcher = PriceFetcher()
 
         for symbol in symbols:
             try:
-                # Add appropriate suffix for crypto symbols on Yahoo Finance based on target currency
-                # For stablecoins, always use USD
-                if symbol in ['USDT', 'USDC']:
-                    yahoo_symbol = f"{symbol}-USD"
-                else:
-                    yahoo_symbol = f"{symbol}-{currency.upper()}"
+                # Add appropriate suffix for crypto symbols on Yahoo Finance
+                yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
 
-                # Use Yahoo Finance to fetch current price in the requested currency
+                # Use Yahoo Finance to fetch current price
                 price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
                 if price_data and price_data.get('current_price'):
                     price = price_data['current_price']
 
-                    # Also fetch USD price for reference if the requested currency is EUR
-                    price_usd = None
-                    if currency.upper() == 'EUR':
-                        try:
-                            usd_price_data = price_fetcher.fetch_realtime_price(f"{symbol}-USD")
-                            if usd_price_data and usd_price_data.get('current_price'):
-                                price_usd = usd_price_data['current_price']
-                        except Exception as e:
-                            logger.warning(f"Could not fetch USD reference price for {symbol}: {e}")
-                    else:
-                        # If already in USD, use the same price
-                        price_usd = price
+                    # Convert to target currency if needed (Yahoo returns USD)
+                    if currency.lower() == 'eur':
+                        # Get USD to EUR conversion rate
+                        eur_rate = await self._get_usd_to_eur_rate()
+                        if eur_rate:
+                            price = price * eur_rate
+                        else:
+                            logger.warning(f"Could not convert {symbol} price to EUR, using USD")
 
                     prices[symbol] = {
                         'symbol': symbol,
                         'price': price,
                         'currency': currency.upper(),
-                        'price_usd': price_usd,
+                        'price_usd': price_data['current_price'],
                         'timestamp': datetime.utcnow(),
                         'source': 'yahoo'
                     }
                 else:
                     # No fallback - if Yahoo Finance fails, we don't add the price
-                    logger.warning(f"Could not fetch price for {yahoo_symbol} from Yahoo Finance - skipping")
+                    logger.warning(f"Could not fetch price for {symbol} from Yahoo Finance - skipping")
             except Exception as e:
                 logger.warning(f"Error getting current price for {symbol}: {e}")
 
@@ -548,45 +526,30 @@ class CryptoCalculationService:
         for symbol in symbols:
             try:
                 # Add appropriate suffix for crypto symbols on Yahoo Finance
-                yahoo_symbol = f"{symbol}-USD"
+                yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
 
-                # Use PriceHistoryManager to get historical prices from database
-                price_data = price_history_manager.get_price_history(
-                    symbol=yahoo_symbol,
+                # Use Yahoo Finance to fetch historical prices
+                price_data = price_fetcher.fetch_historical_prices_sync(
+                    yahoo_symbol,
                     start_date=start_date,
                     end_date=end_date
                 )
 
-                # If no data exists, fetch it
-                if not price_data:
-                    logger.info(f"No historical data found for {yahoo_symbol}, fetching from API")
-                    price_history_manager.fetch_and_store_complete_history(
-                        symbol=yahoo_symbol,
-                        start_date=start_date,
-                        force_update=False
-                    )
-                    # Try to get it again
-                    price_data = price_history_manager.get_price_history(
-                        symbol=yahoo_symbol,
-                        start_date=start_date,
-                        end_date=end_date
-                    )
-
                 if price_data:
                     # Convert to target currency if needed (Yahoo returns USD)
                     if currency.lower() == 'eur':
-                        eur_rate = self._get_usd_to_eur_rate()
+                        eur_rate = await self._get_usd_to_eur_rate()
                         if eur_rate:
                             for data_point in price_data:
-                                data_point['price'] = Decimal(str(data_point['close'])) * eur_rate
+                                data_point['price'] = data_point['close'] * eur_rate
                                 data_point['currency'] = 'EUR'
                         else:
                             for data_point in price_data:
-                                data_point['price'] = Decimal(str(data_point['close']))
+                                data_point['price'] = data_point['close']
                                 data_point['currency'] = 'USD'
                     else:
                         for data_point in price_data:
-                            data_point['price'] = Decimal(str(data_point['close']))
+                            data_point['price'] = data_point['close']
                             data_point['currency'] = 'USD'
 
                     # Format to match expected structure
@@ -610,18 +573,19 @@ class CryptoCalculationService:
 
         return prices
 
-    def _get_usd_to_eur_rate(self) -> Optional[Decimal]:
+    async def _get_usd_to_eur_rate(self) -> Optional[Decimal]:
         """
-        Retrieve the USD to EUR conversion rate using cached currency converter.
-
-        Uses the cached currency converter service which provides 1-hour caching.
-        If no rate is available or an error occurs, returns a fallback Decimal("0.92").
-
+        Retrieve the USD to EUR conversion rate from Yahoo Finance.
+        
+        Attempts to fetch the FX rate and returns it; if no rate is available or an error occurs, returns a fallback Decimal("0.92").
+        
         Returns:
             Decimal: USD→EUR conversion rate, or Decimal("0.92") as a fallback when the fetched rate is unavailable or an error occurs.
         """
         try:
-            rate = get_exchange_rate("USD", "EUR")
+            price_fetcher = PriceFetcher()
+            import asyncio
+            rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
             if rate:
                 return rate
             else:
@@ -683,7 +647,7 @@ class CryptoCalculationService:
                 return None
 
         except Exception as e:
-            logger.exception(f"Error in IRR calculation: {e}")
+            logger.error(f"Error in IRR calculation: {e}")
             return None
 
     async def calculate_portfolio_summary(self, portfolio_id: int) -> Dict[str, Any]:
@@ -729,5 +693,5 @@ class CryptoCalculationService:
             }
 
         except Exception as e:
-            logger.exception(f"Error calculating portfolio summary for {portfolio_id}: {e}")
+            logger.error(f"Error calculating portfolio summary for {portfolio_id}: {e}")
             return {}

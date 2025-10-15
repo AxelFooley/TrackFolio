@@ -19,7 +19,7 @@ Represents a standalone crypto portfolio for organizing cryptocurrency holdings.
 - `name` (String(100), Required) - Portfolio name for identification
 - `description` (String(500), Optional) - Optional portfolio description
 - `is_active` (Boolean, Required, Default: true) - Whether the portfolio is active
- - `base_currency` (String(3), Required, Default: 'EUR') - Base currency for the portfolio (EUR or USD)
+ `base_currency` (SQLEnum(CryptoCurrency), Required, Default: CryptoCurrency.EUR) - Base currency for the portfolio (stored as string: EUR/USD)
 - `created_at` (DateTime, Required) - When the portfolio was created
 - `updated_at` (DateTime, Required) - When the portfolio was last updated
 
@@ -36,7 +36,7 @@ Represents a standalone crypto portfolio for organizing cryptocurrency holdings.
 Represents individual cryptocurrency transactions within a portfolio.
 
 **Table:** `crypto_transactions`
-
+- `transaction_type` (SQLEnum(CryptoTransactionType, native_enum=False), Required, Indexed) - Type of transaction (BUY, SELL, TRANSFER_IN, TRANSFER_OUT) stored as strings
 **Fields:**
 - `id` (Integer, Primary Key) - Auto-incrementing unique identifier
 - `portfolio_id` (Integer, Required, Foreign Key) - Associated portfolio ID (CASCADE DELETE)
@@ -44,7 +44,7 @@ Represents individual cryptocurrency transactions within a portfolio.
 - `transaction_type` (String(20), Required, Indexed) - Type of transaction (buy, sell, transfer_in, transfer_out)
 - `quantity` (Numeric(20,8), Required) - Quantity of crypto asset (positive for all types)
 - `price_at_execution` (Numeric(20,8), Required) - Price per unit at time of execution
- - `currency` (String(3), Required) - Currency used for the transaction (EUR or USD)
+ `currency` (SQLEnum(CryptoCurrency), Required) - Currency used for the transaction (stored as string: EUR/USD)
 - `total_amount` (Numeric(20,2), Required) - Total value of transaction (quantity * price)
 - `fee` (Numeric(20,8), Required, Default: 0) - Transaction fee in crypto asset or base currency
 - `fee_currency` (String(10), Optional) - Currency of the fee (if different from main transaction)

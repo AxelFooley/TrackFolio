@@ -2,7 +2,7 @@
 Crypto portfolio database models - Standalone crypto tracking feature.
 """
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import String, Numeric, DateTime, Enum as SQLEnum, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
@@ -74,14 +74,14 @@ class CryptoPortfolio(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.now(timezone.utc),
+        default=datetime.utcnow,
         comment="When the portfolio was created"
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
         comment="When the portfolio was last updated"
     )
 
@@ -121,7 +121,7 @@ class CryptoPortfolio(Base):
         # Bech32 addresses: start with 'bc1', 42-62 characters (bc1 + 39-59 = 42-62 total)
         legacy_p2pkh_pattern = r'^1[1-9A-HJ-NP-Za-km-z]{25,34}$'
         p2sh_pattern = r'^3[1-9A-HJ-NP-Za-km-z]{25,34}$'
-        bech32_pattern = r'^bc1[023456789acdefghjklmnpqrstuvwxyz]{6,89}$'
+        bech32_pattern = r'^bc1[023456789acdefghjklmnpqrstuvwxyzqpzry9x8gf2tvdw0s3jn54khce6mua7l]{39,59}$'
 
         if (re.match(legacy_p2pkh_pattern, wallet_address) or
             re.match(p2sh_pattern, wallet_address) or
@@ -252,14 +252,14 @@ class CryptoTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.now(timezone.utc),
+        default=datetime.utcnow,
         comment="When the record was created"
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
         comment="When the record was last updated"
     )
 

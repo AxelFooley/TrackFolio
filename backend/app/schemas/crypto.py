@@ -25,7 +25,7 @@ class CryptoPortfolioCreate(BaseModel):
     """Schema for creating a crypto portfolio."""
     name: str = Field(..., min_length=1, max_length=100, description="Portfolio name")
     description: Optional[str] = Field(None, max_length=500, description="Portfolio description")
-    base_currency: CryptoCurrency = Field(CryptoCurrency.USD, description="Base currency")
+    base_currency: CryptoCurrency = Field(CryptoCurrency.EUR, description="Base currency")
     wallet_address: Optional[str] = Field(None, max_length=100, description="Bitcoin wallet address for paper wallet integration")
 
 
@@ -49,20 +49,12 @@ class CryptoPortfolioResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # Optional computed fields (legacy)
+    # Optional computed fields
     total_value: Optional[Decimal] = None
     total_cost_basis: Optional[Decimal] = None
     total_profit_loss: Optional[Decimal] = None
     total_profit_loss_pct: Optional[float] = None
     transaction_count: Optional[int] = None
-
-    # Frontend-compatible fields
-    total_value_usd: Optional[float] = None
-    total_value_eur: Optional[float] = None
-    total_profit_usd: Optional[float] = None
-    total_profit_eur: Optional[float] = None
-    profit_percentage_usd: Optional[float] = None
-    profit_percentage_eur: Optional[float] = None
 
     # Wallet sync status
     wallet_sync_status: Optional[Dict[str, Any]] = None
@@ -144,8 +136,8 @@ class CryptoTransactionResponse(BaseModel):
 
 class CryptoTransactionList(BaseModel):
     """Schema for list of crypto transactions."""
-    items: List[CryptoTransactionResponse]
-    total: int
+    transactions: List[CryptoTransactionResponse]
+    total_count: int
 
 
 # Holdings and Metrics Schemas
@@ -162,7 +154,6 @@ class CryptoHolding(BaseModel):
     realized_gain_loss: Optional[Decimal] = None
     first_purchase_date: Optional[date] = None
     last_transaction_date: Optional[date] = None
-    currency: str  # Currency of the holding values (matches portfolio base_currency)
 
 
 class CryptoPortfolioMetrics(BaseModel):
@@ -247,7 +238,7 @@ class CryptoPortfolioPerformance(BaseModel):
 class CryptoPriceRequest(BaseModel):
     """Schema for crypto price request."""
     symbols: List[str] = Field(..., min_items=1, max_items=100, description="List of crypto symbols")
-    currency: CryptoCurrency = Field(CryptoCurrency.USD, description="Target currency")
+    currency: CryptoCurrency = Field(CryptoCurrency.EUR, description="Target currency")
 
 
 class CryptoPriceResponse(BaseModel):
@@ -262,7 +253,7 @@ class CryptoPriceHistoryRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=20, description="Crypto symbol")
     start_date: date = Field(..., description="Start date for historical data")
     end_date: date = Field(..., description="End date for historical data")
-    currency: CryptoCurrency = Field(CryptoCurrency.USD, description="Target currency")
+    currency: CryptoCurrency = Field(CryptoCurrency.EUR, description="Target currency")
 
 
 class CryptoPriceHistoryResponse(BaseModel):
@@ -284,6 +275,7 @@ class CryptoError(BaseModel):
 # Import/Export Schemas
 class CryptoImportResult(BaseModel):
     """Schema for crypto transaction import result."""
+    imported_count: int
     imported_count: int
     skipped_count: int
     error_count: int

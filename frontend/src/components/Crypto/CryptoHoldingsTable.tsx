@@ -78,7 +78,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
 
   let filteredHoldings = holdings.filter((holding) =>
     holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (holding.asset_name?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false)
+    holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Apply limit if specified
@@ -169,7 +169,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('unrealized_gain_loss')}
+                onClick={() => handleSort('unrealized_gain')}
               >
                 <div className="flex items-center justify-end gap-2">
                   Profit
@@ -178,7 +178,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('unrealized_gain_loss_pct')}
+                onClick={() => handleSort('return_percentage')}
               >
                 <div className="flex items-center justify-end gap-2">
                   Return %
@@ -189,8 +189,8 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
           </TableHeader>
           <TableBody>
             {sortedHoldings.map((holding) => {
-              const isPositive = holding.unrealized_gain_loss >= 0;
-              const rawPct = holding.unrealized_gain_loss_pct;
+              const isPositive = holding.unrealized_gain >= 0;
+              const rawPct = holding.return_percentage;
               const hasPct = rawPct !== null && rawPct !== undefined;
               const returnPercentage = hasPct ? rawPct * 100 : null;
               return (
@@ -231,7 +231,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
                       ) : (
                         <TrendingDown className="h-4 w-4" />
                       )}
-                      {formatCurrency(holding.unrealized_gain_loss, holding.currency)}
+                      {formatCurrency(holding.unrealized_gain, holding.currency)}
                     </div>
                   </TableCell>
                   <TableCell

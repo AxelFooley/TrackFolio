@@ -8,18 +8,10 @@ from decimal import Decimal
 from typing import Optional
 import logging
 import asyncio
-import threading
-from datetime import datetime, timedelta
 
 from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
-
-# Thread-safe in-memory cache for exchange rates
-# Cache format: {('USD', 'EUR'): {'rate': Decimal('0.92'), 'timestamp': datetime}}
-_rate_cache = {}
-_cache_lock = threading.Lock()
-_cache_duration = timedelta(hours=1)  # Cache rates for 1 hour
 
 
 def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
@@ -51,62 +43,23 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
         logger.debug(f"Same currency conversion requested: {from_currency}")
         return Decimal("1.0")
 
-    cache_key = (from_currency, to_currency)
-    current_time = datetime.now()
-
-    # Check if we have a cached rate that's still valid (thread-safe)
-    with _cache_lock:
-        if cache_key in _rate_cache:
-            cached_data = _rate_cache[cache_key]
-            if current_time - cached_data['timestamp'] < _cache_duration:
-                logger.debug(f"Using cached exchange rate for {from_currency}/{to_currency}: {cached_data['rate']}")
-                return cached_data['rate']
-            else:
-                logger.debug(f"Cache expired for {from_currency}/{to_currency}, fetching fresh rate")
-                del _rate_cache[cache_key]
-
     try:
-        # Use PriceFetcher to get exchange rate synchronously
+        # Use PriceFetcher to get exchange rate
         # Note: Yahoo Finance uses base/quote format, so we need to call it with from_currency as base
         logger.info(f"Fetching exchange rate: {from_currency} -> {to_currency}")
 
-        # Use PriceFetcher directly to get the FX rate
-        price_fetcher = PriceFetcher()
-        ticker = f"{from_currency}{to_currency}=X"
-        price_data = price_fetcher.fetch_realtime_price(ticker)
-
-        if price_data and price_data.get('current_price'):
-            rate = price_data['current_price']
-        else:
-            # Try the reverse rate if the direct one fails
-            reverse_ticker = f"{to_currency}{from_currency}=X"
-            reverse_price_data = price_fetcher.fetch_realtime_price(reverse_ticker)
-            if reverse_price_data and reverse_price_data.get('current_price'):
-                # Calculate the reciprocal
-                reverse_rate = reverse_price_data['current_price']
-                if reverse_rate > 0:
-                    rate = Decimal("1") / reverse_rate
-                else:
-                    raise ValueError(f"Invalid reverse rate for {from_currency}/{to_currency}")
-            else:
-                raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}")
+        # Run the async function in a sync context
+        rate = asyncio.run(_fetch_rate_async(from_currency, to_currency))
 
         if rate is None:
             raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}")
 
-        # Cache the rate (thread-safe)
-        with _cache_lock:
-            _rate_cache[cache_key] = {
-                'rate': rate,
-                'timestamp': current_time
-            }
-
-        logger.info(f"Exchange rate {from_currency}/{to_currency}: {rate} (cached)")
+        logger.info(f"Exchange rate {from_currency}/{to_currency}: {rate}")
         return rate
 
     except Exception as e:
-        logger.exception("Error fetching exchange rate %s/%s", from_currency, to_currency)
-        raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}: {e}") from e
+        logger.error(f"Error fetching exchange rate {from_currency}/{to_currency}: {e}")
+        raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}: {e}")
 
 
 async def _fetch_rate_async(from_currency: str, to_currency: str) -> Optional[Decimal]:
@@ -126,20 +79,6 @@ async def _fetch_rate_async(from_currency: str, to_currency: str) -> Optional[De
     except Exception as e:
         logger.error(f"Error in async rate fetch: {e}")
         return None
-
-
-def clear_exchange_rate_cache():
-    """
-    Clear the exchange rate cache.
-
-    This can be useful for forcing fresh rate fetching, for example
-    at the start of a new trading day.
-    """
-    global _rate_cache
-    with _cache_lock:
-        cache_size = len(_rate_cache)
-        _rate_cache.clear()
-    logger.info(f"Cleared exchange rate cache (removed {cache_size} entries)")
 
 
 def get_exchange_rate_with_fallback(

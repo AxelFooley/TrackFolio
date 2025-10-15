@@ -18,7 +18,6 @@ from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransact
 from app.models.crypto_portfolio_snapshot import CryptoPortfolioSnapshot
 from app.models.price_history import PriceHistory
 from app.services.price_fetcher import PriceFetcher
-from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +77,6 @@ def create_daily_crypto_snapshots(self):
         # Track results
         created = 0
         updated = 0
-        skipped = 0
         failed = 0
         failed_portfolios = []
 
@@ -136,7 +134,7 @@ def create_daily_crypto_snapshots(self):
                 # Race condition: another process already created this snapshot
                 db.rollback()
                 logger.debug(f"Snapshot already exists for portfolio {portfolio.name} on {snapshot_date} (race condition)")
-                skipped += 1  # Count as skipped since snapshot already exists
+                created += 1  # Count as success since the snapshot exists
 
             except Exception as e:
                 db.rollback()
@@ -171,7 +169,6 @@ def create_daily_crypto_snapshots(self):
             "status": "success",
             "created": created,
             "updated": updated,
-            "skipped": skipped,
             "failed": failed,
             "total_portfolios": len(active_portfolios),
             "snapshot_date": str(snapshot_date)
@@ -181,7 +178,7 @@ def create_daily_crypto_snapshots(self):
             summary["failed_portfolios"] = failed_portfolios
 
         logger.info(
-            f"Crypto snapshot creation complete: {created} created, {updated} updated, {skipped} skipped, "
+            f"Crypto snapshot creation complete: {created} created, {updated} updated, "
             f"{failed} failed out of {len(active_portfolios)} portfolios"
         )
 
@@ -428,7 +425,9 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
             price_eur = Decimal(str(price_record.close))
             # Derive USD via dynamic FX if available
             try:
-                eur_usd = get_exchange_rate("EUR", "USD")
+                fx = PriceFetcher()
+                import asyncio
+                eur_usd = asyncio.run(fx.fetch_fx_rate("EUR", "USD"))  # EURUSD=X
                 if eur_usd and eur_usd > 0:
                     price_usd = price_eur * eur_usd
                 else:
@@ -446,7 +445,8 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
                 price_usd = price_data["current_price"]
                 # Convert with dynamic FX
                 try:
-                    usd_eur = get_exchange_rate("USD", "EUR")
+                    import asyncio
+                    usd_eur = asyncio.run(price_fetcher.fetch_fx_rate("USD", "EUR"))  # USDEUR=X
                     if usd_eur and usd_eur > 0:
                         price_eur = price_usd * usd_eur
                     else:

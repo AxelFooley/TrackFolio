@@ -22,9 +22,6 @@ from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
-# Fallback USD→EUR conversion rate when dynamic rate fetch fails
-FALLBACK_USD_TO_EUR_RATE = Decimal("0.92")
-
 
 @shared_task(
     bind=True,
@@ -132,7 +129,7 @@ def update_crypto_prices(self):
                     price_eur = price_usd * usd_to_eur_rate
                 except Exception as e:
                     logger.warning(f"Failed to fetch USD→EUR rate for {symbol}: {e}. Using fallback rate.")
-                    price_eur = price_usd * FALLBACK_USD_TO_EUR_RATE
+                    price_eur = price_usd * Decimal("0.92")  # Fallback conversion rate
 
                 # Create price record
                 price_record = PriceHistory(
@@ -155,17 +152,10 @@ def update_crypto_prices(self):
                 updated += 1
 
             except IntegrityError as e:
+                # Race condition: another process already inserted this price
                 db.rollback()
-                # Check if this is the expected unique constraint violation
-                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-                if 'uix_ticker_date' in error_msg or 'duplicate key' in error_msg.lower():
-                    # Race condition: another process already inserted this price
-                    logger.debug(f"Price already exists for {symbol} (race condition)")
-                    skipped += 1
-                else:
-                    # Unexpected integrity error - re-raise
-                    logger.error(f"Unexpected IntegrityError for {symbol}: {error_msg}")
-                    raise
+                logger.debug(f"Price already exists for {symbol} (race condition)")
+                skipped += 1
 
             except Exception as e:
                 db.rollback()
@@ -308,23 +298,15 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: Optional[str] 
             "currency": "EUR"
         }
 
-    except IntegrityError as e:
+    except IntegrityError:
         db.rollback()
-        # Check if this is the expected unique constraint violation
-        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-        if 'uix_ticker_date' in error_msg or 'duplicate key' in error_msg.lower():
-            # Race condition: another process already inserted this price
-            logger.debug(f"Price already exists for {symbol} (race condition)")
-            return {
-                "status": "skipped",
-                "symbol": symbol,
-                "price_date": str(target_date),
-                "reason": "Price already exists"
-            }
-        else:
-            # Unexpected integrity error - re-raise
-            logger.error(f"Unexpected IntegrityError for {symbol}: {error_msg}")
-            raise
+        logger.debug(f"Price already exists for {symbol} (race condition)")
+        return {
+            "status": "skipped",
+            "symbol": symbol,
+            "price_date": str(target_date),
+            "reason": "Price already exists"
+        }
 
     except Exception as e:
         db.rollback()
@@ -448,18 +430,11 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
                     db.add(price_record)
                     prices_added += 1
 
-            except IntegrityError as e:
+            except IntegrityError:
+                # Race condition - price was inserted by another process
                 db.rollback()
-                # Check if this is the expected unique constraint violation
-                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-                if 'uix_ticker_date' in error_msg or 'duplicate key' in error_msg.lower():
-                    # Race condition - price was inserted by another process
-                    prices_skipped += 1
-                    continue
-                else:
-                    # Unexpected integrity error - re-raise
-                    logger.error(f"Unexpected IntegrityError for {symbol} on {price_data['date']}: {error_msg}")
-                    raise
+                prices_skipped += 1
+                continue
 
         # Commit all changes
         db.commit()

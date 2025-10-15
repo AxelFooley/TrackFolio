@@ -7,7 +7,7 @@ Follows existing codebase patterns with proper error handling and async database
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func, and_
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import List, Optional
 import logging
@@ -38,23 +38,23 @@ from app.schemas.crypto import (
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
-from app.services.price_history_manager import price_history_manager
-from app.services.currency_converter import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/crypto", tags=["crypto"])
 
 
-def _get_usd_to_eur_rate() -> Optional[Decimal]:
+async def _get_usd_to_eur_rate() -> Optional[Decimal]:
     """
-    Obtain the USD→EUR conversion rate using cached currency converter.
-
+    Obtain the USD→EUR conversion rate, using PriceFetcher and falling back to Decimal('0.92') when unavailable.
+    
     Returns:
         Decimal: Conversion rate from USD to EUR; returns Decimal('0.92') if fetching fails or no rate is available.
     """
     try:
-        rate = get_exchange_rate("USD", "EUR")
+        price_fetcher = PriceFetcher()
+        import asyncio
+        rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
         if rate:
             return rate
         else:
@@ -64,35 +64,6 @@ def _get_usd_to_eur_rate() -> Optional[Decimal]:
     except Exception as e:
         logger.error(f"Error getting USD to EUR rate: {e}")
         return Decimal("0.92")  # Fallback rate
-
-
-def _store_real_time_price(symbol: str, price: Decimal, timestamp: Optional[datetime] = None) -> bool:
-    """
-    Store real-time price data using price_history_manager.
-
-    Args:
-        symbol (str): Crypto symbol (e.g., "BTC")
-        price (Decimal): Current price to store
-        timestamp (Optional[datetime]): Timestamp for the price data, defaults to current UTC time
-
-    Returns:
-        bool: True if price was stored successfully, False otherwise
-    """
-    try:
-        if timestamp is None:
-            timestamp = datetime.now(timezone.utc)
-
-        # Store price using price_history_manager
-        price_history_manager.store_price(
-            symbol=f"{symbol}-USD",
-            price=price,
-            timestamp=timestamp
-        )
-        logger.info(f"Stored real-time price for {symbol}: ${price}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to store real-time price for {symbol}: {e}")
-        return False
 
 
 # Portfolio Management Endpoints
@@ -135,30 +106,6 @@ async def create_crypto_portfolio(
         db.add(portfolio)
         await db.commit()
         await db.refresh(portfolio)
-
-        # If wallet address is provided, trigger immediate blockchain sync
-        if portfolio.wallet_address:
-            try:
-                from app.tasks.blockchain_sync import sync_wallet_manually
-
-                # Start background sync task with extended lookback to get full history
-                task = sync_wallet_manually.delay(
-                    wallet_address=portfolio.wallet_address,
-                    portfolio_id=portfolio.id,
-                    max_transactions=100,  # Get up to 100 transactions
-                    days_back=800  # Look back over 2 years for complete history
-                )
-
-                logger.info(
-                    f"Started automatic blockchain sync task {task.id} for new portfolio "
-                    f"{portfolio.id} with wallet {portfolio.wallet_address}"
-                )
-
-            except Exception as sync_error:
-                # Log the error but don't fail the portfolio creation
-                logger.warning(
-                    f"Failed to start automatic blockchain sync for portfolio {portfolio.id}: {sync_error}"
-                )
 
         return portfolio
 
@@ -224,7 +171,7 @@ async def list_crypto_portfolios(
                             and_(
                                 CryptoTransaction.portfolio_id == portfolio.id,
                                 CryptoTransaction.exchange == 'Bitcoin Blockchain',
-                                CryptoTransaction.timestamp >= datetime.now(timezone.utc) - timedelta(days=7)
+                                CryptoTransaction.timestamp >= datetime.utcnow() - timedelta(days=7)
                             )
                         )
                     )
@@ -234,7 +181,7 @@ async def list_crypto_portfolios(
                         "wallet_configured": True,
                         "wallet_address": portfolio.wallet_address,
                         "recent_blockchain_transactions": recent_blockchain_txs,
-                        "last_sync_check": datetime.now(timezone.utc).isoformat()
+                        "last_sync_check": datetime.utcnow().isoformat()
                     }
                 except Exception as e:
                     logger.warning(f"Failed to get wallet sync status for portfolio {portfolio.id}: {e}")
@@ -249,56 +196,6 @@ async def list_crypto_portfolios(
                     "wallet_configured": False
                 }
 
-            # Calculate values in both currencies for frontend compatibility
-            usd_to_eur_rate = _get_usd_to_eur_rate()
-
-            # Base currency values (from metrics)
-            base_total_value = metrics.total_value if metrics else None
-            base_total_cost_basis = metrics.total_cost_basis if metrics else None
-            base_total_profit_loss = metrics.total_profit_loss if metrics else None
-
-            # Calculate portfolio values in both USD and EUR
-            if base_total_value is not None:
-                if portfolio.base_currency == 'USD':
-                    total_value_usd = base_total_value
-                    total_value_eur = base_total_value * usd_to_eur_rate
-                else:
-                    total_value_usd = base_total_value / usd_to_eur_rate
-                    total_value_eur = base_total_value
-            else:
-                total_value_usd = None
-                total_value_eur = None
-
-            if base_total_cost_basis is not None:
-                if portfolio.base_currency == 'USD':
-                    total_cost_basis_usd = base_total_cost_basis
-                    total_cost_basis_eur = base_total_cost_basis * usd_to_eur_rate
-                else:
-                    total_cost_basis_usd = base_total_cost_basis / usd_to_eur_rate
-                    total_cost_basis_eur = base_total_cost_basis
-            else:
-                total_cost_basis_usd = None
-                total_cost_basis_eur = None
-
-            if base_total_profit_loss is not None:
-                if portfolio.base_currency == 'USD':
-                    total_profit_usd = base_total_profit_loss
-                    total_profit_eur = base_total_profit_loss * usd_to_eur_rate
-                else:
-                    total_profit_usd = base_total_profit_loss / usd_to_eur_rate
-                    total_profit_eur = base_total_profit_loss
-            else:
-                total_profit_usd = None
-                total_profit_eur = None
-
-            # Calculate profit percentages for both currencies
-            profit_percentage_usd = None
-            profit_percentage_eur = None
-            if total_profit_usd is not None and total_cost_basis_usd is not None and total_cost_basis_usd > 0:
-                profit_percentage_usd = float((total_profit_usd / total_cost_basis_usd) * 100)
-            if total_profit_eur is not None and total_cost_basis_eur is not None and total_cost_basis_eur > 0:
-                profit_percentage_eur = float((total_profit_eur / total_cost_basis_eur) * 100)
-
             portfolio_dict = {
                 "id": portfolio.id,
                 "name": portfolio.name,
@@ -308,13 +205,10 @@ async def list_crypto_portfolios(
                 "wallet_address": portfolio.wallet_address,
                 "created_at": portfolio.created_at,
                 "updated_at": portfolio.updated_at,
-                # Frontend-compatible fields
-                "total_value_usd": float(total_value_usd) if total_value_usd else None,
-                "total_value_eur": float(total_value_eur) if total_value_eur else None,
-                "total_profit_usd": float(total_profit_usd) if total_profit_usd else None,
-                "total_profit_eur": float(total_profit_eur) if total_profit_eur else None,
-                "profit_percentage_usd": profit_percentage_usd,
-                "profit_percentage_eur": profit_percentage_eur,
+                "total_value": metrics.total_value if metrics else None,
+                "total_cost_basis": metrics.total_cost_basis if metrics else None,
+                "total_profit_loss": metrics.total_profit_loss if metrics else None,
+                "total_profit_loss_pct": metrics.total_profit_loss_pct if metrics else None,
                 "transaction_count": metrics.transaction_count if metrics else 0,
                 "wallet_sync_status": wallet_sync_status
             }
@@ -327,116 +221,6 @@ async def list_crypto_portfolios(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list portfolios: {str(e)}")
-
-
-@router.get("/portfolios/{portfolio_id}/wallet-sync-status")
-async def get_wallet_sync_status(
-    portfolio_id: int,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Get wallet synchronization status for a crypto portfolio.
-
-    Returns detailed information about the wallet sync state including:
-    - Current sync status (synced, syncing, error, never, disabled)
-    - Last sync timestamp
-    - Transaction counts (total and recent)
-    - Error messages if applicable
-
-    Parameters:
-        portfolio_id (int): ID of the portfolio to check wallet sync status for.
-
-    Returns:
-        dict: Wallet sync status information with keys:
-            - status: Current sync state
-            - last_sync: ISO timestamp of last successful sync (optional)
-            - transaction_count: Total blockchain transactions synced (optional)
-            - error_message: Error details if status is 'error' (optional)
-
-    Raises:
-        HTTPException: 404 if the portfolio does not exist; 500 for unexpected errors.
-    """
-    try:
-        # Verify portfolio exists
-        portfolio_result = await db.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        )
-        portfolio = portfolio_result.scalar_one_or_none()
-
-        if not portfolio:
-            raise HTTPException(status_code=404, detail="Portfolio not found")
-
-        # If no wallet address configured, return disabled status
-        if not portfolio.wallet_address:
-            return {
-                "status": "disabled",
-                "last_sync": None,
-                "transaction_count": None,
-                "error_message": None
-            }
-
-        try:
-            # Get total blockchain transactions for this portfolio
-            total_blockchain_tx_count = await db.execute(
-                select(func.count(CryptoTransaction.id))
-                .where(
-                    and_(
-                        CryptoTransaction.portfolio_id == portfolio_id,
-                        CryptoTransaction.exchange == 'Bitcoin Blockchain'
-                    )
-                )
-            )
-            total_blockchain_txs = total_blockchain_tx_count.scalar() or 0
-
-            # Get last blockchain transaction date
-            last_blockchain_tx_result = await db.execute(
-                select(CryptoTransaction.timestamp)
-                .where(
-                    and_(
-                        CryptoTransaction.portfolio_id == portfolio_id,
-                        CryptoTransaction.exchange == 'Bitcoin Blockchain'
-                    )
-                )
-                .order_by(CryptoTransaction.timestamp.desc())
-                .limit(1)
-            )
-            last_blockchain_tx = last_blockchain_tx_result.scalar_one_or_none()
-
-            # Determine sync status based on transaction data
-            if total_blockchain_txs == 0:
-                status = "never"
-            else:
-                # Check if there are recent transactions (within last 7 days)
-                recent_threshold = datetime.now(timezone.utc) - timedelta(days=7)
-                # Ensure both datetimes are timezone-aware before comparison
-                last_tx_aware = last_blockchain_tx.replace(tzinfo=timezone.utc) if last_blockchain_tx and last_blockchain_tx.tzinfo is None else last_blockchain_tx
-                if last_tx_aware and last_tx_aware >= recent_threshold:
-                    status = "synced"
-                else:
-                    status = "synced"  # Has transactions but not recent
-
-            return {
-                "status": status,
-                "last_blockchain_transaction": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
-                "last_sync_check": datetime.now(timezone.utc).isoformat(),
-                "transaction_count": total_blockchain_txs,
-                "error_message": None
-            }
-
-        except Exception as e:
-            logger.error(f"Error fetching wallet sync status for portfolio {portfolio_id}: {e}")
-            return {
-                "status": "error",
-                "last_sync": None,
-                "transaction_count": None,
-                "error_message": f"Failed to retrieve wallet sync status: {str(e)}"
-            }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get wallet sync status: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get wallet sync status: {str(e)}")
 
 
 @router.get("/portfolios/{portfolio_id}", response_model=CryptoPortfolioSummary)
@@ -476,7 +260,7 @@ async def get_crypto_portfolio(
                         and_(
                             CryptoTransaction.portfolio_id == portfolio_id,
                             CryptoTransaction.exchange == 'Bitcoin Blockchain',
-                            CryptoTransaction.timestamp >= datetime.now(timezone.utc) - timedelta(days=7)
+                            CryptoTransaction.timestamp >= datetime.utcnow() - timedelta(days=7)
                         )
                     )
                 )
@@ -514,7 +298,7 @@ async def get_crypto_portfolio(
                     "recent_blockchain_transactions": recent_blockchain_txs,
                     "total_blockchain_transactions": total_blockchain_txs,
                     "last_blockchain_transaction": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
-                    "last_sync_check": datetime.now(timezone.utc).isoformat()
+                    "last_sync_check": datetime.utcnow().isoformat()
                 }
             except Exception as e:
                 logger.warning(f"Failed to get wallet sync status for portfolio {portfolio_id}: {e}")
@@ -529,76 +313,11 @@ async def get_crypto_portfolio(
                 "wallet_configured": False
             }
 
-        # Calculate values in both currencies for frontend compatibility
-        usd_to_eur_rate = _get_usd_to_eur_rate()
-
-        # Get metrics from the summary
-        metrics = summary.get('metrics')
-        base_total_value = metrics.total_value if metrics else None
-        base_total_cost_basis = metrics.total_cost_basis if metrics else None
-        base_total_profit_loss = metrics.total_profit_loss if metrics else None
-
-        # Calculate portfolio values in both USD and EUR
-        if base_total_value is not None:
-            if portfolio.base_currency == 'USD':
-                total_value_usd = base_total_value
-                total_value_eur = base_total_value * usd_to_eur_rate
-            else:
-                total_value_usd = base_total_value / usd_to_eur_rate
-                total_value_eur = base_total_value
-        else:
-            total_value_usd = None
-            total_value_eur = None
-
-        if base_total_cost_basis is not None:
-            if portfolio.base_currency == 'USD':
-                total_cost_basis_usd = base_total_cost_basis
-                total_cost_basis_eur = base_total_cost_basis * usd_to_eur_rate
-            else:
-                total_cost_basis_usd = base_total_cost_basis / usd_to_eur_rate
-                total_cost_basis_eur = base_total_cost_basis
-        else:
-            total_cost_basis_usd = None
-            total_cost_basis_eur = None
-
-        if base_total_profit_loss is not None:
-            if portfolio.base_currency == 'USD':
-                total_profit_usd = base_total_profit_loss
-                total_profit_eur = base_total_profit_loss * usd_to_eur_rate
-            else:
-                total_profit_usd = base_total_profit_loss / usd_to_eur_rate
-                total_profit_eur = base_total_profit_loss
-        else:
-            total_profit_usd = None
-            total_profit_eur = None
-
-        # Calculate profit percentages for both currencies
-        profit_percentage_usd = None
-        profit_percentage_eur = None
-        if total_profit_usd is not None and total_cost_basis_usd is not None and total_cost_basis_usd > 0:
-            profit_percentage_usd = float((total_profit_usd / total_cost_basis_usd) * 100)
-        if total_profit_eur is not None and total_cost_basis_eur is not None and total_cost_basis_eur > 0:
-            profit_percentage_eur = float((total_profit_eur / total_cost_basis_eur) * 100)
-
-        # Add frontend-compatible fields to the portfolio object
+        # Add wallet sync status to the portfolio object
         if hasattr(portfolio, '__dict__'):
-            portfolio.__dict__.update({
-                'total_value_usd': float(total_value_usd) if total_value_usd else None,
-                'total_value_eur': float(total_value_eur) if total_value_eur else None,
-                'total_profit_usd': float(total_profit_usd) if total_profit_usd else None,
-                'total_profit_eur': float(total_profit_eur) if total_profit_eur else None,
-                'profit_percentage_usd': profit_percentage_usd,
-                'profit_percentage_eur': profit_percentage_eur,
-                'wallet_sync_status': wallet_sync_status
-            })
+            portfolio.__dict__['wallet_sync_status'] = wallet_sync_status
         else:
             # For SQLAlchemy objects, we'll add this in the response serialization
-            summary['portfolio_total_value_usd'] = float(total_value_usd) if total_value_usd else None
-            summary['portfolio_total_value_eur'] = float(total_value_eur) if total_value_eur else None
-            summary['portfolio_total_profit_usd'] = float(total_profit_usd) if total_profit_usd else None
-            summary['portfolio_total_profit_eur'] = float(total_profit_eur) if total_profit_eur else None
-            summary['portfolio_profit_percentage_usd'] = profit_percentage_usd
-            summary['portfolio_profit_percentage_eur'] = profit_percentage_eur
             summary['wallet_sync_status'] = wallet_sync_status
 
         return summary
@@ -662,73 +381,13 @@ async def update_crypto_portfolio(
 
         # Update portfolio fields
         update_data = portfolio_update.dict(exclude_unset=True)
-        wallet_address_changed = False
-        base_currency_changed = False
-        old_wallet_address = portfolio.wallet_address
-        old_base_currency = portfolio.base_currency
-
         for field, value in update_data.items():
             setattr(portfolio, field, value)
 
-        # Check if wallet address was added or changed
-        if 'wallet_address' in update_data:
-            wallet_address_changed = True
-
-        # Check if base currency was changed
-        if 'base_currency' in update_data and update_data['base_currency'] != old_base_currency:
-            base_currency_changed = True
-
-        portfolio.updated_at = datetime.now(timezone.utc)
+        portfolio.updated_at = datetime.utcnow()
 
         await db.commit()
         await db.refresh(portfolio)
-
-        # If wallet address was added or changed, trigger immediate blockchain sync
-        if wallet_address_changed and portfolio.wallet_address:
-            try:
-                from app.tasks.blockchain_sync import sync_wallet_manually
-
-                # Start background sync task with extended lookback to get full history
-                task = sync_wallet_manually.delay(
-                    wallet_address=portfolio.wallet_address,
-                    portfolio_id=portfolio.id,
-                    max_transactions=100,  # Get up to 100 transactions
-                    days_back=800  # Look back over 2 years for complete history
-                )
-
-                logger.info(
-                    f"Started automatic blockchain sync task {task.id} for updated portfolio "
-                    f"{portfolio.id} with wallet {portfolio.wallet_address} "
-                    f"(previous: {old_wallet_address})"
-                )
-
-            except Exception as sync_error:
-                # Log the error but don't fail the portfolio update
-                logger.warning(
-                    f"Failed to start automatic blockchain sync for portfolio {portfolio.id}: {sync_error}"
-                )
-
-        # If base currency was changed, trigger transaction currency update
-        if base_currency_changed:
-            try:
-                from app.tasks.blockchain_sync import update_portfolio_transaction_currencies
-
-                # Start background task to update all transaction currencies
-                task = update_portfolio_transaction_currencies.delay(
-                    portfolio_id=portfolio.id,
-                    new_currency=portfolio.base_currency.value
-                )
-
-                logger.info(
-                    f"Started transaction currency update task {task.id} for portfolio "
-                    f"{portfolio.id}: {old_base_currency} -> {portfolio.base_currency.value}"
-                )
-
-            except Exception as currency_error:
-                # Log the error but don't fail the portfolio update
-                logger.warning(
-                    f"Failed to start transaction currency update for portfolio {portfolio.id}: {currency_error}"
-                )
 
         return portfolio
 
@@ -925,8 +584,8 @@ async def list_crypto_transactions(
         transactions = result.scalars().all()
 
         return CryptoTransactionList(
-            items=transactions,
-            total=total_count
+            transactions=transactions,
+            total_count=total_count
         )
 
     except HTTPException:
@@ -998,7 +657,7 @@ async def update_crypto_transaction(
             else:
                 setattr(transaction, field, value)
 
-        transaction.updated_at = datetime.now(timezone.utc)
+        transaction.updated_at = datetime.utcnow()
 
         await db.commit()
         await db.refresh(transaction)
@@ -1087,10 +746,10 @@ async def get_crypto_portfolio_holdings(
 ):
     """
     Retrieve current crypto holdings for a portfolio.
-
+    
     Returns:
         List[CryptoHolding]: Current holdings for the specified portfolio.
-
+    
     Raises:
         HTTPException: 404 if the portfolio does not exist; 500 if holdings calculation fails.
     """
@@ -1107,50 +766,6 @@ async def get_crypto_portfolio_holdings(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to calculate holdings: {str(e)}")
-
-
-@router.get("/portfolios/{portfolio_id}/holdings/{symbol}", response_model=CryptoHolding)
-async def get_crypto_holding(
-    portfolio_id: int,
-    symbol: str,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Retrieve a specific crypto holding by symbol for a portfolio.
-
-    Parameters:
-        portfolio_id (int): ID of the portfolio.
-        symbol (str): Crypto symbol (e.g., "BTC", "ETH").
-
-    Returns:
-        CryptoHolding: The holding details for the specified symbol.
-
-    Raises:
-        HTTPException: 404 if the portfolio or holding is not found; 500 if calculation fails.
-    """
-    try:
-        calc_service = CryptoCalculationService(db)
-        holdings = await calc_service.calculate_holdings(portfolio_id)
-
-        if holdings is None:
-            raise HTTPException(status_code=404, detail="Portfolio not found")
-
-        # Find the specific holding by symbol
-        symbol_upper = symbol.upper()
-        holding = next((h for h in holdings if h.symbol == symbol_upper), None)
-
-        if not holding:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No holding found for symbol {symbol_upper} in this portfolio"
-            )
-
-        return holding
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get holding: {str(e)}")
 
 
 @router.get("/portfolios/{portfolio_id}/performance")
@@ -1187,7 +802,7 @@ async def get_crypto_portfolio_performance(
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
         # Calculate date range based on range parameter
-        end_date = datetime.now(timezone.utc).date()
+        end_date = datetime.utcnow().date()
 
         if range == "1D":
             start_date = end_date - timedelta(days=1)
@@ -1341,7 +956,7 @@ async def get_crypto_prices(
 
     eur_rate = None
     if currency.lower() == "eur":
-        eur_rate = _get_usd_to_eur_rate()
+        eur_rate = await _get_usd_to_eur_rate()
 
     prices: list[CryptoPriceData] = []
     for s in symbol_list:
@@ -1359,14 +974,14 @@ async def get_crypto_prices(
             market_cap_usd=None,
             volume_24h_usd=None,
             change_percent_24h=float(data.get("change_percent", 0)) if data.get("change_percent") else None,
-            timestamp=data.get("timestamp", datetime.now(timezone.utc)),
+            timestamp=data.get("timestamp", datetime.utcnow()),
             source="yahoo",
         ))
 
     return CryptoPriceResponse(
         prices=prices,
         currency=currency.upper(),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.utcnow(),
     )
         # Get historical prices from Yahoo Finance
 @router.get("/prices/history", response_model=CryptoPriceHistoryResponse)
@@ -1408,32 +1023,16 @@ async def get_crypto_price_history(
         if days_diff > 365:
             raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
 
-        # Get historical prices from PriceHistoryManager database (USD)
+        # Get historical prices from Yahoo Finance (USD)
+        price_fetcher = PriceFetcher()
         yahoo_symbol = f"{symbol}-USD"
-        historical_prices = price_history_manager.get_price_history(
-            symbol=yahoo_symbol,
-            start_date=start_date,
-            end_date=end_date
+        historical_prices = await price_fetcher.fetch_historical_prices(
+            yahoo_symbol, start_date=start_date, end_date=end_date
         )
-
-        # If no data exists, fetch it
-        if not historical_prices:
-            logger.info(f"No historical data found for {yahoo_symbol}, fetching from API")
-            price_history_manager.fetch_and_store_complete_history(
-                symbol=yahoo_symbol,
-                start_date=start_date,
-                force_update=False
-            )
-            # Try to get it again
-            historical_prices = price_history_manager.get_price_history(
-                symbol=yahoo_symbol,
-                start_date=start_date,
-                end_date=end_date
-            )
 
         eur_rate = None
         if currency.lower() == "eur":
-            eur_rate = _get_usd_to_eur_rate()
+            eur_rate = await _get_usd_to_eur_rate()
 
         prices = []
         for dp in historical_prices:
@@ -1445,7 +1044,7 @@ async def get_crypto_price_history(
                 price=px_conv,
                 currency=currency.upper(),
                 price_usd=dp["close"],
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.utcnow(),
                 source=dp.get("source", "yahoo"),
             ))
 
@@ -1542,7 +1141,7 @@ async def get_supported_crypto_symbols():
         return {
             "symbols": supported_assets,
             "total_count": len(supported_assets),
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.utcnow()
         }
 
     except Exception as e:
@@ -1572,181 +1171,13 @@ async def crypto_health_check():
             "services": {
                 "yahoo_finance": "healthy" if yahoo_healthy else "unhealthy"
             },
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.utcnow()
         }
 
     except Exception as e:
         return {
             "status": "unhealthy",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.utcnow()
         }
-
-
-# Price Refresh Endpoints
-
-@router.post("/refresh-prices")
-async def refresh_all_crypto_prices(
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Refresh prices for all cryptocurrencies.
-
-    Triggers an update of current market prices for major cryptocurrencies.
-    This endpoint fetches the latest prices from external sources and updates
-    the price history database.
-
-    Returns:
-        dict: A message indicating the refresh status and timestamp.
-
-    Raises:
-        HTTPException: 500 if the price refresh fails.
-    """
-    try:
-        logger.info("Starting crypto price refresh for all symbols")
-
-        # Get list of popular crypto symbols to refresh
-        symbols_to_refresh = [
-            "BTC", "ETH", "BNB", "XRP", "ADA", "SOL", "DOGE", "DOT",
-            "MATIC", "SHIB", "AVAX", "LINK", "UNI", "LTC", "ATOM"
-        ]
-
-        price_fetcher = PriceFetcher()
-        tickers = [(f"{symbol}-USD", None) for symbol in symbols_to_refresh]
-        batch_results = price_fetcher.fetch_realtime_prices_batch(tickers)
-
-        successful_updates = 0
-        failed_updates = 0
-
-        for result in batch_results:
-            if result and result.get("ticker") and result.get("current_price"):
-                # Extract symbol from ticker (e.g., "BTC-USD" -> "BTC")
-                ticker = result["ticker"]
-                symbol = ticker.split("-")[0]
-
-                try:
-                    # Store real-time price using price_history_manager
-                    price = Decimal(str(result['current_price']))
-                    timestamp = result.get('timestamp', datetime.now(timezone.utc))
-                    if _store_real_time_price(symbol, price, timestamp):
-                        successful_updates += 1
-                    else:
-                        failed_updates += 1
-
-                except Exception as e:
-                    failed_updates += 1
-                    logger.error(f"Failed to store price for {symbol}: {e}")
-            else:
-                failed_updates += 1
-
-        logger.info(f"Crypto price refresh completed: {successful_updates} successful, {failed_updates} failed")
-
-        return {
-            "message": f"Price refresh completed. Updated {successful_updates} symbols.",
-            "successful_updates": successful_updates,
-            "failed_updates": failed_updates,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
-    except Exception as e:
-        logger.error(f"Crypto price refresh failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to refresh crypto prices: {str(e)}")
-
-
-@router.post("/portfolios/{portfolio_id}/refresh-prices")
-async def refresh_portfolio_crypto_prices(
-    portfolio_id: int,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Refresh prices for cryptocurrencies held in a specific portfolio.
-
-    Fetches current market prices for all crypto symbols present in the given
-    portfolio and updates the price history database. This is more efficient
-    than refreshing all crypto prices as it only updates relevant symbols.
-
-    Parameters:
-        portfolio_id (int): ID of the portfolio whose crypto prices should be refreshed.
-
-    Returns:
-        dict: A message indicating the refresh status, updated symbols, and timestamp.
-
-    Raises:
-        HTTPException: 404 if the portfolio is not found.
-        HTTPException: 500 if the price refresh fails.
-    """
-    try:
-        # Verify portfolio exists
-        portfolio_result = await db.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        )
-        portfolio = portfolio_result.scalar_one_or_none()
-
-        if not portfolio:
-            raise HTTPException(status_code=404, detail="Portfolio not found")
-
-        logger.info(f"Starting crypto price refresh for portfolio {portfolio_id}")
-
-        # Get unique symbols from portfolio transactions
-        symbols_result = await db.execute(
-            select(CryptoTransaction.symbol)
-            .where(CryptoTransaction.portfolio_id == portfolio_id)
-            .distinct()
-        )
-        symbols_to_refresh = [row[0] for row in symbols_result.fetchall()]
-
-        if not symbols_to_refresh:
-            return {
-                "message": "No crypto symbols found in portfolio to refresh",
-                "successful_updates": 0,
-                "failed_updates": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-
-        price_fetcher = PriceFetcher()
-        tickers = [(f"{symbol}-USD", None) for symbol in symbols_to_refresh]
-        batch_results = price_fetcher.fetch_realtime_prices_batch(tickers)
-
-        successful_updates = 0
-        failed_updates = 0
-        updated_symbols = []
-
-        for result in batch_results:
-            if result and result.get("ticker") and result.get("current_price"):
-                # Extract symbol from ticker (e.g., "BTC-USD" -> "BTC")
-                ticker = result["ticker"]
-                symbol = ticker.split("-")[0]
-
-                try:
-                    # Store real-time price using price_history_manager
-                    price = Decimal(str(result['current_price']))
-                    timestamp = result.get('timestamp', datetime.now(timezone.utc))
-                    if _store_real_time_price(symbol, price, timestamp):
-                        successful_updates += 1
-                        updated_symbols.append(symbol)
-                    else:
-                        failed_updates += 1
-
-                except Exception as e:
-                    failed_updates += 1
-                    logger.error(f"Failed to store price for {symbol}: {e}")
-            else:
-                failed_updates += 1
-
-        logger.info(f"Portfolio {portfolio_id} crypto price refresh completed: {successful_updates} successful, {failed_updates} failed")
-
-        return {
-            "message": f"Price refresh completed for portfolio '{portfolio.name}'. Updated {successful_updates} symbols.",
-            "successful_updates": successful_updates,
-            "failed_updates": failed_updates,
-            "updated_symbols": updated_symbols,
-            "portfolio_id": portfolio_id,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Portfolio crypto price refresh failed for portfolio {portfolio_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to refresh portfolio crypto prices: {str(e)}")
 
