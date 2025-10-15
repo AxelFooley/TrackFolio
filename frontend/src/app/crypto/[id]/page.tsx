@@ -23,7 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 export default function CryptoPortfolioDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const portfolioId = parseInt(params.id as string);
+  const portfolioId = parseInt(params.id as string, 10);
 
   const { data: portfolio, isLoading: portfolioLoading } = useCryptoPortfolio(portfolioId);
   const { data: holdings, isLoading: holdingsLoading } = useCryptoHoldings(portfolioId);
@@ -39,10 +39,11 @@ export default function CryptoPortfolioDetailPage() {
         title: 'Prices Refreshed',
         description: 'All crypto prices have been updated',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to refresh prices';
       toast({
         title: 'Refresh Failed',
-        description: error.message || 'Failed to refresh prices',
+        description: errorMessage,
         variant: 'destructive',
       });
     }

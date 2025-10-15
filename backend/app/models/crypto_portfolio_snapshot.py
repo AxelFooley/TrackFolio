@@ -1,7 +1,7 @@
 """
 Crypto portfolio snapshot model - Daily snapshots of crypto portfolio value for historical charts.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from decimal import Decimal
 from sqlalchemy import String, Numeric, Date, DateTime, ForeignKey, UniqueConstraint, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column
@@ -83,7 +83,7 @@ class CryptoPortfolioSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=datetime.now(timezone.utc),
         comment="When the snapshot was created"
     )
 

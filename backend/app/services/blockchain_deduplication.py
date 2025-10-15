@@ -6,7 +6,7 @@ by maintaining a registry of processed transaction hashes and providing utilitie
 for transaction matching and deduplication.
 """
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 import logging
 import redis
@@ -74,7 +74,7 @@ class BlockchainDeduplicationService:
             )
             return {row[0] for row in result.all() if row[0]}
         except Exception as e:
-            logger.error(f"Error fetching portfolio hashes from database: {e}")
+            logger.exception(f"Error fetching portfolio hashes from database: {e}")
             return set()
         finally:
             db.close()
@@ -100,7 +100,7 @@ class BlockchainDeduplicationService:
 
         # Check memory cache
         if portfolio_id in self._memory_cache:
-            cache_age = datetime.utcnow() - self._cache_timestamps.get(portfolio_id, datetime.min)
+            cache_age = datetime.now(timezone.utc) - self._cache_timestamps.get(portfolio_id, datetime.now(timezone.utc))
             if cache_age < timedelta(minutes=30):  # Memory cache valid for 30 minutes
                 logger.debug(f"Memory cache hit for portfolio {portfolio_id} hashes: {len(self._memory_cache[portfolio_id])}")
                 return self._memory_cache[portfolio_id]
@@ -137,7 +137,7 @@ class BlockchainDeduplicationService:
 
         # Update memory cache
         self._memory_cache[portfolio_id] = hashes
-        self._cache_timestamps[portfolio_id] = datetime.utcnow()
+        self._cache_timestamps[portfolio_id] = datetime.now(timezone.utc)
 
         # Clean up memory cache if it gets too large
         if len(self._memory_cache) > self.BULK_CACHE_SIZE:
@@ -326,7 +326,7 @@ class BlockchainDeduplicationService:
         try:
             # Get recent transactions from the database
             recent_days = 30
-            since_date = datetime.utcnow() - timedelta(days=recent_days)
+            since_date = datetime.now(timezone.utc) - timedelta(days=recent_days)
 
             result = db.execute(
                 text("""
@@ -357,7 +357,7 @@ class BlockchainDeduplicationService:
             return potential_duplicates
 
         except Exception as e:
-            logger.error(f"Error finding potential duplicates: {e}")
+            logger.exception(f"Error finding potential duplicates: {e}")
             return []
 
         finally:

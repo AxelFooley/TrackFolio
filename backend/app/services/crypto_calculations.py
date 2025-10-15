@@ -213,7 +213,7 @@ class CryptoCalculationService:
             )
 
         except Exception as e:
-            logger.error(f"Error calculating portfolio metrics for {portfolio_id}: {e}")
+            logger.exception(f"Error calculating portfolio metrics for {portfolio_id}: {e}")
             return None
 
     async def calculate_holdings(self, portfolio_id: int) -> List[CryptoHolding]:
@@ -283,7 +283,7 @@ class CryptoCalculationService:
             return holdings
 
         except Exception as e:
-            logger.error(f"Error calculating holdings for portfolio {portfolio_id}: {e}")
+            logger.exception(f"Error calculating holdings for portfolio {portfolio_id}: {e}")
             return []
 
     async def calculate_performance_history(
@@ -372,7 +372,7 @@ class CryptoCalculationService:
             return performance_data
 
         except Exception as e:
-            logger.error(f"Error calculating performance history for portfolio {portfolio_id}: {e}")
+            logger.exception(f"Error calculating performance history for portfolio {portfolio_id}: {e}")
             return []
 
     async def _calculate_holdings(self, transactions: List[CryptoTransaction]) -> Dict[str, Dict]:
@@ -548,7 +548,7 @@ class CryptoCalculationService:
         for symbol in symbols:
             try:
                 # Add appropriate suffix for crypto symbols on Yahoo Finance
-                yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
+                yahoo_symbol = f"{symbol}-USD"
 
                 # Use PriceHistoryManager to get historical prices from database
                 price_data = price_history_manager.get_price_history(
@@ -683,7 +683,7 @@ class CryptoCalculationService:
                 return None
 
         except Exception as e:
-            logger.error(f"Error in IRR calculation: {e}")
+            logger.exception(f"Error in IRR calculation: {e}")
             return None
 
     async def calculate_portfolio_summary(self, portfolio_id: int) -> Dict[str, Any]:
@@ -729,5 +729,5 @@ class CryptoCalculationService:
             }
 
         except Exception as e:
-            logger.error(f"Error calculating portfolio summary for {portfolio_id}: {e}")
+            logger.exception(f"Error calculating portfolio summary for {portfolio_id}: {e}")
             return {}

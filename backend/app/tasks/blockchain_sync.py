@@ -5,7 +5,7 @@ This module handles automatic synchronization of Bitcoin wallet transactions
 from blockchain APIs to the crypto portfolio system.
 """
 from celery import shared_task
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.exc import IntegrityError
@@ -186,7 +186,7 @@ def _sync_bitcoin_wallets_impl():
             "total_transactions_added": total_transactions,
             "total_transactions_skipped": total_skipped,
             "total_wallets_failed": total_failed,
-            "sync_timestamp": datetime.utcnow().isoformat(),
+            "sync_timestamp": datetime.now(timezone.utc).isoformat(),
             "wallet_results": wallet_results
         }
 
@@ -623,7 +623,7 @@ def test_blockchain_connection(self):
             "status": "success",
             "message": f"Connected to {success_count}/{total_count} blockchain APIs",
             "api_results": results,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         logger.info(f"Blockchain API connection test: {summary}")
@@ -634,7 +634,7 @@ def test_blockchain_connection(self):
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
 
@@ -710,7 +710,7 @@ def update_portfolio_transaction_currencies(
             "portfolio_id": portfolio_id,
             "portfolio_name": portfolio.name,
             "new_currency": new_currency,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         logger.info(f"Transaction currency update completed: {summary}")
@@ -726,7 +726,7 @@ def update_portfolio_transaction_currencies(
             "message": f"Failed to update transaction currencies for portfolio {portfolio_id}",
             "updated_count": 0,
             "portfolio_id": portfolio_id,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
     finally:

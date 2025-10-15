@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 
 from app.config import settings
 from app.models.crypto import CryptoTransaction, CryptoTransactionType, CryptoCurrency
+from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -352,6 +353,58 @@ class BlockchainFetcherService:
 
         return hashlib.sha256(hash_string.encode()).hexdigest()
 
+    def _get_historical_btc_price(self, timestamp: datetime) -> Decimal:
+        """
+        Get the historical BTC price at the given timestamp.
+
+        Uses the PriceFetcher service to lookup the closing BTC price for the date
+        of the transaction. Falls back to a reasonable default if lookup fails.
+
+        Args:
+            timestamp: The datetime of the transaction
+
+        Returns:
+            Decimal: The historical BTC price in USD
+        """
+        try:
+            # Create a PriceFetcher instance
+            price_fetcher = PriceFetcher()
+
+            # Fetch historical price for the transaction date
+            transaction_date = timestamp.date()
+            historical_prices = price_fetcher.fetch_historical_prices_sync(
+                ticker="BTC-USD",
+                start_date=transaction_date,
+                end_date=transaction_date
+            )
+
+            if historical_prices:
+                # Use the closing price from the transaction date
+                price = historical_prices[0]["close"]  # close price
+                logger.info(f"Found historical BTC price ${price} for {transaction_date}")
+                return price
+            else:
+                logger.warning(f"No historical price found for {transaction_date}, using fallback")
+
+        except Exception as e:
+            logger.warning(f"Error fetching historical BTC price for {timestamp}: {e}")
+
+        # Fallback prices based on historical averages (used if lookup fails)
+        # These are conservative estimates for different periods
+        year = timestamp.year
+        if year >= 2024:
+            return Decimal("50000")  # Post-2024 bull run
+        elif year >= 2021:
+            return Decimal("35000")  # 2021-2023 range
+        elif year >= 2020:
+            return Decimal("20000")  # 2020-2021 range
+        elif year >= 2018:
+            return Decimal("8000")   # 2018-2019 bear market
+        elif year >= 2016:
+            return Decimal("1000")   # 2016-2017 growth period
+        else:
+            return Decimal("400")    # Pre-2016 early adoption
+
     def _detect_transaction_type(self, tx_data: Dict) -> CryptoTransactionType:
         """
         Detect transaction type based on transaction flow.
@@ -434,8 +487,8 @@ class BlockchainFetcherService:
             # Detect transaction type
             tx_type = self._detect_transaction_type(tx_data)
 
-            # TODO: replace with market price at timestamp
-            estimated_price = Decimal("1.0")
+            # Get historical BTC price at timestamp
+            estimated_price = self._get_historical_btc_price(timestamp)
 
             return {
                 'transaction_hash': txid,
@@ -504,8 +557,8 @@ class BlockchainFetcherService:
             satoshis = abs(int(tx_data.get('result', tx_data.get('balance', 0))))
             quantity = Decimal(satoshis) / Decimal('100000000')
 
-            # For now, we'll estimate the price
-            estimated_price = Decimal("1.0")  # Placeholder
+            # Get historical BTC price at timestamp
+            estimated_price = self._get_historical_btc_price(timestamp)
 
             return {
                 'transaction_hash': tx_hash,
@@ -562,8 +615,8 @@ class BlockchainFetcherService:
             quantity = Decimal(str(total_value)) / Decimal('100000000')
             fee_amount = Decimal(str(fees)) / Decimal('100000000')
 
-            # For now, we'll estimate the price
-            estimated_price = Decimal("1.0")  # Placeholder
+            # Get historical BTC price at timestamp
+            estimated_price = self._get_historical_btc_price(timestamp)
 
             # Detect transaction type
             tx_type = self._detect_transaction_type(tx_data)

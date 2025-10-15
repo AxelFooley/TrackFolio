@@ -7,7 +7,7 @@ Follows existing codebase patterns with proper error handling and async database
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func, and_
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 import logging
@@ -80,7 +80,7 @@ def _store_real_time_price(symbol: str, price: Decimal, timestamp: Optional[date
     """
     try:
         if timestamp is None:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(timezone.utc)
 
         # Store price using price_history_manager
         price_history_manager.store_price(
@@ -224,7 +224,7 @@ async def list_crypto_portfolios(
                             and_(
                                 CryptoTransaction.portfolio_id == portfolio.id,
                                 CryptoTransaction.exchange == 'Bitcoin Blockchain',
-                                CryptoTransaction.timestamp >= datetime.utcnow() - timedelta(days=7)
+                                CryptoTransaction.timestamp >= datetime.now(timezone.utc) - timedelta(days=7)
                             )
                         )
                     )
@@ -234,7 +234,7 @@ async def list_crypto_portfolios(
                         "wallet_configured": True,
                         "wallet_address": portfolio.wallet_address,
                         "recent_blockchain_transactions": recent_blockchain_txs,
-                        "last_sync_check": datetime.utcnow().isoformat()
+                        "last_sync_check": datetime.now(timezone.utc).isoformat()
                     }
                 except Exception as e:
                     logger.warning(f"Failed to get wallet sync status for portfolio {portfolio.id}: {e}")
@@ -407,7 +407,7 @@ async def get_wallet_sync_status(
                 status = "never"
             else:
                 # Check if there are recent transactions (within last 7 days)
-                recent_threshold = datetime.utcnow() - timedelta(days=7)
+                recent_threshold = datetime.now(timezone.utc) - timedelta(days=7)
                 if last_blockchain_tx and last_blockchain_tx >= recent_threshold:
                     status = "synced"
                 else:
@@ -416,7 +416,7 @@ async def get_wallet_sync_status(
             return {
                 "status": status,
                 "last_blockchain_transaction": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
-                "last_sync_check": datetime.utcnow().isoformat(),
+                "last_sync_check": datetime.now(timezone.utc).isoformat(),
                 "transaction_count": total_blockchain_txs,
                 "error_message": None
             }
@@ -474,7 +474,7 @@ async def get_crypto_portfolio(
                         and_(
                             CryptoTransaction.portfolio_id == portfolio_id,
                             CryptoTransaction.exchange == 'Bitcoin Blockchain',
-                            CryptoTransaction.timestamp >= datetime.utcnow() - timedelta(days=7)
+                            CryptoTransaction.timestamp >= datetime.now(timezone.utc) - timedelta(days=7)
                         )
                     )
                 )
@@ -512,7 +512,7 @@ async def get_crypto_portfolio(
                     "recent_blockchain_transactions": recent_blockchain_txs,
                     "total_blockchain_transactions": total_blockchain_txs,
                     "last_blockchain_transaction": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
-                    "last_sync_check": datetime.utcnow().isoformat()
+                    "last_sync_check": datetime.now(timezone.utc).isoformat()
                 }
             except Exception as e:
                 logger.warning(f"Failed to get wallet sync status for portfolio {portfolio_id}: {e}")
@@ -676,7 +676,7 @@ async def update_crypto_portfolio(
         if 'base_currency' in update_data and update_data['base_currency'] != old_base_currency:
             base_currency_changed = True
 
-        portfolio.updated_at = datetime.utcnow()
+        portfolio.updated_at = datetime.now(timezone.utc)
 
         await db.commit()
         await db.refresh(portfolio)
@@ -996,7 +996,7 @@ async def update_crypto_transaction(
             else:
                 setattr(transaction, field, value)
 
-        transaction.updated_at = datetime.utcnow()
+        transaction.updated_at = datetime.now(timezone.utc)
 
         await db.commit()
         await db.refresh(transaction)
@@ -1185,7 +1185,7 @@ async def get_crypto_portfolio_performance(
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
         # Calculate date range based on range parameter
-        end_date = datetime.utcnow().date()
+        end_date = datetime.now(timezone.utc).date()
 
         if range == "1D":
             start_date = end_date - timedelta(days=1)
@@ -1357,14 +1357,14 @@ async def get_crypto_prices(
             market_cap_usd=None,
             volume_24h_usd=None,
             change_percent_24h=float(data.get("change_percent", 0)) if data.get("change_percent") else None,
-            timestamp=data.get("timestamp", datetime.utcnow()),
+            timestamp=data.get("timestamp", datetime.now(timezone.utc)),
             source="yahoo",
         ))
 
     return CryptoPriceResponse(
         prices=prices,
         currency=currency.upper(),
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
         # Get historical prices from Yahoo Finance
 @router.get("/prices/history", response_model=CryptoPriceHistoryResponse)
@@ -1443,7 +1443,7 @@ async def get_crypto_price_history(
                 price=px_conv,
                 currency=currency.upper(),
                 price_usd=dp["close"],
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 source=dp.get("source", "yahoo"),
             ))
 
@@ -1540,7 +1540,7 @@ async def get_supported_crypto_symbols():
         return {
             "symbols": supported_assets,
             "total_count": len(supported_assets),
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone.utc)
         }
 
     except Exception as e:
@@ -1570,14 +1570,14 @@ async def crypto_health_check():
             "services": {
                 "yahoo_finance": "healthy" if yahoo_healthy else "unhealthy"
             },
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone.utc)
         }
 
     except Exception as e:
         return {
             "status": "unhealthy",
             "error": str(e),
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone.utc)
         }
 
 
@@ -1625,7 +1625,7 @@ async def refresh_all_crypto_prices(
                 try:
                     # Store real-time price using price_history_manager
                     price = Decimal(str(result['current_price']))
-                    timestamp = result.get('timestamp', datetime.utcnow())
+                    timestamp = result.get('timestamp', datetime.now(timezone.utc))
                     if _store_real_time_price(symbol, price, timestamp):
                         successful_updates += 1
                     else:
@@ -1643,7 +1643,7 @@ async def refresh_all_crypto_prices(
             "message": f"Price refresh completed. Updated {successful_updates} symbols.",
             "successful_updates": successful_updates,
             "failed_updates": failed_updates,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
     except Exception as e:
@@ -1698,7 +1698,7 @@ async def refresh_portfolio_crypto_prices(
                 "message": "No crypto symbols found in portfolio to refresh",
                 "successful_updates": 0,
                 "failed_updates": 0,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
 
         price_fetcher = PriceFetcher()
@@ -1718,7 +1718,7 @@ async def refresh_portfolio_crypto_prices(
                 try:
                     # Store real-time price using price_history_manager
                     price = Decimal(str(result['current_price']))
-                    timestamp = result.get('timestamp', datetime.utcnow())
+                    timestamp = result.get('timestamp', datetime.now(timezone.utc))
                     if _store_real_time_price(symbol, price, timestamp):
                         successful_updates += 1
                         updated_symbols.append(symbol)
@@ -1739,7 +1739,7 @@ async def refresh_portfolio_crypto_prices(
             "failed_updates": failed_updates,
             "updated_symbols": updated_symbols,
             "portfolio_id": portfolio_id,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
     except HTTPException:

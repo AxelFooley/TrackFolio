@@ -4,7 +4,7 @@ Crypto metric calculation tasks.
 Calculates and caches IRR, TWR, and other crypto portfolio metrics.
 """
 from celery import shared_task
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +18,9 @@ from app.services.price_fetcher import PriceFetcher
 from sqlalchemy.dialects.postgresql import insert
 
 logger = logging.getLogger(__name__)
+
+# Fallback EURUSD rate when real-time data is unavailable (USD per EUR)
+DEFAULT_EURUSD_FALLBACK_RATE = Decimal("0.92")
 
 
 def _calculate_holdings_from_transactions(transactions):
@@ -115,7 +118,7 @@ def calculate_crypto_metrics(self):
         failed_portfolios = []
 
         # Calculate expiry (24 hours from now)
-        expires_at = datetime.utcnow() + timedelta(hours=24)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
 
         for portfolio in active_portfolios:
             try:
@@ -133,13 +136,13 @@ def calculate_crypto_metrics(self):
                     metric_type="crypto_portfolio_metrics",
                     metric_key=str(portfolio.id),
                     metric_value=metrics,
-                    calculated_at=datetime.utcnow(),
+                    calculated_at=datetime.now(timezone.utc),
                     expires_at=expires_at
                 ).on_conflict_do_update(
                     index_elements=["metric_type", "metric_key"],
                     set_={
                         "metric_value": metrics,
-                        "calculated_at": datetime.utcnow(),
+                        "calculated_at": datetime.now(timezone.utc),
                         "expires_at": expires_at,
                     }
                 )
@@ -165,13 +168,13 @@ def calculate_crypto_metrics(self):
                     metric_type="crypto_global_metrics",
                     metric_key="global",
                     metric_value=global_metrics,
-                    calculated_at=datetime.utcnow(),
+                    calculated_at=datetime.now(timezone.utc),
                     expires_at=expires_at
                 ).on_conflict_do_update(
                     index_elements=["metric_type", "metric_key"],
                     set_={
                         "metric_value": global_metrics,
-                        "calculated_at": datetime.utcnow(),
+                        "calculated_at": datetime.now(timezone.utc),
                         "expires_at": expires_at,
                     }
                 )
@@ -187,7 +190,7 @@ def calculate_crypto_metrics(self):
         # Clean up expired metrics
         try:
             stmt = delete(CachedMetrics).where(
-                CachedMetrics.expires_at < datetime.utcnow()
+                CachedMetrics.expires_at < datetime.now(timezone.utc)
             )
             result = db.execute(stmt)
             db.commit()
@@ -279,7 +282,7 @@ def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
             "asset_allocation": {},
             "num_positions": 0,
             "base_currency": portfolio.base_currency.value,
-            "calculated_at": datetime.utcnow().isoformat()
+            "calculated_at": datetime.now(timezone.utc).isoformat()
         }
 
     # Get current holdings using helper function
@@ -316,7 +319,7 @@ def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
 
         if price_data and price_data.get("current_price"):
             price_usd = price_data["current_price"]
-            price_eur = (price_usd / eurusd_rate) if eurusd_rate and eurusd_rate != 0 else (price_usd * Decimal("0.92"))
+            price_eur = (price_usd / eurusd_rate) if eurusd_rate and eurusd_rate != 0 else (price_usd * DEFAULT_EURUSD_FALLBACK_RATE)
 
             value_eur = holding["quantity"] * price_eur
             value_usd = holding["quantity"] * price_usd
@@ -448,7 +451,7 @@ def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
 
         if price_data and price_data.get("current_price"):
             price_usd = price_data["current_price"]
-            price_eur = (price_usd / eurusd_rate) if eurusd_rate and eurusd_rate != 0 else (price_usd * Decimal("0.92"))
+            price_eur = (price_usd / eurusd_rate) if eurusd_rate and eurusd_rate != 0 else (price_usd * DEFAULT_EURUSD_FALLBACK_RATE)
             current_value = holding["quantity"] * price_eur
 
             # Calculate simple return as IRR substitute for now
@@ -465,7 +468,7 @@ def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
                 "unrealized_pnl_eur": float(current_value - holding["total_cost"]),
                 "unrealized_pnl_pct": float((current_value / holding["total_cost"] - 1) * 100) if holding["total_cost"] > 0 else 0,
                 "irr": irr,
-                "calculated_at": datetime.utcnow().isoformat()
+                "calculated_at": datetime.now(timezone.utc).isoformat()
             }
 
     return metrics

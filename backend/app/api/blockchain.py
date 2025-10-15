@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 import logging
 
 from app.database import SyncSessionLocal
@@ -55,7 +55,8 @@ class WalletSyncRequest(BaseModel):
     max_transactions: Optional[int] = Field(100, description="Maximum number of transactions to fetch", ge=1, le=500)
     days_back: Optional[int] = Field(30, description="Number of days to look back", ge=1, le=365)
 
-    @validator('wallet_address')
+    @field_validator('wallet_address')
+    @classmethod
     def validate_wallet_address_field(cls, v):
         """Validate wallet address using shared validator function."""
         return validate_wallet_address(v)
@@ -66,7 +67,8 @@ class WalletConfigRequest(BaseModel):
     portfolio_id: int = Field(..., description="Portfolio ID")
     wallet_address: str = Field(..., description="Bitcoin wallet address to configure")
 
-    @validator('wallet_address')
+    @field_validator('wallet_address')
+    @classmethod
     def validate_wallet_address_field(cls, v):
         """Validate wallet address using shared validator function."""
         return validate_wallet_address(v)
@@ -89,8 +91,7 @@ class TransactionResponse(BaseModel):
     transaction_hash: Optional[str]
     notes: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class WalletSyncResponse(BaseModel):
