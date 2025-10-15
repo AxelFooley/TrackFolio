@@ -408,7 +408,9 @@ async def get_wallet_sync_status(
             else:
                 # Check if there are recent transactions (within last 7 days)
                 recent_threshold = datetime.now(timezone.utc) - timedelta(days=7)
-                if last_blockchain_tx and last_blockchain_tx >= recent_threshold:
+                # Ensure both datetimes are timezone-aware before comparison
+                last_tx_aware = last_blockchain_tx.replace(tzinfo=timezone.utc) if last_blockchain_tx and last_blockchain_tx.tzinfo is None else last_blockchain_tx
+                if last_tx_aware and last_tx_aware >= recent_threshold:
                     status = "synced"
                 else:
                     status = "synced"  # Has transactions but not recent
