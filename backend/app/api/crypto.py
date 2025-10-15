@@ -865,8 +865,8 @@ async def list_crypto_transactions(
         transactions = result.scalars().all()
 
         return CryptoTransactionList(
-            transactions=transactions,
-            total_count=total_count
+            items=transactions,
+            total=total_count
         )
 
     except HTTPException:
