@@ -386,7 +386,8 @@ async def get_wallet_sync_status(
 
             return {
                 "status": status,
-                "last_sync": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
+                "last_blockchain_transaction": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
+                "last_sync_check": datetime.utcnow().isoformat(),
                 "transaction_count": total_blockchain_txs,
                 "error_message": None
             }
