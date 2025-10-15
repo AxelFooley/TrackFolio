@@ -47,7 +47,7 @@ export default function CryptoTransactionsPage() {
 
   // Search and filter state
   const [searchTerm, setSearchTerm] = useState('');
-  const [symbolFilter, setSymbolFilter] = useState('');
+  const [symbolFilter, setSymbolFilter] = useState('all');
 
   const handleCreateTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -307,11 +307,12 @@ export default function CryptoTransactionsPage() {
               <SelectValue placeholder="All symbols" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All symbols</SelectItem>
+              <SelectItem value="all">All symbols</SelectItem>
               {/* Generate unique symbols from transactions */}
               {transactionsData?.items
                 ?.map((t) => t.symbol)
-                .filter((symbol, index, arr) => arr.indexOf(symbol) === index)
+                .filter((symbol) => symbol && symbol.trim() !== '') // Filter out empty, null, undefined, and whitespace-only symbols
+                .filter((symbol, index, arr) => arr.indexOf(symbol) === index) // Get unique symbols
                 .map((symbol) => (
                   <SelectItem key={symbol} value={symbol}>
                     {symbol}
