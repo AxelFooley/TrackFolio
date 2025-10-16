@@ -233,34 +233,40 @@ async def list_crypto_portfolios(
         raise HTTPException(status_code=500, detail=f"Failed to list portfolios: {str(e)}")
 
 
-@router.get("/portfolios/{portfolio_id}", response_model=CryptoPortfolioSummary)
+@router.get("/portfolios/{portfolio_id}", response_model=CryptoPortfolioResponse)
 async def get_crypto_portfolio(
     portfolio_id: int,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Retrieve a detailed portfolio summary including computed metrics, holdings, and wallet sync status.
-    
+    Retrieve a detailed portfolio including computed metrics and wallet sync status.
+
     Parameters:
         portfolio_id (int): ID of the portfolio to retrieve.
-    
+
     Returns:
-        dict: A summary object containing at least a `portfolio` entry (portfolio details), computed metrics and holdings, and a `wallet_sync_status` object with wallet configuration and recent blockchain transaction info.
-    
+        CryptoPortfolioResponse: Portfolio object with all currency-specific fields populated based on base_currency and wallet_sync_status.
+
     Raises:
-        HTTPException: 404 if the portfolio is not found; 500 if an unexpected error occurs while retrieving or composing the summary.
+        HTTPException: 404 if the portfolio is not found; 500 if an unexpected error occurs while retrieving.
     """
     try:
         calc_service = CryptoCalculationService(db)
-        summary = await calc_service.calculate_portfolio_summary(portfolio_id)
 
-        if not summary or not summary.get('portfolio'):
+        # Get portfolio
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
-        # Add wallet sync status to portfolio response
-        portfolio = summary['portfolio']
-        wallet_sync_status = None
+        # Get metrics
+        metrics = await calc_service.calculate_portfolio_metrics(portfolio_id)
 
+        # Get wallet sync status
+        wallet_sync_status = None
         if portfolio.wallet_address:
             try:
                 # Get recent blockchain transaction count for sync status
@@ -323,63 +329,34 @@ async def get_crypto_portfolio(
                 "wallet_configured": False
             }
 
-        # Add wallet sync status to the portfolio object
-        if hasattr(portfolio, '__dict__'):
-            portfolio.__dict__['wallet_sync_status'] = wallet_sync_status
-
-        # Get metrics for portfolio to create proper response with currency-specific fields
-        metrics = await calc_service.calculate_portfolio_metrics(portfolio_id)
-
-        # Convert portfolio to CryptoPortfolioResponse with currency-specific fields
+        # Convert to CryptoPortfolioResponse with currency-specific fields
         base_currency_str = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
-        if metrics:
-            portfolio_response = CryptoPortfolioResponse(
-                id=portfolio.id,
-                name=portfolio.name,
-                description=portfolio.description,
-                is_active=portfolio.is_active,
-                base_currency=portfolio.base_currency,
-                wallet_address=portfolio.wallet_address,
-                created_at=portfolio.created_at,
-                updated_at=portfolio.updated_at,
-                # Add currency-specific fields for frontend compatibility
-                total_value_usd=metrics.total_value if base_currency_str == 'USD' else None,
-                total_value_eur=metrics.total_value if base_currency_str == 'EUR' else None,
-                total_profit_usd=metrics.total_profit_loss if base_currency_str == 'USD' else None,
-                total_profit_eur=metrics.total_profit_loss if base_currency_str == 'EUR' else None,
-                profit_percentage_usd=metrics.total_profit_loss_pct if base_currency_str == 'USD' else None,
-                profit_percentage_eur=metrics.total_profit_loss_pct if base_currency_str == 'EUR' else None,
-                # Keep original fields for backward compatibility
-                total_value=metrics.total_value,
-                total_cost_basis=metrics.total_cost_basis,
-                total_profit_loss=metrics.total_profit_loss,
-                total_profit_loss_pct=metrics.total_profit_loss_pct,
-                transaction_count=metrics.transaction_count,
-                wallet_sync_status=wallet_sync_status
-            )
-            # Update the portfolio in the summary
-            summary['portfolio'] = portfolio_response
-        else:
-            # If metrics calculation failed, still return portfolio with None values
-            portfolio_response = CryptoPortfolioResponse(
-                id=portfolio.id,
-                name=portfolio.name,
-                description=portfolio.description,
-                is_active=portfolio.is_active,
-                base_currency=portfolio.base_currency,
-                wallet_address=portfolio.wallet_address,
-                created_at=portfolio.created_at,
-                updated_at=portfolio.updated_at,
-                total_value=None,
-                total_cost_basis=None,
-                total_profit_loss=None,
-                total_profit_loss_pct=None,
-                transaction_count=0,
-                wallet_sync_status=wallet_sync_status
-            )
-            summary['portfolio'] = portfolio_response
+        portfolio_response = CryptoPortfolioResponse(
+            id=portfolio.id,
+            name=portfolio.name,
+            description=portfolio.description,
+            is_active=portfolio.is_active,
+            base_currency=portfolio.base_currency,
+            wallet_address=portfolio.wallet_address,
+            created_at=portfolio.created_at,
+            updated_at=portfolio.updated_at,
+            # Add currency-specific fields for frontend compatibility
+            total_value_usd=metrics.total_value if metrics and base_currency_str == 'USD' else None,
+            total_value_eur=metrics.total_value if metrics and base_currency_str == 'EUR' else None,
+            total_profit_usd=metrics.total_profit_loss if metrics and base_currency_str == 'USD' else None,
+            total_profit_eur=metrics.total_profit_loss if metrics and base_currency_str == 'EUR' else None,
+            profit_percentage_usd=metrics.total_profit_loss_pct if metrics and base_currency_str == 'USD' else None,
+            profit_percentage_eur=metrics.total_profit_loss_pct if metrics and base_currency_str == 'EUR' else None,
+            # Keep original fields for backward compatibility
+            total_value=metrics.total_value if metrics else None,
+            total_cost_basis=metrics.total_cost_basis if metrics else None,
+            total_profit_loss=metrics.total_profit_loss if metrics else None,
+            total_profit_loss_pct=metrics.total_profit_loss_pct if metrics else None,
+            transaction_count=metrics.transaction_count if metrics else 0,
+            wallet_sync_status=wallet_sync_status
+        )
 
-        return summary
+        return portfolio_response
 
     except HTTPException:
         raise
