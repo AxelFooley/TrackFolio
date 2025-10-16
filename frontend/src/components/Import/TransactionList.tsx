@@ -17,6 +17,13 @@ import { AlertTriangle, Pencil } from 'lucide-react';
 import { EditTransactionModal } from '@/components/Modals/EditTransactionModal';
 import type { Transaction } from '@/lib/types';
 
+/**
+ * Display a "Recent Transactions" card that shows loading, empty, or populated transaction states and supports editing individual transactions.
+ *
+ * Shows a skeleton list while data is loading, an empty-state message when there are no transactions, and a horizontally scrollable table of transactions with formatted date, ticker, type badge, quantity, computed amount, fees (with a missing-fee indicator), currency, and an edit action that opens an edit modal.
+ *
+ * @returns The transactions UI as a React element.
+ */
 export function TransactionList() {
   const { data: transactions, isLoading } = useTransactions(0, 50);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
@@ -44,7 +51,7 @@ export function TransactionList() {
     );
   }
 
-  if (!transactions || transactions.length === 0) {
+  if (!transactions || !transactions.items || transactions.items.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -79,26 +86,28 @@ export function TransactionList() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {transactions.map((transaction) => (
+                {transactions.items.map((transaction) => (
                   <TableRow key={transaction.id}>
                     <TableCell>{formatDate(transaction.operation_date)}</TableCell>
                     <TableCell className="font-medium">{transaction.ticker || '-'}</TableCell>
                     <TableCell>
-                      <span
+                        <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          transaction.transaction_type === 'buy'
-                            ? 'bg-success/10 text-success'
-                            : 'bg-danger/10 text-danger'
+                          transaction.transaction_type === 'BUY'
+                          ? 'bg-success/10 text-success'
+                          : transaction.transaction_type === 'SELL'
+                          ? 'bg-danger/10 text-danger'
+                          : 'bg-gray-100 text-gray-600'
                         }`}
-                      >
-                        {transaction.transaction_type?.toUpperCase() || 'N/A'}
-                      </span>
+                        >
+                        {transaction.transaction_type || 'N/A'}
+                        </span>
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {transaction.quantity || '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(transaction.price_per_share * transaction.quantity, transaction.currency)}
+                      {formatCurrency((transaction.price_per_share || 0) * (transaction.quantity || 0), transaction.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       <div className="flex items-center justify-end gap-2">

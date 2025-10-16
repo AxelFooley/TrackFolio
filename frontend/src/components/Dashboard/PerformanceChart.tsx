@@ -12,6 +12,14 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 
 const timeRanges: TimeRange[] = ['1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'];
 
+/**
+ * Render the portfolio performance chart with range selection controls, handling loading, error, and no-data states, and optionally overlaying benchmark data.
+ *
+ * The component fetches performance and benchmark data for the selected time range, formats and maps data for the chart,
+ * displays a single-point summary when only one data point exists, and renders a responsive line chart for multiple points.
+ *
+ * @returns A JSX element that displays the Performance card with range buttons, status UIs, and a responsive line chart (portfolio and optional benchmark).
+ */
 export function PerformanceChart() {
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y');
   const { data: performanceData, isLoading, error, refetch } = usePerformanceData(selectedRange);
@@ -83,7 +91,7 @@ export function PerformanceChart() {
   }
 
   // Check if we have portfolio data
-  const hasPortfolioData = performanceData?.portfolio_data && performanceData.portfolio_data.length > 0;
+  const hasPortfolioData = performanceData && performanceData.length > 0;
 
   if (!hasPortfolioData) {
     return (
@@ -125,34 +133,20 @@ export function PerformanceChart() {
     );
   }
 
-  // Transform data for Recharts
-  // Create a map of benchmark data by date for efficient lookup
-  const benchmarkByDate = new Map<string, number>();
-  if (performanceData.benchmark_data) {
-    performanceData.benchmark_data.forEach((point) => {
-      benchmarkByDate.set(point.date, Number(point.value));
-    });
-  }
+  // Transform data for Recharts - performanceData is already an array of PerformanceData objects
+  const chartData = performanceData.map((point) => ({
+    date: point.date,
+    portfolio: point.portfolio,
+    ...(point.benchmark != null && { benchmark: point.benchmark }),
+  }));
 
-  const chartData = performanceData.portfolio_data.map((point) => {
-    const dataPoint: any = {
-      date: point.date,
-      portfolio: Number(point.value),
-    };
-
-    // Add benchmark data if available for this date
-    const benchmarkValue = benchmarkByDate.get(point.date);
-    if (benchmarkValue !== undefined) {
-      dataPoint.benchmark = benchmarkValue;
-    }
-
-    return dataPoint;
-  });
-
-  const hasBenchmarkData = performanceData.benchmark_data && performanceData.benchmark_data.length > 0;
+  const hasBenchmarkData = chartData.some(point => point.benchmark != null);
 
   // Determine if we have a single data point (special case for rendering)
   const isSinglePoint = chartData.length === 1;
+
+  // Portfolio currency (currently hardcoded to EUR as API doesn't return currency with performance data)
+  const portfolioCurrency = 'EUR';
 
   return (
     <Card>
@@ -174,73 +168,13 @@ export function PerformanceChart() {
         </div>
       </CardHeader>
       <CardContent>
-        {/* Performance Metrics Display */}
-        {(performanceData?.portfolio_start_value !== undefined &&
-          performanceData?.portfolio_end_value !== undefined &&
-          performanceData?.portfolio_change_pct !== null &&
-          performanceData?.portfolio_change_pct !== undefined) && (
-          <div className="mb-6 flex flex-wrap gap-4 pb-4 border-b border-gray-200">
-            {/* Portfolio Performance */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-600">Portfolio:</span>
-              <span className="text-sm font-mono">
-                {formatCurrency(performanceData.portfolio_start_value, 'EUR')}
-              </span>
-              <span className="text-gray-400">→</span>
-              <span className="text-sm font-mono">
-                {formatCurrency(performanceData.portfolio_end_value, 'EUR')}
-              </span>
-              <span
-                className={`text-sm font-semibold ml-1 ${
-                  performanceData.portfolio_change_pct >= 0
-                    ? 'text-green-600'
-                    : 'text-red-600'
-                }`}
-              >
-                ({performanceData.portfolio_change_pct >= 0 ? '+' : ''}{performanceData.portfolio_change_pct.toFixed(2)}%)
-              </span>
-            </div>
-
-            {/* Benchmark Performance */}
-            {benchmark &&
-             performanceData?.benchmark_start_price !== undefined &&
-             performanceData?.benchmark_end_price !== undefined &&
-             performanceData?.benchmark_change_pct !== null &&
-             performanceData?.benchmark_change_pct !== undefined && (
-              <>
-                <span className="text-gray-300">|</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-600">
-                    Benchmark ({benchmark.ticker}):
-                  </span>
-                  <span className="text-sm font-mono">
-                    {formatCurrency(performanceData.benchmark_start_price, 'EUR')}
-                  </span>
-                  <span className="text-gray-400">→</span>
-                  <span className="text-sm font-mono">
-                    {formatCurrency(performanceData.benchmark_end_price, 'EUR')}
-                  </span>
-                  <span
-                    className={`text-sm font-semibold ml-1 ${
-                      performanceData.benchmark_change_pct >= 0
-                        ? 'text-green-600'
-                        : 'text-red-600'
-                    }`}
-                  >
-                    ({performanceData.benchmark_change_pct >= 0 ? '+' : ''}{performanceData.benchmark_change_pct.toFixed(2)}%)
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
+  
         {isSinglePoint ? (
           <div className="h-96 flex items-center justify-center">
             <div className="text-center">
               <p className="text-gray-600 font-medium mb-2">Single Data Point</p>
               <p className="text-sm text-gray-500">
-                Portfolio Value: {formatCurrency(chartData[0].portfolio, 'EUR')}
+                Portfolio Value: {formatCurrency(chartData[0].portfolio, portfolioCurrency)}
               </p>
               <p className="text-xs text-gray-400 mt-2">
                 More data points will appear as your portfolio is tracked over time.
@@ -259,7 +193,7 @@ export function PerformanceChart() {
               <YAxis
                 yAxisId="left"
                 tick={{ fontSize: 12 }}
-                tickFormatter={(value) => formatCurrency(value, 'EUR')}
+                tickFormatter={(value) => formatCurrency(value, portfolioCurrency)}
                 width={80}
               />
               {hasBenchmarkData && (
@@ -267,12 +201,12 @@ export function PerformanceChart() {
                   yAxisId="right"
                   orientation="right"
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => formatCurrency(value, 'EUR')}
+                  tickFormatter={(value) => formatCurrency(value, portfolioCurrency)}
                   width={80}
                 />
               )}
               <Tooltip
-                formatter={(value: number) => formatCurrency(value, 'EUR')}
+                formatter={(value: number) => formatCurrency(value, portfolioCurrency)}
                 labelFormatter={(label) => formatDate(label)}
                 contentStyle={{
                   backgroundColor: 'white',

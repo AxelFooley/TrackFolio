@@ -7,8 +7,9 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json ./
 
-# Install dependencies with npm ci for reproducible builds
-RUN npm ci
+# Clear npm cache and install dependencies with npm ci for reproducible builds
+RUN npm cache clean --force && \
+    npm ci
 
 # Copy application code
 COPY . .
@@ -17,25 +18,41 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Production
-FROM node:18-alpine
+FROM node:18-alpine AS runner
 
 WORKDIR /app
+
+# Set NODE_ENV to production
+ENV NODE_ENV=production
+
+# Create non-root user for security
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
 
 # Copy package files
 COPY package.json package-lock.json ./
 
-# Install production dependencies only
-RUN npm ci --production
+# Clear npm cache and install production dependencies only
+RUN npm cache clean --force && \
+    npm ci --only=production && \
+    npm cache clean --force
 
 # Copy built application from builder stage
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/next.config.js ./next.config.js
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+# Set correct permissions
+RUN chown -R nextjs:nodejs /app
 
-# Copy public directory if it exists (optional)
-RUN mkdir -p public
+# Switch to non-root user
+USER nextjs
 
 # Expose port
 EXPOSE 3000
 
+# Set environment variables
+ENV PORT 3000
+ENV HOSTNAME "0.0.0.0"
+
 # Run in production mode
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

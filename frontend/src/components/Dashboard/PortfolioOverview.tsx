@@ -8,10 +8,18 @@ import { useRealtimePrices } from '@/hooks/useRealtimePrices';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { TrendingUp, TrendingDown, DollarSign, Target, Activity } from 'lucide-react';
 
+/**
+ * Renders a portfolio overview panel showing current value, total profit, average annual return, and today's change, and displays a live-price update indicator when real-time data is available.
+ *
+ * Shows loading skeletons while data is loading and an error message when the overview cannot be loaded.
+ *
+ * @returns The React element containing the portfolio overview UI.
+ */
 export function PortfolioOverview() {
   const { data: overview, isLoading, error } = usePortfolioOverview();
   const { data: holdings } = useHoldings();
-  const { realtimePrices, isLoading: pricesLoading, lastUpdate } = useRealtimePrices();
+  const symbols = holdings?.map(h => h.ticker) || [];
+  const { realtimePrices, isLoading: pricesLoading, lastUpdate } = useRealtimePrices(symbols);
 
   // Calculate real-time portfolio metrics
   const realtimeMetrics = useMemo(() => {
@@ -21,21 +29,26 @@ export function PortfolioOverview() {
     let totalPreviousValue = 0;
     let hasRealtimeData = false;
 
-    holdings.forEach((holding) => {
-      const realtimePrice = realtimePrices.get(holding.ticker);
+    if (Array.isArray(holdings)) {
+      holdings.forEach((holding) => {
+        const realtimePrice = realtimePrices.get(holding.ticker);
 
-      if (realtimePrice) {
-        hasRealtimeData = true;
-        const currentValue = holding.quantity * realtimePrice.current_price;
-        const previousValue = holding.quantity * realtimePrice.previous_close;
-        totalCurrentValue += currentValue;
-        totalPreviousValue += previousValue;
-      } else {
-        // Use fallback values from holdings if no real-time data
-        totalCurrentValue += holding.current_value ?? 0;
-        totalPreviousValue += holding.current_value ?? 0;
-      }
-    });
+        if (realtimePrice) {
+          hasRealtimeData = true;
+          const currentValue = holding.quantity * realtimePrice.current_price;
+          const previousValue = holding.quantity * realtimePrice.previous_close;
+          totalCurrentValue += currentValue;
+          totalPreviousValue += previousValue;
+        } else {
+          // Fallbacks when no real-time data
+          const curr = holding.current_value ?? 0;
+          // Calculate previous value from today's change: previous = current - change
+          const prev = holding.today_change != null ? curr - holding.today_change : curr;
+          totalCurrentValue += curr;
+          totalPreviousValue += prev;
+        }
+      });
+    }
 
     if (!hasRealtimeData) return null;
 

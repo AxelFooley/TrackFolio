@@ -23,5 +23,6 @@ class PositionResponse(BaseModel):
     today_change: Optional[Decimal] = None
     today_change_percent: Optional[float] = None
     last_calculated_at: datetime
+    currency: str = "USD"  # Default to USD as a more standard base currency for portfolio positions
 
     model_config = {"from_attributes": True}

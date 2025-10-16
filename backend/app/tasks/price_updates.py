@@ -1,7 +1,7 @@
 """
 Daily price update tasks.
 
-Fetches latest prices from Yahoo Finance and CoinGecko for all active positions.
+Fetches latest prices from Yahoo Finance for all active positions.
 """
 from celery import shared_task
 from datetime import date, timedelta
@@ -65,6 +65,9 @@ def update_daily_prices(self):
 
         # Get yesterday's date (since we run at 23:00, we want previous trading day's close)
         price_date = date.today() - timedelta(days=1)
+        # Back off weekends (Saturday=5, Sunday=6)
+        while price_date.weekday() >= 5:
+            price_date -= timedelta(days=1)
 
         # Track results
         updated = 0
@@ -91,14 +94,20 @@ def update_daily_prices(self):
                     skipped += 1
                     continue
 
-                # Fetch latest price
+                # Fetch price for the exact target date
                 # Rate limiting: sleep 0.5s between requests to avoid API throttling
                 time.sleep(0.5)
 
-                price_data = price_fetcher.fetch_latest_price(ticker, isin)
+                hist = price_fetcher.fetch_historical_prices_sync(
+                    ticker=ticker,
+                    isin=isin,
+                    start_date=price_date,
+                    end_date=price_date,
+                )
+                price_data = next((p for p in (hist or []) if p.get("date") == price_date), None)
 
                 if not price_data or not price_data.get("close"):
-                    logger.warning(f"No price data returned for {ticker} (ISIN: {isin})")
+                    logger.warning(f"No price data for {ticker} on {price_date} (ISIN: {isin})")
                     failed += 1
                     failed_tickers.append(ticker)
                     continue
@@ -129,9 +138,9 @@ def update_daily_prices(self):
                 logger.debug(f"Price already exists for {ticker} (race condition)")
                 skipped += 1
 
-            except Exception as e:
+            except Exception:
                 db.rollback()
-                logger.error(f"Error fetching price for {ticker}: {str(e)}")
+                logger.exception(f"Error fetching price for {ticker}")
                 failed += 1
                 failed_tickers.append(ticker)
 
@@ -155,8 +164,8 @@ def update_daily_prices(self):
 
         return summary
 
-    except Exception as e:
-        logger.error(f"Fatal error in price update task: {str(e)}")
+    except Exception:
+        logger.exception("Fatal error in price update task")
         raise
 
     finally:
@@ -173,16 +182,22 @@ def update_daily_prices(self):
 )
 def update_price_for_ticker(self, ticker: str, price_date: str = None):
     """
-    Update price for a single ticker.
-
-    This is a utility task that can be called manually or from API endpoints.
-
-    Args:
-        ticker: Ticker symbol
-        price_date: Date string (YYYY-MM-DD). If None, uses yesterday's date.
-
+    Update the historical price for a single ticker on the specified date.
+    
+    If a price record for the target date already exists the task returns a skipped status.
+    On success a new PriceHistory record is created and the returned dict includes the recorded price.
+    
+    Parameters:
+        ticker (str): Ticker symbol to update.
+        price_date (str, optional): Date string in `YYYY-MM-DD` format. If omitted, defaults to yesterday.
+    
     Returns:
-        dict: Price update result
+        dict: Result object with keys:
+            - `status`: `"success"`, `"skipped"`, or `"failed"`.
+            - `ticker`: the ticker symbol.
+            - `price_date`: the target date as `YYYY-MM-DD`.
+            - On success: `price` (float) with the recorded close price.
+            - On skip or failure: `reason` (str) describing why the update was skipped or failed.
     """
     logger.info(f"Updating price for {ticker}")
 
@@ -214,11 +229,16 @@ def update_price_for_ticker(self, ticker: str, price_date: str = None):
                 "reason": "Price already exists"
             }
 
-        # Fetch price
-        price_data = price_fetcher.fetch_latest_price(ticker)
+        # Fetch price for the exact target date
+        hist = price_fetcher.fetch_historical_prices_sync(
+            ticker=ticker,
+            start_date=target_date,
+            end_date=target_date,
+        )
+        price_data = next((p for p in (hist or []) if p.get("date") == target_date), None)
 
         if not price_data or not price_data.get("close"):
-            logger.warning(f"No price data returned for {ticker}")
+            logger.warning(f"No price data for {ticker} on {target_date}")
             return {
                 "status": "failed",
                 "ticker": ticker,
@@ -260,9 +280,9 @@ def update_price_for_ticker(self, ticker: str, price_date: str = None):
             "reason": "Price already exists"
         }
 
-    except Exception as e:
+    except Exception:
         db.rollback()
-        logger.error(f"Error updating price for {ticker}: {str(e)}")
+        logger.exception(f"Error updating price for {ticker}")
         raise
 
     finally:
@@ -276,18 +296,27 @@ def update_price_for_ticker(self, ticker: str, price_date: str = None):
 )
 def fetch_prices_for_ticker(self, ticker: str, isin: str = None, start_date: str = None, end_date: str = None):
     """
-    Fetch historical prices for a specific ticker.
-
-    Used for benchmark price fetching.
-
-    Args:
-        ticker: Ticker symbol
-        isin: Optional ISIN code
-        start_date: Start date string (YYYY-MM-DD)
-        end_date: End date string (YYYY-MM-DD)
-
+    Fetches historical daily prices for a ticker, upserts them into PriceHistory, and returns a summary of changes.
+    
+    Parameters:
+        ticker (str): Ticker symbol to fetch.
+        isin (str, optional): ISIN code to assist fetching when available.
+        start_date (str, optional): Inclusive start date in YYYY-MM-DD format. Defaults to 365 days before today.
+        end_date (str, optional): Inclusive end date in YYYY-MM-DD format. Defaults to today.
+    
     Returns:
-        dict: Summary of prices fetched
+        dict: Summary with keys:
+            - "status": "success" or "no_data".
+            - "ticker": the ticker provided.
+            - "start_date": string start date used.
+            - "end_date": string end date used.
+            - "prices_added": number of new records inserted.
+            - "prices_updated": number of existing records updated when values differed.
+            - "prices_skipped": number of records skipped (identical or due to race condition).
+            - "total_fetched": number of price entries retrieved from the fetcher.
+    
+    Raises:
+        Exception: Rolls back the transaction and re-raises on any unexpected error during fetch or persistence.
     """
     logger.info(f"Starting historical price fetch for {ticker}")
 
@@ -385,9 +414,9 @@ def fetch_prices_for_ticker(self, ticker: str, isin: str = None, start_date: str
 
         return summary
 
-    except Exception as e:
+    except Exception:
         db.rollback()
-        logger.error(f"Error fetching historical prices for {ticker}: {str(e)}")
+        logger.exception(f"Error fetching historical prices for {ticker}")
         raise
 
     finally:

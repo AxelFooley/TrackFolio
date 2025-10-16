@@ -66,6 +66,7 @@ export function TickerAutocomplete({
       // Load common benchmarks when opening
       searchTickers('s&p').then(setResults).catch(console.error);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const handleSelect = (ticker: string) => {
