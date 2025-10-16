@@ -243,6 +243,24 @@ def sync_single_wallet(
     logger.info(f"Syncing Bitcoin wallet {wallet_address} (portfolio {portfolio_id})")
 
     try:
+        # Get portfolio to retrieve base_currency
+        portfolio_result = db_session.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            return {
+                "status": "error",
+                "error": f"Portfolio {portfolio_id} not found",
+                "transactions_added": 0,
+                "transactions_skipped": 0,
+                "transactions_failed": 0
+            }
+
+        # Get base currency for price fetching
+        base_currency = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
+
         # Get existing transaction hashes for this portfolio using deduplication service
         existing_hashes = blockchain_deduplication.get_portfolio_transaction_hashes(portfolio_id)
         logger.info(f"Found {len(existing_hashes)} existing transactions for wallet {wallet_address}")
@@ -282,40 +300,32 @@ def sync_single_wallet(
                     skipped_transactions.append(tx_data)
                     continue
 
-                # Get historical price at transaction time
+                # Get historical price at transaction time in wallet's base currency
                 price_at_time = get_historical_price_at_time(
                     symbol='BTC',
                     timestamp=tx_data['timestamp'],
-                    base_currency='EUR'
+                    base_currency=base_currency
                 )
 
                 if price_at_time:
                     tx_data['price_at_execution'] = price_at_time
                     tx_data['total_amount'] = tx_data['quantity'] * price_at_time
-                    tx_data['currency'] = CryptoCurrency.EUR
+                    tx_data['currency'] = CryptoCurrency(base_currency)
                 else:
                     # Fallback to current price if historical price not available
                     logger.warning(f"Could not get historical price for transaction {tx_hash}, using current price from Yahoo Finance")
                     try:
                         price_fetcher = PriceFetcher()
-                        current_price_data = price_fetcher.fetch_realtime_price('BTC-USD')
+                        # Fetch price in wallet's base currency
+                        ticker = f'BTC-{base_currency.upper()}'
+                        current_price_data = price_fetcher.fetch_realtime_price(ticker)
 
                         if current_price_data and current_price_data.get('current_price'):
-                            current_price_usd = current_price_data['current_price']
-
-                            # Convert USD to EUR
-                            eur_rate = get_usd_to_eur_rate()
-                            if eur_rate:
-                                current_price_eur = current_price_usd * eur_rate
-                                logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price_eur} EUR (converted from {current_price_usd} USD)")
-                                tx_data['price_at_execution'] = current_price_eur
-                            else:
-                                logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {current_price_usd}")
-                                tx_data['price_at_execution'] = current_price_usd
-                                tx_data['currency'] = CryptoCurrency.USD
-
-                            tx_data['total_amount'] = tx_data['quantity'] * tx_data['price_at_execution']
-                            tx_data['currency'] = CryptoCurrency.EUR if eur_rate else CryptoCurrency.USD
+                            current_price = current_price_data['current_price']
+                            logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price} {base_currency}")
+                            tx_data['price_at_execution'] = current_price
+                            tx_data['total_amount'] = tx_data['quantity'] * current_price
+                            tx_data['currency'] = CryptoCurrency(base_currency)
                         else:
                             raise Exception("Yahoo Finance returned no price data")
 
@@ -427,9 +437,9 @@ def get_historical_price_at_time(
         # Initialize price fetcher
         price_fetcher = PriceFetcher()
 
-        # Map crypto symbol to Yahoo Finance ticker
-        yahoo_ticker = f"{symbol}-USD"
-        logger.debug(f"Fetching historical price for {symbol} using Yahoo ticker: {yahoo_ticker}")
+        # Map crypto symbol to Yahoo Finance ticker (fetch in requested currency)
+        yahoo_ticker = f"{symbol}-{base_currency.upper()}"
+        logger.debug(f"Fetching historical price for {symbol} in {base_currency.upper()} using Yahoo ticker: {yahoo_ticker}")
 
         # Try to get historical price from Yahoo Finance for the target date
         # Use a wider range to ensure we capture the data (target date ± 1 day)
@@ -459,37 +469,16 @@ def get_historical_price_at_time(
                     closest_price = price_data.get('close')
 
             if closest_price:
-                # Convert USD to EUR if needed
-                if base_currency.upper() == 'EUR':
-                    eur_rate = get_usd_to_eur_rate()
-                    if eur_rate:
-                        closest_price_eur = closest_price * eur_rate
-                        logger.debug(f"Found historical price for {symbol} at {timestamp}: {closest_price_eur} EUR (converted from {closest_price} USD)")
-                        return closest_price_eur
-                    else:
-                        logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {closest_price}")
-
-                logger.debug(f"Found historical price for {symbol} at {timestamp}: {closest_price}")
+                logger.debug(f"Found historical price for {symbol} at {timestamp}: {closest_price} {base_currency.upper()}")
                 return closest_price
 
         # Fallback: try to get current price if historical not available
-        logger.warning(f"No historical price available for {symbol} at {timestamp}, trying current price")
+        logger.warning(f"No historical price available for {symbol} at {timestamp}, trying current price in {base_currency.upper()}")
         current_price_data = price_fetcher.fetch_realtime_price(yahoo_ticker)
 
         if current_price_data and current_price_data.get('current_price'):
             current_price = current_price_data['current_price']
-
-            # Convert USD to EUR if needed
-            if base_currency.upper() == 'EUR':
-                eur_rate = get_usd_to_eur_rate()
-                if eur_rate:
-                    current_price_eur = current_price * eur_rate
-                    logger.debug(f"Using current price for {symbol}: {current_price_eur} EUR (converted from {current_price} USD)")
-                    return current_price_eur
-                else:
-                    logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {current_price}")
-
-            logger.debug(f"Using current price for {symbol}: {current_price}")
+            logger.debug(f"Using current price for {symbol}: {current_price} {base_currency.upper()}")
             return current_price
 
         return None
