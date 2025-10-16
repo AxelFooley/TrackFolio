@@ -924,10 +924,7 @@ GET /api/crypto/portfolios/{id}/wallet-sync-status
 
 API endpoints are rate limited to **100 requests per minute** per client.
 
-Rate limit information is included in response headers:
-- `X-RateLimit-Limit`: 100
-- `X-RateLimit-Remaining`: 99
-- `X-RateLimit-Reset`: Unix timestamp
+**Note:** Rate limiting is enforced through in-service delays and connection throttling. No rate limit response headers (X-RateLimit-*) are currently provided. For production deployments with strict API limits, consider implementing rate-limit headers via a reverse proxy (nginx, Traefik) or API gateway.
 
 ---
 
