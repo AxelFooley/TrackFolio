@@ -398,16 +398,34 @@ export default function CryptoPortfoliosPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      {portfolio.profit_percentage_usd !== undefined && portfolio.profit_percentage_usd !== null && (
-                        <div className={`flex items-center text-sm ${
-                          portfolio.profit_percentage_usd >= 0 ? 'text-success' : 'text-danger'
-                        }`}>
-                          {portfolio.profit_percentage_usd >= 0 ? (
+                      {(() => {
+                        const profitPct =
+                          portfolio.base_currency === 'USD'
+                            ? portfolio.profit_percentage_usd
+                            : portfolio.profit_percentage_eur;
+                        return profitPct !== undefined && profitPct !== null;
+                      })() && (
+                        <div
+                          className={`flex items-center text-sm ${
+                            ((portfolio.base_currency === 'USD'
+                              ? portfolio.profit_percentage_usd
+                              : portfolio.profit_percentage_eur) as number) >= 0
+                              ? 'text-success'
+                              : 'text-danger'
+                          }`}
+                        >
+                          {((portfolio.base_currency === 'USD'
+                            ? portfolio.profit_percentage_usd
+                            : portfolio.profit_percentage_eur) as number) >= 0 ? (
                             <TrendingUp className="h-4 w-4" />
                           ) : (
                             <TrendingDown className="h-4 w-4" />
                           )}
-                          {formatPercentage(portfolio.profit_percentage_usd)}
+                          {formatPercentage(
+                            (portfolio.base_currency === 'USD'
+                              ? portfolio.profit_percentage_usd
+                              : portfolio.profit_percentage_eur) as number
+                          )}
                         </div>
                       )}
                       <div className="flex gap-1">
