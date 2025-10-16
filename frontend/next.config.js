@@ -3,14 +3,8 @@ const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
   swcMinify: true,
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '')}/api/:path*`,
-      },
-    ];
-  },
+  // No rewrites needed anymore - we use Next.js API routes for proxying
+  // The API routes handle backend URL detection and proxying dynamically
 };
 
 module.exports = nextConfig
