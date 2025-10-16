@@ -460,11 +460,16 @@ export async function refreshCryptoPrices(portfolioId?: number): Promise<{ messa
 // === Blockchain / Wallet APIs ===
 
 // Wallet Sync
-export async function syncWallet(portfolioId: number): Promise<{ message: string; status: WalletSyncStatus }> {
+export async function syncWallet(portfolioId: number, walletAddress: string): Promise<{ message: string; status: WalletSyncStatus }> {
   return apiRequest<{ message: string; status: WalletSyncStatus }>({
     method: 'POST',
     url: `/blockchain/sync/wallet`,
-    data: { portfolio_id: portfolioId },
+    data: {
+      portfolio_id: portfolioId,
+      wallet_address: walletAddress,
+      max_transactions: 100,
+      days_back: 30
+    },
   });
 }
 

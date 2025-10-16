@@ -30,7 +30,7 @@ export function WalletSync({ portfolioId, walletAddress }: WalletSyncProps) {
 
   const handleSync = async () => {
     try {
-      await syncWalletMutation.mutateAsync(portfolioId);
+      await syncWalletMutation.mutateAsync({ portfolioId, walletAddress });
       toast({
         title: 'Wallet Sync Started',
         description: 'Syncing your Bitcoin wallet transactions...',

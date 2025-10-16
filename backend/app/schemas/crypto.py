@@ -197,9 +197,9 @@ class CryptoPortfolioMetrics(BaseModel):
     asset_allocation: List[dict] = Field(default_factory=list)
 
     # Performance insights
-    best_performer: dict
-    worst_performer: dict
-    largest_position: dict
+    best_performer: Optional[dict] = None
+    worst_performer: Optional[dict] = None
+    largest_position: Optional[dict] = None
 
 class CryptoPriceData(BaseModel):
     """Schema for crypto price data."""
