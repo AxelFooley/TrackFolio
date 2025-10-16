@@ -192,6 +192,56 @@ class CryptoCalculationService:
                             'percentage': currency_allocation_pct
                         })
 
+            # Calculate performance insights
+            best_performer = {"symbol": "", "asset_name": "", "return_percentage": 0, "current_value": Decimal("0")}
+            worst_performer = {"symbol": "", "asset_name": "", "return_percentage": 0, "current_value": Decimal("0")}
+            largest_position = {"symbol": "", "asset_name": "", "current_value": Decimal("0"), "return_percentage": 0}
+
+            if holdings:
+                # Best performer (highest return percentage)
+                best_holdings = sorted(
+                    [(symbol, data) for symbol, data in holdings.items() if data.get('unrealized_gain_loss_pct') is not None],
+                    key=lambda x: x[1]['unrealized_gain_loss_pct'],
+                    reverse=True
+                )
+                if best_holdings:
+                    symbol, data = best_holdings[0]
+                    best_performer = {
+                        'symbol': symbol,
+                        'asset_name': symbol,  # Could be enhanced with asset name lookup
+                        'return_percentage': data['unrealized_gain_loss_pct'],
+                        'current_value': data.get('current_value', Decimal('0'))
+                    }
+
+                # Worst performer (lowest return percentage)
+                worst_holdings = sorted(
+                    [(symbol, data) for symbol, data in holdings.items() if data.get('unrealized_gain_loss_pct') is not None],
+                    key=lambda x: x[1]['unrealized_gain_loss_pct']
+                )
+                if worst_holdings:
+                    symbol, data = worst_holdings[0]
+                    worst_performer = {
+                        'symbol': symbol,
+                        'asset_name': symbol,  # Could be enhanced with asset name lookup
+                        'return_percentage': data['unrealized_gain_loss_pct'],
+                        'current_value': data.get('current_value', Decimal('0'))
+                    }
+
+                # Largest position (highest current value)
+                largest_holdings = sorted(
+                    [(symbol, data) for symbol, data in holdings.items() if data.get('current_value')],
+                    key=lambda x: x[1]['current_value'],
+                    reverse=True
+                )
+                if largest_holdings:
+                    symbol, data = largest_holdings[0]
+                    largest_position = {
+                        'symbol': symbol,
+                        'asset_name': symbol,  # Could be enhanced with asset name lookup
+                        'current_value': data['current_value'],
+                        'return_percentage': data.get('unrealized_gain_loss_pct', 0)
+                    }
+
             return CryptoPortfolioMetrics(
                 portfolio_id=portfolio_id,
                 base_currency=portfolio.base_currency.value,
@@ -207,7 +257,10 @@ class CryptoCalculationService:
                 holdings_count=len(holdings),
                 transaction_count=len(transactions),
                 asset_allocation=asset_allocation,
-                currency_breakdown=currency_breakdown
+                currency_breakdown=currency_breakdown,
+                best_performer=best_performer,
+                worst_performer=worst_performer,
+                largest_position=largest_position
             )
 
         except Exception as e:

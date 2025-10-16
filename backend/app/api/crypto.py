@@ -722,13 +722,13 @@ async def get_crypto_portfolio_metrics(
 ):
     """
     Retrieve computed metrics for a crypto portfolio.
-    
+
     Parameters:
         portfolio_id (int): ID of the portfolio to compute metrics for.
-    
+
     Returns:
         CryptoPortfolioMetrics: Calculated portfolio metrics for the given portfolio.
-    
+
     Raises:
         HTTPException: 404 if the portfolio does not exist.
         HTTPException: 500 if an unexpected error prevents metrics calculation.

@@ -122,19 +122,26 @@ export interface CryptoPortfolioList {
 }
 
 export interface CryptoPosition {
-  id: number;
-  portfolio_id: number;
   symbol: string;
-  asset_name: string;
   quantity: number;
   average_cost: number;
   cost_basis: number;
   current_price: number;
   current_value: number;
-  unrealized_gain: number;
-  return_percentage: number;
-  currency: 'USD' | 'EUR';
-  last_updated: string;
+  unrealized_gain_loss: number;
+  unrealized_gain_loss_pct: number | null;
+  realized_gain_loss: number | null;
+  first_purchase_date: string | null;
+  last_transaction_date: string | null;
+  // Optional fields for UI compatibility
+  id?: number;
+  portfolio_id?: number;
+  asset_name?: string;
+  currency?: 'USD' | 'EUR';
+  last_updated?: string;
+  // Aliases for backwards compatibility
+  unrealized_gain?: number;
+  return_percentage?: number;
 }
 
 export interface CryptoTransaction {

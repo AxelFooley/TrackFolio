@@ -209,10 +209,34 @@ export async function setBenchmark(data: {
 }
 
 // Price Updates
-export async function refreshPrices(): Promise<{ message: string }> {
+export async function refreshPrices(currentOnly?: boolean, symbols?: string[]): Promise<{ message: string }> {
+  const params: any = {};
+  if (currentOnly !== undefined) params.current_only = currentOnly;
+  if (symbols && symbols.length > 0) params.symbols = symbols.join(',');
+
   return apiRequest<{ message: string }>({
     method: 'POST',
     url: '/prices/refresh',
+    params,
+  });
+}
+
+export async function ensurePriceCoverage(symbols?: string[]): Promise<{ message: string }> {
+  const params: any = {};
+  if (symbols && symbols.length > 0) params.symbols = symbols.join(',');
+
+  return apiRequest<{ message: string }>({
+    method: 'POST',
+    url: '/prices/ensure-coverage',
+    params,
+  });
+}
+
+export async function getPriceHistory(ticker: string, days: number): Promise<{ data: PerformanceData[] }> {
+  return apiRequest<{ data: PerformanceData[] }>({
+    method: 'GET',
+    url: `/assets/${ticker}/price-history`,
+    params: { days },
   });
 }
 

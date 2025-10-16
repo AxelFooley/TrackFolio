@@ -50,7 +50,7 @@ await setBenchmarkMutation.mutateAsync({
 
   const handleRefreshPrices = async () => {
     try {
-      await refreshPricesMutation.mutateAsync(true);
+      await refreshPricesMutation.mutateAsync(false);
       // Refetch last update timestamp immediately
       await refetchLastUpdate();
       toast({
