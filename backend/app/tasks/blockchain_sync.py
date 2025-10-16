@@ -140,13 +140,15 @@ def _sync_bitcoin_wallets_impl():
         total_failed = 0
         wallet_results = []
 
-        # Sync each wallet
+        # Sync each wallet (using config defaults for automatic syncs)
         for portfolio in portfolios:
             try:
                 wallet_result = sync_single_wallet(
                     portfolio.wallet_address,
                     portfolio.id,
-                    db
+                    db,
+                    max_transactions=settings.blockchain_max_transactions_per_sync,
+                    days_back=settings.blockchain_sync_days_back
                 )
 
                 wallet_results.append({
@@ -228,17 +230,15 @@ def sync_single_wallet(
         wallet_address: Bitcoin wallet address to sync
         portfolio_id: Portfolio ID to associate transactions with
         db_session: Database session
-        max_transactions: Maximum number of transactions to fetch (from config if None)
-        days_back: Number of days to look back for new transactions (from config if None)
+        max_transactions: Maximum number of transactions to fetch. None = unlimited
+        days_back: Number of days to look back. None = unlimited (all history)
 
     Returns:
         dict: Sync result for this wallet
     """
-    # Use configuration defaults if not provided
-    if max_transactions is None:
-        max_transactions = settings.blockchain_max_transactions_per_sync
-    if days_back is None:
-        days_back = settings.blockchain_sync_days_back
+    # Note: We don't use config defaults here - we pass through None to allow unlimited fetching
+    # For automatic scheduled syncs, the sync_all_wallets function will use config defaults
+    # For manual syncs, pass None to fetch complete history
 
     logger.info(f"Syncing Bitcoin wallet {wallet_address} (portfolio {portfolio_id})")
 
@@ -508,18 +508,20 @@ def sync_wallet_manually(
     self,
     wallet_address: str,
     portfolio_id: int,
-    max_transactions: Optional[int] = 500,
-    days_back: Optional[int] = 3650
+    max_transactions: Optional[int] = None,
+    days_back: Optional[int] = None
 ):
     """
     Manually trigger a synchronization of transactions for a single Bitcoin wallet and return the per-wallet sync result.
-    
+
+    Fetches ALL historical transactions from the blockchain with NO limits on quantity or time period.
+
     Parameters:
     	wallet_address (str): Bitcoin wallet address to synchronize.
     	portfolio_id (int): ID of the portfolio that must own the wallet.
-    	max_transactions (Optional[int]): Maximum number of transactions to fetch for this sync (default 200).
-    	days_back (Optional[int]): Lookback window in days for transactions to fetch (default 30).
-    
+    	max_transactions (Optional[int]): Maximum number of transactions to fetch. None = unlimited (fetch all).
+    	days_back (Optional[int]): Lookback window in days. None = unlimited (fetch from beginning of blockchain).
+
     Returns:
     	dict: Summary of the sync outcome containing keys such as `status`, `transactions_added`, `transactions_skipped`, `transactions_failed`, and optionally `error` with details when the sync cannot be performed.
     """
