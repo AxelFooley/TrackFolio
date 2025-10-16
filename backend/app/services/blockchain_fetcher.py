@@ -325,7 +325,7 @@ class BlockchainFetcherService:
                 # Bech32 addresses - use different character set (lowercase only + numbers)
                 # Remove the 'bc1' prefix for character validation
                 bech32_part = address[3:]  # Remove 'bc1' prefix
-                valid_chars = set('023456789acdefghjklmnpqrstuvwxyzqpzry9x8gf2tvdw0s3jn54khce6mua7l')
+                valid_chars = set('023456789acdefghjklmnpqrstuvwxyz')
                 if not all(c in valid_chars for c in bech32_part):
                     return False
                 return True
