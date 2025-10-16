@@ -381,6 +381,17 @@ def sync_single_wallet(
                 failed_transactions.append(transaction.transaction_hash)
                 continue
 
+        # Update wallet_last_sync_time if transactions were processed or if it's the first sync
+        total_processed = transactions_added + len(skipped_transactions)
+        if total_processed > 0 or portfolio.wallet_last_sync_time is None:
+            try:
+                portfolio.wallet_last_sync_time = datetime.utcnow()
+                db_session.commit()
+                logger.info(f"Updated wallet_last_sync_time for portfolio {portfolio_id} to {portfolio.wallet_last_sync_time}")
+            except Exception as e:
+                db_session.rollback()
+                logger.error(f"Error updating wallet_last_sync_time for portfolio {portfolio_id}: {e}")
+
         result = {
             "status": "success",
             "transactions_added": transactions_added,
