@@ -565,7 +565,8 @@ class CryptoCalculationService:
         for symbol in symbols:
             try:
                 # Add appropriate suffix for crypto symbols on Yahoo Finance
-                yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
+                # Use the target currency in the ticker for direct fetching
+                yahoo_symbol = f"{symbol}-{currency.upper()}"
 
                 # Use Yahoo Finance to fetch current price
                 price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
@@ -573,26 +574,42 @@ class CryptoCalculationService:
                 if price_data and price_data.get('current_price'):
                     price = price_data['current_price']
 
-                    # Convert to target currency if needed (Yahoo returns USD)
-                    if currency.upper() != 'USD':
-                        # Get USD to target currency conversion rate
-                        conversion_rate = await self._get_usd_to_eur_rate()  # Currently supports USD->EUR
-                        if conversion_rate:
-                            price = price * conversion_rate
-                        else:
-                            logger.warning(f"Could not convert {symbol} price to {currency}, using USD")
-
                     prices[symbol] = {
                         'symbol': symbol,
                         'price': price,
                         'currency': currency.upper(),
-                        'price_usd': price_data['current_price'],
+                        'price_usd': price_data.get('price_usd', price_data.get('current_price')),
                         'timestamp': datetime.utcnow(),
                         'source': 'yahoo'
                     }
                 else:
-                    # No fallback - if Yahoo Finance fails, we don't add the price
-                    logger.warning(f"Could not fetch price for {symbol} from Yahoo Finance - skipping")
+                    # Fallback: try fetching BTC-USD and converting if currency is not USD
+                    if currency.upper() != 'USD':
+                        logger.info(f"Could not fetch {symbol}-{currency.upper()}, trying {symbol}-USD with conversion")
+                        yahoo_symbol_usd = f"{symbol}-USD"
+                        price_data = price_fetcher.fetch_realtime_price(yahoo_symbol_usd)
+
+                        if price_data and price_data.get('current_price'):
+                            price = price_data['current_price']
+                            # Get USD to target currency conversion rate
+                            conversion_rate = await self._get_usd_to_eur_rate()  # Currently supports USD->EUR
+                            if conversion_rate:
+                                price = price * conversion_rate
+                                prices[symbol] = {
+                                    'symbol': symbol,
+                                    'price': price,
+                                    'currency': currency.upper(),
+                                    'price_usd': price_data['current_price'],
+                                    'timestamp': datetime.utcnow(),
+                                    'source': 'yahoo'
+                                }
+                            else:
+                                logger.warning(f"Could not convert {symbol} price to {currency}, skipping")
+                        else:
+                            logger.warning(f"Could not fetch price for {symbol} from Yahoo Finance - skipping")
+                    else:
+                        # No fallback - if Yahoo Finance fails, we don't add the price
+                        logger.warning(f"Could not fetch price for {symbol} from Yahoo Finance - skipping")
             except Exception as e:
                 logger.warning(f"Error getting current price for {symbol}: {e}")
 
@@ -634,7 +651,8 @@ class CryptoCalculationService:
         for symbol in symbols:
             try:
                 # Add appropriate suffix for crypto symbols on Yahoo Finance
-                yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
+                # Use the target currency in the ticker for direct fetching
+                yahoo_symbol = f"{symbol}-{currency.upper()}"
 
                 # Use Yahoo Finance to fetch historical prices (call static method directly)
                 price_data = await PriceFetcher.fetch_historical_prices(
@@ -643,12 +661,12 @@ class CryptoCalculationService:
                     end_date=end_date
                 )
 
-                # If no data for the requested range, try a wider range
-                if not price_data:
-                    logger.info(f"No data for {symbol} in requested range, trying wider range")
+                # If no data for the requested range, try USD (fallback to conversion if needed)
+                if not price_data and currency.upper() != 'USD':
+                    logger.info(f"No data for {symbol}-{currency.upper()}, trying {symbol}-USD with conversion")
                     wider_start_date = start_date - timedelta(days=30)  # Go back 30 more days
                     price_data = await PriceFetcher.fetch_historical_prices(
-                        yahoo_symbol,
+                        f"{symbol}-USD",
                         start_date=wider_start_date,
                         end_date=end_date
                     )
@@ -662,6 +680,7 @@ class CryptoCalculationService:
                                 data_point['price'] = data_point['close'] * conversion_rate
                                 data_point['currency'] = currency.upper()
                         else:
+                            logger.warning(f"Could not convert {symbol} prices to {currency}, using USD")
                             for data_point in price_data:
                                 data_point['price'] = data_point['close']
                                 data_point['currency'] = 'USD'
