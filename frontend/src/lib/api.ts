@@ -108,11 +108,26 @@ export async function getHoldings(): Promise<Position[]> {
 
 // Performance Data
 export async function getPerformanceData(range: string): Promise<PerformanceData[]> {
-  return apiRequest<PerformanceData[]>({
+  const response = await apiRequest<{
+    portfolio_data: Array<{ date: string; value: number }>;
+    benchmark_data: Array<{ date: string; value: number }>;
+  }>({
     method: 'GET',
     url: '/portfolio/performance',
     params: { range },
   });
+
+  // Transform backend response to frontend format
+  // Convert portfolio_data.value to portfolio, merge benchmark data by date
+  const benchmarkMap = new Map(
+    response.benchmark_data.map((b) => [b.date, b.value])
+  );
+
+  return response.portfolio_data.map((point) => ({
+    date: point.date,
+    portfolio: point.value,
+    ...(benchmarkMap.has(point.date) && { benchmark: benchmarkMap.get(point.date) }),
+  }));
 }
 
 // Asset Detail
