@@ -9,8 +9,9 @@ The workflow automatically builds and pushes Docker images to GitHub Container R
 ## Workflow: `build-and-push.yml`
 
 ### Triggers
-- Automatically runs when code is pushed to `main` or `dev` branches
-- Can be manually triggered via Actions tab in GitHub
+- **On Push**: Automatically runs and builds/pushes images when code is pushed to `main` or `dev` branches
+- **On Pull Request**: Automatically runs linting and tests when PRs target `main` or `dev` (builds but does NOT push images)
+- **Manual**: Can be manually triggered via Actions tab in GitHub
 
 ### What It Does
 
@@ -58,6 +59,17 @@ The workflow automatically builds and pushes Docker images to GitHub Container R
 
 #### 6. **Notify Job**
 - Reports success or failure of the entire pipeline
+
+### Pull Request Workflow
+
+When you open a PR targeting `main` or `dev`:
+
+1. ✅ Linting jobs run (flake8, pytest, eslint)
+2. ✅ Build jobs run (creates Docker images)
+3. ❌ **Images are NOT pushed to GHCR** (only for actual merges)
+4. 📊 Workflow status is reported on the PR
+
+This allows reviewers to see if the code passes quality checks before approving the merge.
 
 ### Image Tags Explained
 
@@ -191,13 +203,30 @@ services:
 - ✅ Only tested code is pushed
 - ✅ Container registry requires GitHub authentication
 
+## Typical Workflow
+
+1. **Create a feature branch** from `dev`
+2. **Push to your feature branch** - no workflow runs
+3. **Create a Pull Request** targeting `dev`
+   - Linting and tests run on your PR
+   - Reviewers see if code passes quality checks
+4. **After PR approval**, merge into `dev`
+   - Workflow runs and pushes image with `dev` tag
+   - `ghcr.io/AxelFooley/trackfolio-backend:dev` is updated
+5. **Create PR from `dev` to `main`** when ready for release
+   - Same linting and test checks
+6. **Merge into `main`**
+   - Workflow runs and pushes image with `latest` tag
+   - `ghcr.io/AxelFooley/trackfolio-backend:latest` is updated
+
 ## Next Steps
 
-1. **Push to main or dev branch** to trigger the first build
-2. **Go to Actions tab** to monitor the build
-3. **Check GHCR** (Packages tab) to see your images
-4. **Pull and test locally** if desired
-5. **Update docker-compose.yml** to use GHCR images for remote deployments
+1. **Go to Actions tab** to see your workflow
+2. **Create a test PR** to see the workflow in action
+3. **Merge a PR** to trigger the build and push
+4. **Check Packages tab** to see your built images in GHCR
+5. **Pull and test images locally** if desired
+6. **Update docker-compose.yml** to use GHCR images for remote deployments
 
 ## Advanced Customization
 
@@ -219,16 +248,27 @@ Not recommended, but you can remove the `needs: [setup, lint-*]` dependency if n
 
 Add a notification step after the notify job to send alerts to your preferred platform.
 
-### Build on Pull Requests
+### Limit Builds to Specific Paths (Optional)
 
-Add to the `on:` section:
+To only build when specific files change (e.g., backend OR frontend, not dependencies):
 
 ```yaml
 on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/build-and-push.yml'
   pull_request:
     branches:
       - main
       - dev
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
 ```
 
-This will lint and build PRs but won't push images.
+This prevents unnecessary builds when only documentation or other unrelated files change.

@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - dev
+  pull_request:
+    branches:
+      - main
+      - dev
 
 env:
   REGISTRY: ghcr.io
@@ -120,7 +124,7 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          push: true
+          push: ${{ github.event_name == 'push' }}
           platforms: linux/amd64,linux/arm64
           tags: |
             ${{ needs.setup.outputs.backend-image }}:${{ needs.setup.outputs.image-tag }}
@@ -153,7 +157,7 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          push: true
+          push: ${{ github.event_name == 'push' }}
           platforms: linux/amd64,linux/arm64
           tags: |
             ${{ needs.setup.outputs.frontend-image }}:${{ needs.setup.outputs.image-tag }}
