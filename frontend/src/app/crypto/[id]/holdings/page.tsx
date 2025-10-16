@@ -65,7 +65,7 @@ export default function CryptoHoldingsPage() {
   // Filter and sort holdings
   let filteredHoldings = holdings?.filter((holding) =>
     holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase())
+    (holding.asset_name && holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase()))
   ) || [];
 
   const sortedHoldings = [...filteredHoldings].sort((a, b) => {
@@ -353,13 +353,13 @@ export default function CryptoHoldingsPage() {
                             {formatCryptoQuantity(holding.quantity)}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {formatCurrency(holding.average_cost, holding.currency)}
+                            {formatCurrency(holding.average_cost, portfolio.base_currency)}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {formatCurrency(holding.current_price, holding.currency)}
+                            {formatCurrency(holding.current_price, portfolio.base_currency)}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {formatCurrency(holding.current_value, holding.currency)}
+                            {formatCurrency(holding.current_value, portfolio.base_currency)}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
                             <div className={`flex items-center justify-end gap-1 ${
@@ -370,7 +370,7 @@ export default function CryptoHoldingsPage() {
                               ) : (
                                 <TrendingDown className="h-4 w-4" />
                               )}
-                              {formatCurrency(holding.unrealized_gain_loss, holding.currency)}
+                              {formatCurrency(holding.unrealized_gain_loss, portfolio.base_currency)}
                             </div>
                           </td>
                           <td className="py-4 px-4 text-right font-mono">

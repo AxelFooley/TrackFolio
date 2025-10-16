@@ -221,23 +221,23 @@ class PriceFetcher:
         Returns:
             Dict with OHLCV data or None
         """
+        import asyncio
+
         try:
             # Resolve ticker using ISIN if provided
             resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
             logger.info(f"Fetching price for {ticker} (resolved: {resolved_ticker})")
-            
-            # Check if we're in an async context
-            try:
-                loop = asyncio.get_running_loop()
-                # We're in an async context - use run_coroutine_threadsafe or create new loop
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(
-                    lambda: asyncio.run(self.fetch_stock_price(resolved_ticker))
-                    ).result()
-            except RuntimeError:
-                # No running loop - safe to use asyncio.run
-                return asyncio.run(self.fetch_stock_price(resolved_ticker))
+
+            # Create a new event loop in a thread to run async function
+            def run_async_in_thread():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(PriceFetcher.fetch_stock_price(resolved_ticker))
+                finally:
+                    loop.close()
+
+            return run_async_in_thread()
         except Exception as e:
             logger.error(f"Error fetching latest price for {ticker}: {str(e)}")
             return None
@@ -270,20 +270,18 @@ class PriceFetcher:
             resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
             logger.info(f"Fetching historical prices for {ticker} (resolved: {resolved_ticker})")
 
-            # Check if we're in an async context
-            try:
-                loop = asyncio.get_running_loop()
-                # We're in an async context - use run_coroutine_threadsafe or create new loop
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(
-                        lambda: asyncio.run(self.fetch_historical_prices(resolved_ticker, start_date, end_date))
-                    ).result()
-            except RuntimeError:
-                # No running loop - safe to use asyncio.run
-                return asyncio.run(
-                    self.fetch_historical_prices(resolved_ticker, start_date, end_date)
-                )
+            # Create a new event loop in a thread to run async function
+            def run_async_in_thread():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(
+                        PriceFetcher.fetch_historical_prices(resolved_ticker, start_date, end_date)
+                    )
+                finally:
+                    loop.close()
+
+            return run_async_in_thread()
         except Exception as e:
             logger.error(f"Error fetching historical prices for {ticker}: {str(e)}")
             return []

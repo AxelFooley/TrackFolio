@@ -207,12 +207,12 @@ async def list_crypto_portfolios(
                 "created_at": portfolio.created_at,
                 "updated_at": portfolio.updated_at,
                 # Add currency-specific fields for frontend compatibility
-                "total_value_usd": metrics.total_value if portfolio.base_currency.value == 'USD' and metrics else None,
-                "total_value_eur": metrics.total_value if portfolio.base_currency.value == 'EUR' and metrics else None,
-                "total_profit_usd": metrics.total_profit_loss if portfolio.base_currency.value == 'USD' and metrics else None,
-                "total_profit_eur": metrics.total_profit_loss if portfolio.base_currency.value == 'EUR' and metrics else None,
-                "profit_percentage_usd": metrics.total_profit_loss_pct if portfolio.base_currency.value == 'USD' and metrics else None,
-                "profit_percentage_eur": metrics.total_profit_loss_pct if portfolio.base_currency.value == 'EUR' and metrics else None,
+                "total_value_usd": metrics.total_value if metrics and str(portfolio.base_currency) == 'USD' else None,
+                "total_value_eur": metrics.total_value if metrics and str(portfolio.base_currency) == 'EUR' else None,
+                "total_profit_usd": metrics.total_profit_loss if metrics and str(portfolio.base_currency) == 'USD' else None,
+                "total_profit_eur": metrics.total_profit_loss if metrics and str(portfolio.base_currency) == 'EUR' else None,
+                "profit_percentage_usd": metrics.total_profit_loss_pct if metrics and str(portfolio.base_currency) == 'USD' else None,
+                "profit_percentage_eur": metrics.total_profit_loss_pct if metrics and str(portfolio.base_currency) == 'EUR' else None,
                 # Keep original fields for backward compatibility
                 "total_value": metrics.total_value if metrics else None,
                 "total_cost_basis": metrics.total_cost_basis if metrics else None,
@@ -325,9 +325,57 @@ async def get_crypto_portfolio(
         # Add wallet sync status to the portfolio object
         if hasattr(portfolio, '__dict__'):
             portfolio.__dict__['wallet_sync_status'] = wallet_sync_status
+
+        # Get metrics for portfolio to create proper response with currency-specific fields
+        metrics = await calc_service.calculate_portfolio_metrics(portfolio_id)
+
+        # Convert portfolio to CryptoPortfolioResponse with currency-specific fields
+        if metrics:
+            portfolio_response = CryptoPortfolioResponse(
+                id=portfolio.id,
+                name=portfolio.name,
+                description=portfolio.description,
+                is_active=portfolio.is_active,
+                base_currency=portfolio.base_currency,
+                wallet_address=portfolio.wallet_address,
+                created_at=portfolio.created_at,
+                updated_at=portfolio.updated_at,
+                # Add currency-specific fields for frontend compatibility
+                total_value_usd=metrics.total_value if str(portfolio.base_currency) == 'USD' else None,
+                total_value_eur=metrics.total_value if str(portfolio.base_currency) == 'EUR' else None,
+                total_profit_usd=metrics.total_profit_loss if str(portfolio.base_currency) == 'USD' else None,
+                total_profit_eur=metrics.total_profit_loss if str(portfolio.base_currency) == 'EUR' else None,
+                profit_percentage_usd=metrics.total_profit_loss_pct if str(portfolio.base_currency) == 'USD' else None,
+                profit_percentage_eur=metrics.total_profit_loss_pct if str(portfolio.base_currency) == 'EUR' else None,
+                # Keep original fields for backward compatibility
+                total_value=metrics.total_value,
+                total_cost_basis=metrics.total_cost_basis,
+                total_profit_loss=metrics.total_profit_loss,
+                total_profit_loss_pct=metrics.total_profit_loss_pct,
+                transaction_count=metrics.transaction_count,
+                wallet_sync_status=wallet_sync_status
+            )
+            # Update the portfolio in the summary
+            summary['portfolio'] = portfolio_response
         else:
-            # For SQLAlchemy objects, we'll add this in the response serialization
-            summary['wallet_sync_status'] = wallet_sync_status
+            # If metrics calculation failed, still return portfolio with None values
+            portfolio_response = CryptoPortfolioResponse(
+                id=portfolio.id,
+                name=portfolio.name,
+                description=portfolio.description,
+                is_active=portfolio.is_active,
+                base_currency=portfolio.base_currency,
+                wallet_address=portfolio.wallet_address,
+                created_at=portfolio.created_at,
+                updated_at=portfolio.updated_at,
+                total_value=None,
+                total_cost_basis=None,
+                total_profit_loss=None,
+                total_profit_loss_pct=None,
+                transaction_count=0,
+                wallet_sync_status=wallet_sync_status
+            )
+            summary['portfolio'] = portfolio_response
 
         return summary
 
@@ -811,7 +859,13 @@ async def get_crypto_portfolio_performance(
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
         # Calculate date range based on range parameter
-        end_date = datetime.utcnow().date()
+        original_end_date = datetime.utcnow().date()
+        end_date = original_end_date
+
+        # Adjust end_date to exclude dates that likely don't have market data yet
+        if end_date >= date.today():
+            end_date = date.today() - timedelta(days=2)
+            logger.info(f"API: Adjusted end_date from {original_end_date} to {end_date} for data availability")
 
         if range == "1D":
             start_date = end_date - timedelta(days=1)
@@ -827,6 +881,8 @@ async def get_crypto_portfolio_performance(
             start_date = end_date - timedelta(days=365)
         else:  # ALL
             start_date = end_date - timedelta(days=365 * 5)  # 5 years max
+
+        logger.info(f"API: Using date range {start_date} to {end_date} for performance calculation")
 
         calc_service = CryptoCalculationService(db)
         performance_data = await calc_service.calculate_performance_history(
@@ -963,9 +1019,9 @@ async def get_crypto_prices(
     batch_results = price_fetcher.fetch_realtime_prices_batch(tickers)
     by_ticker = {d["ticker"]: d for d in batch_results if d and d.get("ticker")}
 
-    eur_rate = None
-    if currency.lower() == "eur":
-        eur_rate = await _get_usd_to_eur_rate()
+    conversion_rate = None
+    if currency.upper() != "USD":
+        conversion_rate = await _get_usd_to_eur_rate()
 
     prices: list[CryptoPriceData] = []
     for s in symbol_list:
@@ -973,8 +1029,8 @@ async def get_crypto_prices(
         if not data or not data.get("current_price"):
             continue
         price = data["current_price"]
-        if currency.lower() == "eur" and eur_rate:
-            price = price * eur_rate
+        if currency.upper() != "USD" and conversion_rate:
+            price = price * conversion_rate
         prices.append(CryptoPriceData(
             symbol=s,
             price=price,
@@ -1039,14 +1095,14 @@ async def get_crypto_price_history(
             yahoo_symbol, start_date=start_date, end_date=end_date
         )
 
-        eur_rate = None
-        if currency.lower() == "eur":
-            eur_rate = await _get_usd_to_eur_rate()
+        conversion_rate = None
+        if currency.upper() != "USD":
+            conversion_rate = await _get_usd_to_eur_rate()
 
         prices = []
         for dp in historical_prices:
             px = dp["close"]
-            px_conv = px * eur_rate if (eur_rate and currency.lower() == "eur") else px
+            px_conv = px * conversion_rate if (conversion_rate and currency.upper() != "USD") else px
             prices.append(CryptoHistoricalPrice(
                 date=dp["date"],
                 symbol=symbol.upper(),

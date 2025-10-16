@@ -270,16 +270,26 @@ class CryptoCalculationService:
     async def calculate_holdings(self, portfolio_id: int) -> List[CryptoHolding]:
         """
         Build current crypto holdings for a portfolio and enrich each holding with current price and unrealized P/L.
-        
+
         Parameters:
             portfolio_id (int): ID of the portfolio to compute holdings for.
-        
+
         Returns:
             List[CryptoHolding]: A list of holdings where each entry includes symbol, quantity, average cost, cost basis,
             current price (if available), current value (if price available), unrealized gain/loss and unrealized gain/loss
-            percentage (if calculable), first purchase date, and last transaction date. 
+            percentage (if calculable), first purchase date, and last transaction date.
         """
         try:
+            # Get portfolio to determine base currency
+            portfolio_result = await self.db.execute(
+                select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+            )
+            portfolio = portfolio_result.scalar_one_or_none()
+
+            if not portfolio:
+                logger.warning(f"Portfolio {portfolio_id} not found")
+                return []
+
             # Get all transactions
             transactions_result = await self.db.execute(
                 select(CryptoTransaction)
@@ -294,9 +304,9 @@ class CryptoCalculationService:
             # Calculate holdings
             holdings_data = await self._calculate_holdings(transactions)
 
-            # Get current prices
+            # Get current prices using portfolio's base currency
             symbols = list(holdings_data.keys())
-            current_prices = await self._get_current_prices(symbols, "EUR")  # Default to EUR
+            current_prices = await self._get_current_prices(symbols, portfolio.base_currency.value)
 
             # Convert to CryptoHolding objects
             holdings = []
@@ -316,7 +326,8 @@ class CryptoCalculationService:
                         ((current_value - data['cost_basis']) / data['cost_basis']) * 100
                     ) if current_value and data['cost_basis'] > 0 else None,
                     first_purchase_date=data['first_purchase_date'],
-                    last_transaction_date=data['last_transaction_date']
+                    last_transaction_date=data['last_transaction_date'],
+                    currency=portfolio.base_currency
                 )
                 holdings.append(holding)
 
@@ -334,16 +345,24 @@ class CryptoCalculationService:
     ) -> List[CryptoPerformanceData]:
         """
         Compute daily portfolio performance between start_date and end_date inclusive.
-        
+
         Parameters:
             portfolio_id (int): ID of the crypto portfolio to evaluate.
             start_date (date): Inclusive start date for the performance series.
             end_date (date): Inclusive end date for the performance series.
-        
+
         Returns:
-            List[CryptoPerformanceData]: One entry per calendar date from start_date to end_date containing portfolio value, cost basis, profit/loss, and profit/loss percentage for that date. 
+            List[CryptoPerformanceData]: One entry per calendar date from start_date to end_date containing portfolio value, cost basis, profit/loss, and profit/loss percentage for that date.
         """
         try:
+            # Adjust end_date to exclude today and yesterday (likely no market data)
+            today = date.today()
+            original_end_date = end_date
+            if end_date >= today:
+                # If end_date is today or future, set it to two days ago to ensure data availability
+                end_date = today - timedelta(days=2)
+                logger.info(f"Adjusted end_date from {original_end_date} to {end_date} for data availability")
+
             # Get all transactions up to end_date
             transactions_result = await self.db.execute(
                 select(CryptoTransaction)
@@ -355,9 +374,42 @@ class CryptoCalculationService:
             )
             transactions = transactions_result.scalars().all()
 
+            # Get portfolio base currency
+            portfolio_result = await self.db.execute(
+                select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+            )
+            portfolio = portfolio_result.scalar_one_or_none()
+
+            if not portfolio:
+                return []
+
+            base_currency = portfolio.base_currency.value
+
+            # Calculate holdings up to end_date to determine which symbols we need
+            holdings = await self._calculate_holdings(transactions)
+            symbols = list(holdings.keys())
+
+            # If no symbols, return empty performance data
+            if not symbols:
+                return []
+
+            # Fetch historical prices for the entire date range to enable forward-filling
+            all_historical_prices = {}
+            if symbols:
+                # Get prices for the full date range (we'll need these for forward-filling)
+                all_historical_prices = await self._get_historical_prices(
+                    symbols,
+                    start_date,
+                    end_date,
+                    base_currency
+                )
+
             # Generate daily performance data
             performance_data = []
             current_date = start_date
+
+            # Keep track of the last known prices for forward-filling
+            last_known_prices = {}
 
             while current_date <= end_date:
                 # Filter transactions up to current date
@@ -369,43 +421,45 @@ class CryptoCalculationService:
                 # Calculate holdings up to current date
                 holdings = await self._calculate_holdings(transactions_up_to_date)
 
-                # Get historical prices for current date
-                symbols = list(holdings.keys())
-                # Get portfolio base currency
-                portfolio_result = await self.db.execute(
-                    select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-                )
-                portfolio = portfolio_result.scalar_one_or_none()
-                base_currency = portfolio.base_currency.value if portfolio else "EUR"
-
-                historical_prices = await self._get_historical_prices(
-                    symbols,
-                    current_date,
-                    current_date,
-                    base_currency
-                )
-
                 # Calculate portfolio value
                 portfolio_value = Decimal("0")
                 cost_basis = sum(h['cost_basis'] for h in holdings.values())
 
+                # For each symbol, try to get price for current date, or use last known price
                 for symbol, holding_data in holdings.items():
-                    price_data = historical_prices.get(symbol, [{}])
-                    if price_data and 'price' in price_data[0]:
-                        portfolio_value += holding_data['quantity'] * price_data[0]['price']
+                    symbol_prices = all_historical_prices.get(symbol, [])
+
+                    # Try to find price for current date
+                    current_price = None
+                    if symbol_prices:
+                        for price_data in symbol_prices:
+                            if price_data['date'] == current_date:
+                                current_price = price_data['price']
+                                break
+
+                    # If no price for current date, use last known price (forward-fill)
+                    if current_price is None and symbol in last_known_prices:
+                        current_price = last_known_prices[symbol]
+
+                    # If we found a price (current or forward-filled), use it
+                    if current_price is not None:
+                        portfolio_value += holding_data['quantity'] * current_price
+                        last_known_prices[symbol] = current_price
 
                 profit_loss = portfolio_value - cost_basis
                 profit_loss_pct = float(
                     (profit_loss / cost_basis) * 100
                 ) if cost_basis > 0 else 0
 
-                performance_data.append(CryptoPerformanceData(
-                    date=current_date,
-                    portfolio_value=portfolio_value,
-                    cost_basis=cost_basis,
-                    profit_loss=profit_loss,
-                    profit_loss_pct=profit_loss_pct
-                ))
+                # Only add performance data if we have some portfolio value or cost basis
+                if portfolio_value > 0 or cost_basis > 0:
+                    performance_data.append(CryptoPerformanceData(
+                        date=current_date,
+                        portfolio_value=portfolio_value,
+                        cost_basis=cost_basis,
+                        profit_loss=profit_loss,
+                        profit_loss_pct=profit_loss_pct
+                    ))
 
                 current_date += timedelta(days=1)
 
@@ -520,13 +574,13 @@ class CryptoCalculationService:
                     price = price_data['current_price']
 
                     # Convert to target currency if needed (Yahoo returns USD)
-                    if currency.lower() == 'eur':
-                        # Get USD to EUR conversion rate
-                        eur_rate = await self._get_usd_to_eur_rate()
-                        if eur_rate:
-                            price = price * eur_rate
+                    if currency.upper() != 'USD':
+                        # Get USD to target currency conversion rate
+                        conversion_rate = await self._get_usd_to_eur_rate()  # Currently supports USD->EUR
+                        if conversion_rate:
+                            price = price * conversion_rate
                         else:
-                            logger.warning(f"Could not convert {symbol} price to EUR, using USD")
+                            logger.warning(f"Could not convert {symbol} price to {currency}, using USD")
 
                     prices[symbol] = {
                         'symbol': symbol,
@@ -553,13 +607,13 @@ class CryptoCalculationService:
     ) -> Dict[str, List[Dict]]:
         """
         Fetch historical price series for multiple symbols from Yahoo Finance and convert prices to the requested currency.
-        
+
         Parameters:
             symbols (List[str]): Crypto symbols to fetch (e.g., "BTC", "ETH").
             start_date (date): Inclusive start date for historical data.
             end_date (date): Inclusive end date for historical data.
             currency (str): Target currency for returned prices; case-insensitive. If 'EUR', USD prices are converted to EUR using the service's USD→EUR rate; otherwise prices are returned in USD.
-        
+
         Returns:
             Dict[str, List[Dict]]: Mapping from symbol to a list of price records. Each record contains:
                 - 'date' (date): The date of the price point.
@@ -569,33 +623,44 @@ class CryptoCalculationService:
                 - 'price_usd' (Decimal/float): The original USD close price from the source.
                 - 'timestamp' (datetime): Retrieval timestamp (UTC).
                 - 'source' (str): Data source identifier ('yahoo').
-        
+
         Notes:
-            Symbols for which no historical data is available are omitted from the returned dictionary.
+            If no data is available for the requested range, tries to fetch a wider range to get some data.
         """
         prices = {}
         price_fetcher = PriceFetcher()
 
+        # Try to get data for the requested range first
         for symbol in symbols:
             try:
                 # Add appropriate suffix for crypto symbols on Yahoo Finance
                 yahoo_symbol = f"{symbol}-USD" if symbol not in ['USDT', 'USDC'] else f"{symbol}-USD"
 
-                # Use Yahoo Finance to fetch historical prices
-                price_data = price_fetcher.fetch_historical_prices_sync(
+                # Use Yahoo Finance to fetch historical prices (call static method directly)
+                price_data = await PriceFetcher.fetch_historical_prices(
                     yahoo_symbol,
                     start_date=start_date,
                     end_date=end_date
                 )
 
+                # If no data for the requested range, try a wider range
+                if not price_data:
+                    logger.info(f"No data for {symbol} in requested range, trying wider range")
+                    wider_start_date = start_date - timedelta(days=30)  # Go back 30 more days
+                    price_data = await PriceFetcher.fetch_historical_prices(
+                        yahoo_symbol,
+                        start_date=wider_start_date,
+                        end_date=end_date
+                    )
+
                 if price_data:
                     # Convert to target currency if needed (Yahoo returns USD)
-                    if currency.lower() == 'eur':
-                        eur_rate = await self._get_usd_to_eur_rate()
-                        if eur_rate:
+                    if currency.upper() != 'USD':
+                        conversion_rate = await self._get_usd_to_eur_rate()  # Currently supports USD->EUR
+                        if conversion_rate:
                             for data_point in price_data:
-                                data_point['price'] = data_point['close'] * eur_rate
-                                data_point['currency'] = 'EUR'
+                                data_point['price'] = data_point['close'] * conversion_rate
+                                data_point['currency'] = currency.upper()
                         else:
                             for data_point in price_data:
                                 data_point['price'] = data_point['close']
@@ -619,6 +684,7 @@ class CryptoCalculationService:
                         })
 
                     prices[symbol] = formatted_data
+                    logger.info(f"Found {len(formatted_data)} price points for {symbol}")
                 else:
                     logger.warning(f"No historical data available for {symbol}")
             except Exception as e:
@@ -638,7 +704,7 @@ class CryptoCalculationService:
         try:
             price_fetcher = PriceFetcher()
             import asyncio
-            rate = await price_fetcher.fetch_fx_rate("USD", "EUR")
+            rate = await PriceFetcher.fetch_fx_rate("USD", "EUR")
             if rate:
                 return rate
             else:

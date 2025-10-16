@@ -19,6 +19,7 @@ import type { CryptoPosition } from '@/lib/types';
 
 interface CryptoHoldingsTableProps {
   portfolioId: number;
+  baseCurrency: 'USD' | 'EUR';
   limit?: number;
   showSearch?: boolean;
 }
@@ -33,7 +34,7 @@ interface CryptoHoldingsTableProps {
  * @param showSearch - When `true` (default), show the search input to filter results
  * @returns The rendered holdings table element
  */
-export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: CryptoHoldingsTableProps) {
+export function CryptoHoldingsTable({ portfolioId, baseCurrency, limit, showSearch = true }: CryptoHoldingsTableProps) {
   const router = useRouter();
   const { data: holdings, isLoading } = useCryptoHoldings(portfolioId);
   const [searchTerm, setSearchTerm] = useState('');
@@ -78,7 +79,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
 
   let filteredHoldings = holdings.filter((holding) =>
     holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase())
+    (holding.asset_name && holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   // Apply limit if specified
@@ -212,13 +213,13 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
                     {formatCryptoQuantity(holding.quantity)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.average_cost, holding.currency)}
+                    {formatCurrency(holding.average_cost, baseCurrency)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.current_price, holding.currency)}
+                    {formatCurrency(holding.current_price, baseCurrency)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.current_value, holding.currency)}
+                    {formatCurrency(holding.current_value, baseCurrency)}
                   </TableCell>
                   <TableCell
                     className={`text-right font-mono ${
@@ -231,7 +232,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
                       ) : (
                         <TrendingDown className="h-4 w-4" />
                       )}
-                      {formatCurrency(holding.unrealized_gain_loss, holding.currency)}
+                      {formatCurrency(holding.unrealized_gain_loss, baseCurrency)}
                     </div>
                   </TableCell>
                   <TableCell

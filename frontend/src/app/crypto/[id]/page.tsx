@@ -247,7 +247,7 @@ export default function CryptoPortfolioDetailPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <CryptoHoldingsTable portfolioId={portfolioId} />
+            <CryptoHoldingsTable portfolioId={portfolioId} baseCurrency={portfolio.base_currency} />
           </CardContent>
         </Card>
       </div>

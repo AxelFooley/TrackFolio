@@ -162,6 +162,7 @@ class CryptoHolding(BaseModel):
     realized_gain_loss: Optional[Decimal] = None
     first_purchase_date: Optional[date] = None
     last_transaction_date: Optional[date] = None
+    currency: Optional[CryptoCurrency] = None
 
 
 class CryptoPortfolioMetrics(BaseModel):
