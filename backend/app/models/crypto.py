@@ -70,6 +70,13 @@ class CryptoPortfolio(Base):
         comment="Bitcoin wallet address for paper wallet tracking (optional)"
     )
 
+    # Wallet sync tracking
+    wallet_last_sync_time: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=True,
+        comment="When the wallet was last successfully synced"
+    )
+
     # Metadata
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

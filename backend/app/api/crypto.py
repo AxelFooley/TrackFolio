@@ -815,20 +815,18 @@ async def get_wallet_sync_status(
             )
             last_blockchain_tx = last_blockchain_tx_result.scalar_one_or_none()
 
-            # Determine sync status based on transaction data
+            # Determine sync status based on transaction data and sync timestamp
             if total_blockchain_txs == 0:
                 status = "never"
+                last_sync_time = None
             else:
-                # Check if there are recent transactions (within last 7 days)
-                recent_threshold = datetime.utcnow() - timedelta(days=7)
-                if last_blockchain_tx and last_blockchain_tx >= recent_threshold:
-                    status = "synced"
-                else:
-                    status = "synced"  # Has transactions but not recent
+                status = "synced"
+                # Use the stored wallet_last_sync_time if available, otherwise fall back to last blockchain transaction
+                last_sync_time = portfolio.wallet_last_sync_time if portfolio.wallet_last_sync_time else last_blockchain_tx
 
             return {
                 "status": status,
-                "last_sync": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
+                "last_sync": last_sync_time.isoformat() if last_sync_time else None,
                 "transaction_count": total_blockchain_txs,
                 "error_message": None
             }
