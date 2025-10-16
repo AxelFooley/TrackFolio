@@ -505,8 +505,8 @@ class TestBlockchainIntegration:
                 mock_hashes.return_value = set()
 
                 # Mock the price fetcher to avoid Yahoo Finance calls
-                with patch('app.services.price_fetcher.fetch_current_prices') as mock_prices:
-                    mock_prices.return_value = {'BTC': {'price': Decimal('50000'), 'currency': 'USD'}}
+                with patch('app.services.price_fetcher_integration.UnifiedPriceFetcher.fetch_price_with_auto_detection') as mock_prices:
+                    mock_prices.return_value = {'current_price': Decimal('50000'), 'currency': 'USD'}
 
                     # Import the sync function
                     from app.tasks.blockchain_sync import sync_single_wallet
