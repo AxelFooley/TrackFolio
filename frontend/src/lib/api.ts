@@ -467,8 +467,6 @@ export async function syncWallet(portfolioId: number, walletAddress: string): Pr
     data: {
       portfolio_id: portfolioId,
       wallet_address: walletAddress,
-      max_transactions: 100,
-      days_back: 30
     },
   });
 }
