@@ -1,0 +1,29 @@
+# Celery Beat Scheduler Dockerfile for Portfolio Tracker
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    curl \
+    libgdbm-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for layer caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Health check - check if Beat scheduler is running (can't easily ping Beat, so check process)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD ps aux | grep -q '[c]elery.*beat' || exit 1
+
+# Run Celery Beat scheduler with RedBeat for Redis-backed schedule persistence
+CMD ["celery", "-A", "app.celery_app", "beat", "--scheduler", "redbeat.schedulers.RedBeatScheduler", "--loglevel=info"]

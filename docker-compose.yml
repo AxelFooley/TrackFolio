@@ -65,9 +65,8 @@ services:
   celery-worker:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.celery-worker
     container_name: portfolio-celery-worker
-    command: celery -A app.celery_app worker --loglevel=info
     environment:
       DATABASE_URL: postgresql://portfolio:portfolio@postgres:5432/portfolio_db
       REDIS_URL: redis://redis:6379/0
@@ -89,9 +88,8 @@ services:
   celery-beat:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.celery-beat
     container_name: portfolio-celery-beat
-    command: celery -A app.celery_app beat --scheduler redbeat.schedulers.RedBeatScheduler --loglevel=info
     environment:
       DATABASE_URL: postgresql://portfolio:portfolio@postgres:5432/portfolio_db
       REDIS_URL: redis://redis:6379/0
