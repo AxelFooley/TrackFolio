@@ -108,11 +108,27 @@ export async function getHoldings(): Promise<Position[]> {
 
 // Performance Data
 export async function getPerformanceData(range: string): Promise<PerformanceData[]> {
-  return apiRequest<PerformanceData[]>({
+  const response = await apiRequest<{
+    portfolio_data: Array<{ date: string; value: string | number }>;
+    benchmark_data: Array<{ date: string; value: string | number }>;
+  }>({
     method: 'GET',
     url: '/portfolio/performance',
     params: { range },
   });
+
+  // Transform backend response to frontend format
+  // Convert portfolio_data.value to portfolio, merge benchmark data by date
+  // Convert string values (Decimal) to numbers for Recharts
+  const benchmarkMap = new Map(
+    response.benchmark_data.map((b) => [b.date, parseFloat(String(b.value))])
+  );
+
+  return response.portfolio_data.map((point) => ({
+    date: point.date,
+    portfolio: parseFloat(String(point.value)), // Convert string to number for chart
+    ...(benchmarkMap.has(point.date) && { benchmark: benchmarkMap.get(point.date) }),
+  }));
 }
 
 // Asset Detail
@@ -125,11 +141,17 @@ export async function getAssetDetail(ticker: string): Promise<Position> {
 
 // Asset Prices
 export async function getAssetPrices(ticker: string, range: string): Promise<PerformanceData[]> {
-  return apiRequest<PerformanceData[]>({
+  const response = await apiRequest<Array<{ date: string; value: string | number }>>({
     method: 'GET',
     url: `/assets/${ticker}/prices`,
     params: { range },
   });
+
+  // Transform to PerformanceData format and convert string values to numbers
+  return response.map((point) => ({
+    date: point.date,
+    portfolio: parseFloat(String(point.value)),
+  }));
 }
 
 // Asset Transactions

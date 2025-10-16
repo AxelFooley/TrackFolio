@@ -138,10 +138,35 @@ async def get_portfolio_overview(db: AsyncSession = Depends(get_db)):
     )
     portfolio_metrics = portfolio_metrics_result.scalar_one_or_none()
 
-    # Get today's gain/loss (would need yesterday's snapshot)
-    # For now, return None
-    today_gain_loss = None
+    # Calculate today's gain/loss by summing all positions' today changes
+    today_gain_loss = Decimal("0")
+    total_previous_value = Decimal("0")
+
+    for position in positions:
+        # Get latest and previous prices for each position
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == position.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(2)
+        )
+        price_history = price_result.scalars().all()
+
+        if price_history and len(price_history) >= 2:
+            latest_price = price_history[0]
+            previous_price = price_history[1]
+
+            # Add to today's change
+            price_change = latest_price.close - previous_price.close
+            today_gain_loss += position.quantity * price_change
+
+            # Track previous value for percentage calculation
+            total_previous_value += position.quantity * previous_price.close
+
+    # Calculate percentage change
     today_gain_loss_pct = None
+    if total_previous_value > 0:
+        today_gain_loss_pct = float((today_gain_loss / total_previous_value) * 100)
 
     # Get average annual return from portfolio metrics
     average_annual_return = None

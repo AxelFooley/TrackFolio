@@ -293,6 +293,8 @@ class PriceFetcher:
         Uses fast_info for quick intraday price retrieval.
         Results are cached for 30 seconds to reduce API load.
 
+        Gracefully falls back from ISIN to ticker if resolution fails.
+
         Args:
             ticker: Stock ticker symbol (broker format)
             isin: Optional ISIN code for ticker resolution
@@ -313,32 +315,20 @@ class PriceFetcher:
             resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
             logger.info(f"Fetching real-time price for {ticker} (resolved: {resolved_ticker})")
 
-            # Use yfinance Ticker.fast_info for quick access
-            stock = yf.Ticker(resolved_ticker)
+            # Try to fetch price with resolved ticker, with fallback to original ticker
+            price_data = None
 
-            # Try to get current price from fast_info
-            try:
-                current_price = stock.fast_info.get('lastPrice')
-                previous_close = stock.fast_info.get('previousClose')
-            except Exception:
-                # Fallback to regular history if fast_info fails
-                logger.debug(f"fast_info failed for {resolved_ticker}, falling back to history")
-                hist = stock.history(period="1d", interval="1m")
-                if hist.empty:
-                    logger.warning(f"No real-time data for {resolved_ticker}")
-                    return None
-                current_price = float(hist['Close'].iloc[-1])
-                # Get previous close from info
-                info = stock.info
-                previous_close = info.get('previousClose', info.get('regularMarketPreviousClose'))
+            # First attempt: use resolved ticker
+            # Logging about which ticker was used happens inside _fetch_price_with_fallback
+            price_data, _ = self._fetch_price_with_fallback(resolved_ticker, ticker)
 
-            if current_price is None or previous_close is None:
-                logger.warning(f"Missing price data for {resolved_ticker}")
+            if price_data is None:
+                logger.warning(f"Failed to fetch price for {ticker}")
                 return None
 
             # Convert to Decimal
-            current_price = Decimal(str(current_price))
-            previous_close = Decimal(str(previous_close))
+            current_price = Decimal(str(price_data["current_price"]))
+            previous_close = Decimal(str(price_data["previous_close"]))
 
             # Calculate change
             change_amount = current_price - previous_close
@@ -365,6 +355,88 @@ class PriceFetcher:
         except Exception as e:
             logger.error(f"Error fetching real-time price for {ticker}: {str(e)}")
             return None
+
+    def _fetch_price_with_fallback(self, resolved_ticker: str, fallback_ticker: str) -> Tuple[Optional[Dict], bool]:
+        """
+        Attempt to fetch price with resolved ticker, falling back to original ticker if needed.
+
+        Args:
+            resolved_ticker: Primary ticker to try (may be ISIN)
+            fallback_ticker: Fallback ticker if resolved fails
+
+        Returns:
+            Tuple of (price_data dict or None, fallback_used boolean)
+        """
+        # Try resolved ticker first
+        try:
+            stock = yf.Ticker(resolved_ticker)
+
+            # Try to get current price from fast_info
+            try:
+                current_price = stock.fast_info.get('lastPrice')
+                previous_close = stock.fast_info.get('previousClose')
+            except Exception:
+                # Fallback to regular history if fast_info fails
+                logger.debug(f"fast_info failed for {resolved_ticker}, falling back to history")
+                hist = stock.history(period="1d", interval="1m")
+                if hist.empty:
+                    logger.debug(f"No real-time data for {resolved_ticker}")
+                    current_price = None
+                    previous_close = None
+                else:
+                    current_price = float(hist['Close'].iloc[-1])
+                    # Get previous close from info
+                    info = stock.info
+                    previous_close = info.get('previousClose', info.get('regularMarketPreviousClose'))
+
+            if current_price is not None and previous_close is not None:
+                logger.debug(f"Successfully fetched price for {resolved_ticker}")
+                return {
+                    "current_price": current_price,
+                    "previous_close": previous_close
+                }, False
+
+            # If we got here, resolved ticker didn't work
+            logger.warning(f"Missing price data for {resolved_ticker}, trying fallback {fallback_ticker}")
+
+        except Exception as e:
+            logger.warning(f"Error fetching with {resolved_ticker}: {str(e)}, trying fallback {fallback_ticker}")
+
+        # Try fallback ticker if different and we haven't already
+        if fallback_ticker != resolved_ticker:
+            try:
+                stock = yf.Ticker(fallback_ticker)
+
+                # Try to get current price from fast_info
+                try:
+                    current_price = stock.fast_info.get('lastPrice')
+                    previous_close = stock.fast_info.get('previousClose')
+                except Exception:
+                    logger.debug(f"fast_info failed for {fallback_ticker}, falling back to history")
+                    hist = stock.history(period="1d", interval="1m")
+                    if hist.empty:
+                        logger.debug(f"No real-time data for {fallback_ticker}")
+                        return None, True
+                    current_price = float(hist['Close'].iloc[-1])
+                    # Get previous close from info
+                    info = stock.info
+                    previous_close = info.get('previousClose', info.get('regularMarketPreviousClose'))
+
+                if current_price is not None and previous_close is not None:
+                    logger.info(f"Successfully fetched price using fallback ticker {fallback_ticker}")
+                    return {
+                        "current_price": current_price,
+                        "previous_close": previous_close
+                    }, True
+
+                logger.warning(f"Missing price data for fallback {fallback_ticker}")
+                return None, True
+
+            except Exception as e:
+                logger.error(f"Error fetching with fallback {fallback_ticker}: {str(e)}")
+                return None, True
+
+        return None, False
 
     def fetch_realtime_prices_batch(
         self,
