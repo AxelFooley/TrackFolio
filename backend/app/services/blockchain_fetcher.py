@@ -37,10 +37,7 @@ class BlockchainFetcherService:
     """
     Service for fetching Bitcoin blockchain transactions.
 
-    Supports multiple blockchain APIs with automatic fallback:
-    1. Blockstream API (primary) - Reliable, free, no API key required
-    2. Blockchain.com API (fallback) - Good backup option
-    3. BlockCypher API (fallback) - Alternative with rate limits
+    Uses blockchain.info API (https://blockchain.info/rawaddr/{address}) for reliable transaction fetching.
     """
 
     def __init__(self):
@@ -624,32 +621,29 @@ class BlockchainFetcherService:
             logger.info(f"Cache hit for wallet transactions: {wallet_address}")
             return cached_result
 
-        # Try different APIs in order
-        apis_to_try = ['blockstream', 'blockchain_com', 'blockcypher']
+        # Use blockchain.info API (most reliable)
+        try:
+            logger.info(f"Fetching transactions for wallet {wallet_address} using blockchain.info API")
+            result = self._fetch_transactions_from_api(
+                'blockchain_com', wallet_address, portfolio_id, max_transactions, days_back
+            )
 
-        for api_name in apis_to_try:
-            try:
-                logger.info(f"Trying {api_name} API for wallet {wallet_address}")
-                result = self._fetch_transactions_from_api(
-                    api_name, wallet_address, portfolio_id, max_transactions, days_back
-                )
+            if result and result.get('transactions'):
+                logger.info(f"Successfully fetched {len(result['transactions'])} transactions using blockchain.info API")
 
-                if result and result.get('transactions'):
-                    logger.info(f"Successfully fetched {len(result['transactions'])} transactions using {api_name} API")
+                # Cache the result
+                self._cache_set(cache_key, result, self.TRANSACTION_CACHE_TTL)
 
-                    # Cache the result
-                    self._cache_set(cache_key, result, self.TRANSACTION_CACHE_TTL)
+                return result
+            else:
+                # API returned no transactions
+                error_msg = f"No transactions returned from blockchain.info API for wallet {wallet_address}"
+                logger.error(error_msg)
+                raise BlockchainFetchError(error_msg)
 
-                    return result
-
-            except Exception as e:
-                logger.warning(f"Failed to fetch transactions using {api_name} API: {e}")
-                continue
-
-        # All APIs failed
-        error_msg = f"Failed to fetch transactions from all blockchain APIs for wallet {wallet_address}"
-        logger.error(error_msg)
-        raise BlockchainFetchError(error_msg)
+        except Exception as e:
+            logger.error(f"Failed to fetch transactions from blockchain.info API: {e}")
+            raise BlockchainFetchError(f"Blockchain API error: {str(e)}")
 
     def _fetch_transactions_from_api(
         self,
