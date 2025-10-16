@@ -35,6 +35,9 @@ jobs:
             echo "tag=latest" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
             echo "tag=dev" >> $GITHUB_OUTPUT
+          else
+            # For PRs and other branches, use the short SHA
+            echo "tag=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
           fi
 
       - name: Set backend image name
