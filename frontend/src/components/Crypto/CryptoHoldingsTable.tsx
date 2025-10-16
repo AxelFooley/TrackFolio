@@ -19,6 +19,7 @@ import type { CryptoPosition } from '@/lib/types';
 
 interface CryptoHoldingsTableProps {
   portfolioId: number;
+  baseCurrency: 'USD' | 'EUR';
   limit?: number;
   showSearch?: boolean;
 }
@@ -33,7 +34,7 @@ interface CryptoHoldingsTableProps {
  * @param showSearch - When `true` (default), show the search input to filter results
  * @returns The rendered holdings table element
  */
-export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: CryptoHoldingsTableProps) {
+export function CryptoHoldingsTable({ portfolioId, baseCurrency, limit, showSearch = true }: CryptoHoldingsTableProps) {
   const router = useRouter();
   const { data: holdings, isLoading } = useCryptoHoldings(portfolioId);
   const [searchTerm, setSearchTerm] = useState('');
@@ -78,7 +79,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
 
   let filteredHoldings = holdings.filter((holding) =>
     holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase())
+    (holding.asset_name && holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   // Apply limit if specified
@@ -169,7 +170,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('unrealized_gain')}
+                onClick={() => handleSort('unrealized_gain_loss')}
               >
                 <div className="flex items-center justify-end gap-2">
                   Profit
@@ -178,7 +179,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
               </TableHead>
               <TableHead
                 className="cursor-pointer text-right"
-                onClick={() => handleSort('return_percentage')}
+                onClick={() => handleSort('unrealized_gain_loss_pct')}
               >
                 <div className="flex items-center justify-end gap-2">
                   Return %
@@ -189,10 +190,10 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
           </TableHeader>
           <TableBody>
             {sortedHoldings.map((holding) => {
-              const isPositive = holding.unrealized_gain >= 0;
-              const rawPct = holding.return_percentage;
+              const isPositive = holding.unrealized_gain_loss >= 0;
+              const rawPct = holding.unrealized_gain_loss_pct;
               const hasPct = rawPct !== null && rawPct !== undefined;
-              const returnPercentage = hasPct ? rawPct * 100 : null;
+              const returnPercentage = hasPct ? rawPct : null;  // rawPct is already a percentage value from backend
               return (
                 <TableRow
                   key={holding.symbol}
@@ -212,13 +213,13 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
                     {formatCryptoQuantity(holding.quantity)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.average_cost, holding.currency)}
+                    {formatCurrency(holding.average_cost, baseCurrency)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.current_price, holding.currency)}
+                    {formatCurrency(holding.current_price, baseCurrency)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {formatCurrency(holding.current_value, holding.currency)}
+                    {formatCurrency(holding.current_value, baseCurrency)}
                   </TableCell>
                   <TableCell
                     className={`text-right font-mono ${
@@ -231,7 +232,7 @@ export function CryptoHoldingsTable({ portfolioId, limit, showSearch = true }: C
                       ) : (
                         <TrendingDown className="h-4 w-4" />
                       )}
-                      {formatCurrency(holding.unrealized_gain, holding.currency)}
+                      {formatCurrency(holding.unrealized_gain_loss, baseCurrency)}
                     </div>
                   </TableCell>
                   <TableCell

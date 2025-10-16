@@ -5,18 +5,18 @@ import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useCryptoPortfolio, useCryptoPortfolioMetrics, useCryptoHoldings, useRefreshCryptoPrices } from '@/hooks/useCrypto';
+import { useCryptoPortfolio, useCryptoHoldings, useRefreshCryptoPrices } from '@/hooks/useCrypto';
 import { formatCurrency, formatPercentage, formatDate } from '@/lib/utils';
-import { Bitcoin, TrendingUp, TrendingDown, ArrowLeft, RefreshCw, Eye, Plus } from 'lucide-react';
+import { Bitcoin, ArrowLeft, RefreshCw, Eye, Plus } from 'lucide-react';
 import { CryptoHoldingsTable } from '@/components/Crypto/CryptoHoldingsTable';
 import { CryptoPriceChart } from '@/components/Crypto/CryptoPriceChart';
 import { WalletSync } from '@/components/Crypto/WalletSync';
 import { useToast } from '@/hooks/use-toast';
 
 /**
- * Render the detailed view for a cryptocurrency portfolio, including overview metrics, a performance chart with selectable time ranges, portfolio metrics (best/worst performer and largest position), optional wallet sync, and a holdings table.
+ * Render the detailed view for a cryptocurrency portfolio, including overview metrics, a performance chart with selectable time ranges, optional wallet sync, and a holdings table.
  *
- * Fetches portfolio, metrics, and holdings data for the ID from route params; exposes a refresh action that updates live prices and shows success or error toasts, and provides navigation actions for adding transactions and viewing holdings.
+ * Fetches portfolio and holdings data for the ID from route params; exposes a refresh action that updates live prices and shows success or error toasts, and provides navigation actions for adding transactions and viewing holdings.
  *
  * @returns The React element for the crypto portfolio detail page.
  */
@@ -26,7 +26,6 @@ export default function CryptoPortfolioDetailPage() {
   const portfolioId = parseInt(params.id as string);
 
   const { data: portfolio, isLoading: portfolioLoading } = useCryptoPortfolio(portfolioId);
-  const { data: metrics, isLoading: metricsLoading } = useCryptoPortfolioMetrics(portfolioId);
   const { data: holdings, isLoading: holdingsLoading } = useCryptoHoldings(portfolioId);
   const refreshPricesMutation = useRefreshCryptoPrices();
   const { toast } = useToast();
@@ -222,74 +221,6 @@ export default function CryptoPortfolioDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Portfolio Metrics */}
-        {metrics && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-gray-600">
-                  Best Performer
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {metrics.best_performer ? (
-                  <div>
-                    <p className="font-semibold">{metrics.best_performer.symbol}</p>
-                    <p className="text-sm text-gray-600">{metrics.best_performer.asset_name}</p>
-                    <p className="text-sm text-success">
-                      {formatPercentage(metrics.best_performer.return_percentage)}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-gray-500">No data available</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-gray-600">
-                  Worst Performer
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {metrics.worst_performer ? (
-                  <div>
-                    <p className="font-semibold">{metrics.worst_performer.symbol}</p>
-                    <p className="text-sm text-gray-600">{metrics.worst_performer.asset_name}</p>
-                    <p className="text-sm text-danger">
-                      {formatPercentage(metrics.worst_performer.return_percentage)}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-gray-500">No data available</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-gray-600">
-                  Largest Position
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {metrics.largest_position ? (
-                  <div>
-                    <p className="font-semibold">{metrics.largest_position.symbol}</p>
-                    <p className="text-sm text-gray-600">{metrics.largest_position.asset_name}</p>
-                    <p className="text-sm">
-                      {formatCurrency(metrics.largest_position.current_value, currency)}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-gray-500">No data available</p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
         {/* Wallet Sync Section */}
         {portfolio.wallet_address && (
           <WalletSync portfolioId={portfolioId} walletAddress={portfolio.wallet_address} />
@@ -316,7 +247,7 @@ export default function CryptoPortfolioDetailPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <CryptoHoldingsTable portfolioId={portfolioId} />
+            <CryptoHoldingsTable portfolioId={portfolioId} baseCurrency={portfolio.base_currency} />
           </CardContent>
         </Card>
       </div>

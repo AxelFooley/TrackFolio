@@ -65,7 +65,7 @@ export default function CryptoHoldingsPage() {
   // Filter and sort holdings
   let filteredHoldings = holdings?.filter((holding) =>
     holding.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase())
+    (holding.asset_name && holding.asset_name.toLowerCase().includes(searchTerm.toLowerCase()))
   ) || [];
 
   const sortedHoldings = [...filteredHoldings].sort((a, b) => {
@@ -88,7 +88,7 @@ export default function CryptoHoldingsPage() {
   // Calculate totals
   const totalValue = holdings?.reduce((sum, h) => sum + h.current_value, 0) || 0;
   const totalCostBasis = holdings?.reduce((sum, h) => sum + h.cost_basis, 0) || 0;
-  const totalProfit = holdings?.reduce((sum, h) => sum + h.unrealized_gain, 0) || 0;
+  const totalProfit = holdings?.reduce((sum, h) => sum + h.unrealized_gain_loss, 0) || 0;
   const totalReturnPercent = totalCostBasis > 0 ? (totalProfit / totalCostBasis) * 100 : 0;
 
   return (
@@ -311,7 +311,7 @@ export default function CryptoHoldingsPage() {
                       </th>
                       <th
                         className="text-right py-3 px-4 cursor-pointer"
-                        onClick={() => handleSort('unrealized_gain')}
+                        onClick={() => handleSort('unrealized_gain_loss')}
                       >
                         <div className="flex items-center justify-end gap-2">
                           Profit
@@ -320,7 +320,7 @@ export default function CryptoHoldingsPage() {
                       </th>
                       <th
                         className="text-right py-3 px-4 cursor-pointer"
-                        onClick={() => handleSort('return_percentage')}
+                        onClick={() => handleSort('unrealized_gain_loss_pct')}
                       >
                         <div className="flex items-center justify-end gap-2">
                           Return %
@@ -332,8 +332,8 @@ export default function CryptoHoldingsPage() {
                   </thead>
                   <tbody>
                     {sortedHoldings.map((holding) => {
-                      const isPositive = holding.unrealized_gain >= 0;
-                      const returnPercentage = holding.return_percentage;
+                      const isPositive = holding.unrealized_gain_loss >= 0;
+                      const returnPercentage = holding.unrealized_gain_loss_pct;
 
                       return (
                         <tr
@@ -353,13 +353,13 @@ export default function CryptoHoldingsPage() {
                             {formatCryptoQuantity(holding.quantity)}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {formatCurrency(holding.average_cost, holding.currency)}
+                            {formatCurrency(holding.average_cost, portfolio.base_currency)}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {formatCurrency(holding.current_price, holding.currency)}
+                            {formatCurrency(holding.current_price, portfolio.base_currency)}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {formatCurrency(holding.current_value, holding.currency)}
+                            {formatCurrency(holding.current_value, portfolio.base_currency)}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
                             <div className={`flex items-center justify-end gap-1 ${
@@ -370,18 +370,18 @@ export default function CryptoHoldingsPage() {
                               ) : (
                                 <TrendingDown className="h-4 w-4" />
                               )}
-                              {formatCurrency(holding.unrealized_gain, holding.currency)}
+                              {formatCurrency(holding.unrealized_gain_loss, portfolio.base_currency)}
                             </div>
                           </td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {holding.return_percentage === null || holding.return_percentage === undefined ? (
+                            {holding.unrealized_gain_loss_pct === null || holding.unrealized_gain_loss_pct === undefined ? (
                               <Badge variant="outline" className="text-xs">—</Badge>
                             ) : (
                               <Badge
-                                variant={holding.return_percentage >= 0 ? 'default' : 'destructive'}
+                                variant={holding.unrealized_gain_loss_pct >= 0 ? 'default' : 'destructive'}
                                 className="text-xs"
                               >
-                                {formatPercentage(holding.return_percentage * 100)}
+                                {formatPercentage(holding.unrealized_gain_loss_pct * 100)}
                               </Badge>
                             )}
                           </td>

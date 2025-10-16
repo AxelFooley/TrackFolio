@@ -196,6 +196,8 @@ async def list_crypto_portfolios(
                     "wallet_configured": False
                 }
 
+            # Build portfolio response with currency-specific fields
+            base_currency_str = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
             portfolio_dict = {
                 "id": portfolio.id,
                 "name": portfolio.name,
@@ -205,6 +207,14 @@ async def list_crypto_portfolios(
                 "wallet_address": portfolio.wallet_address,
                 "created_at": portfolio.created_at,
                 "updated_at": portfolio.updated_at,
+                # Add currency-specific fields for frontend compatibility
+                "total_value_usd": metrics.total_value if metrics and base_currency_str == 'USD' else None,
+                "total_value_eur": metrics.total_value if metrics and base_currency_str == 'EUR' else None,
+                "total_profit_usd": metrics.total_profit_loss if metrics and base_currency_str == 'USD' else None,
+                "total_profit_eur": metrics.total_profit_loss if metrics and base_currency_str == 'EUR' else None,
+                "profit_percentage_usd": metrics.total_profit_loss_pct if metrics and base_currency_str == 'USD' else None,
+                "profit_percentage_eur": metrics.total_profit_loss_pct if metrics and base_currency_str == 'EUR' else None,
+                # Keep original fields for backward compatibility
                 "total_value": metrics.total_value if metrics else None,
                 "total_cost_basis": metrics.total_cost_basis if metrics else None,
                 "total_profit_loss": metrics.total_profit_loss if metrics else None,
@@ -223,34 +233,40 @@ async def list_crypto_portfolios(
         raise HTTPException(status_code=500, detail=f"Failed to list portfolios: {str(e)}")
 
 
-@router.get("/portfolios/{portfolio_id}", response_model=CryptoPortfolioSummary)
+@router.get("/portfolios/{portfolio_id}", response_model=CryptoPortfolioResponse)
 async def get_crypto_portfolio(
     portfolio_id: int,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Retrieve a detailed portfolio summary including computed metrics, holdings, and wallet sync status.
-    
+    Retrieve a detailed portfolio including computed metrics and wallet sync status.
+
     Parameters:
         portfolio_id (int): ID of the portfolio to retrieve.
-    
+
     Returns:
-        dict: A summary object containing at least a `portfolio` entry (portfolio details), computed metrics and holdings, and a `wallet_sync_status` object with wallet configuration and recent blockchain transaction info.
-    
+        CryptoPortfolioResponse: Portfolio object with all currency-specific fields populated based on base_currency and wallet_sync_status.
+
     Raises:
-        HTTPException: 404 if the portfolio is not found; 500 if an unexpected error occurs while retrieving or composing the summary.
+        HTTPException: 404 if the portfolio is not found; 500 if an unexpected error occurs while retrieving.
     """
     try:
         calc_service = CryptoCalculationService(db)
-        summary = await calc_service.calculate_portfolio_summary(portfolio_id)
 
-        if not summary or not summary.get('portfolio'):
+        # Get portfolio
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
-        # Add wallet sync status to portfolio response
-        portfolio = summary['portfolio']
-        wallet_sync_status = None
+        # Get metrics
+        metrics = await calc_service.calculate_portfolio_metrics(portfolio_id)
 
+        # Get wallet sync status
+        wallet_sync_status = None
         if portfolio.wallet_address:
             try:
                 # Get recent blockchain transaction count for sync status
@@ -313,14 +329,34 @@ async def get_crypto_portfolio(
                 "wallet_configured": False
             }
 
-        # Add wallet sync status to the portfolio object
-        if hasattr(portfolio, '__dict__'):
-            portfolio.__dict__['wallet_sync_status'] = wallet_sync_status
-        else:
-            # For SQLAlchemy objects, we'll add this in the response serialization
-            summary['wallet_sync_status'] = wallet_sync_status
+        # Convert to CryptoPortfolioResponse with currency-specific fields
+        base_currency_str = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
+        portfolio_response = CryptoPortfolioResponse(
+            id=portfolio.id,
+            name=portfolio.name,
+            description=portfolio.description,
+            is_active=portfolio.is_active,
+            base_currency=portfolio.base_currency,
+            wallet_address=portfolio.wallet_address,
+            created_at=portfolio.created_at,
+            updated_at=portfolio.updated_at,
+            # Add currency-specific fields for frontend compatibility
+            total_value_usd=metrics.total_value if metrics and base_currency_str == 'USD' else None,
+            total_value_eur=metrics.total_value if metrics and base_currency_str == 'EUR' else None,
+            total_profit_usd=metrics.total_profit_loss if metrics and base_currency_str == 'USD' else None,
+            total_profit_eur=metrics.total_profit_loss if metrics and base_currency_str == 'EUR' else None,
+            profit_percentage_usd=metrics.total_profit_loss_pct if metrics and base_currency_str == 'USD' else None,
+            profit_percentage_eur=metrics.total_profit_loss_pct if metrics and base_currency_str == 'EUR' else None,
+            # Keep original fields for backward compatibility
+            total_value=metrics.total_value if metrics else None,
+            total_cost_basis=metrics.total_cost_basis if metrics else None,
+            total_profit_loss=metrics.total_profit_loss if metrics else None,
+            total_profit_loss_pct=metrics.total_profit_loss_pct if metrics else None,
+            transaction_count=metrics.transaction_count if metrics else 0,
+            wallet_sync_status=wallet_sync_status
+        )
 
-        return summary
+        return portfolio_response
 
     except HTTPException:
         raise
@@ -584,8 +620,10 @@ async def list_crypto_transactions(
         transactions = result.scalars().all()
 
         return CryptoTransactionList(
-            transactions=transactions,
-            total_count=total_count
+            items=transactions,
+            total=total_count,
+            skip=skip,
+            limit=limit
         )
 
     except HTTPException:
@@ -704,6 +742,113 @@ async def delete_crypto_transaction(
         raise HTTPException(status_code=500, detail=f"Failed to delete transaction: {str(e)}")
 
 
+# Wallet Sync Status Endpoint
+
+@router.get("/portfolios/{portfolio_id}/wallet-sync-status")
+async def get_wallet_sync_status(
+    portfolio_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get wallet synchronization status for a crypto portfolio.
+
+    Returns detailed information about the wallet sync state including:
+    - Current sync status (synced, syncing, error, never, disabled)
+    - Last sync timestamp
+    - Transaction counts (total and recent)
+    - Error messages if applicable
+
+    Parameters:
+        portfolio_id (int): ID of the portfolio to check wallet sync status for.
+
+    Returns:
+        dict: Wallet sync status information with keys:
+            - status: Current sync state
+            - last_sync: ISO timestamp of last successful sync (optional)
+            - transaction_count: Total blockchain transactions synced (optional)
+            - error_message: Error details if status is 'error' (optional)
+
+    Raises:
+        HTTPException: 404 if the portfolio does not exist; 500 for unexpected errors.
+    """
+    try:
+        # Verify portfolio exists
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # If no wallet address configured, return disabled status
+        if not portfolio.wallet_address:
+            return {
+                "status": "disabled",
+                "last_sync": None,
+                "transaction_count": None,
+                "error_message": None
+            }
+
+        try:
+            # Get total blockchain transactions for this portfolio
+            total_blockchain_tx_count = await db.execute(
+                select(func.count(CryptoTransaction.id))
+                .where(
+                    and_(
+                        CryptoTransaction.portfolio_id == portfolio_id,
+                        CryptoTransaction.exchange == 'Bitcoin Blockchain'
+                    )
+                )
+            )
+            total_blockchain_txs = total_blockchain_tx_count.scalar() or 0
+
+            # Get last blockchain transaction date
+            last_blockchain_tx_result = await db.execute(
+                select(CryptoTransaction.timestamp)
+                .where(
+                    and_(
+                        CryptoTransaction.portfolio_id == portfolio_id,
+                        CryptoTransaction.exchange == 'Bitcoin Blockchain'
+                    )
+                )
+                .order_by(CryptoTransaction.timestamp.desc())
+                .limit(1)
+            )
+            last_blockchain_tx = last_blockchain_tx_result.scalar_one_or_none()
+
+            # Determine sync status based on transaction data and sync timestamp
+            if total_blockchain_txs == 0:
+                status = "never"
+                last_sync_time = None
+            else:
+                status = "synced"
+                # Use the stored wallet_last_sync_time if available, otherwise fall back to last blockchain transaction
+                last_sync_time = portfolio.wallet_last_sync_time if portfolio.wallet_last_sync_time else last_blockchain_tx
+
+            return {
+                "status": status,
+                "last_sync": last_sync_time.isoformat() if last_sync_time else None,
+                "transaction_count": total_blockchain_txs,
+                "error_message": None
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching wallet sync status for portfolio {portfolio_id}: {e}")
+            return {
+                "status": "error",
+                "last_sync": None,
+                "transaction_count": None,
+                "error_message": f"Failed to retrieve wallet sync status: {str(e)}"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get wallet sync status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get wallet sync status: {str(e)}")
+
+
 # Metrics and Analytics Endpoints
 
 @router.get("/portfolios/{portfolio_id}/metrics", response_model=CryptoPortfolioMetrics)
@@ -713,13 +858,13 @@ async def get_crypto_portfolio_metrics(
 ):
     """
     Retrieve computed metrics for a crypto portfolio.
-    
+
     Parameters:
         portfolio_id (int): ID of the portfolio to compute metrics for.
-    
+
     Returns:
         CryptoPortfolioMetrics: Calculated portfolio metrics for the given portfolio.
-    
+
     Raises:
         HTTPException: 404 if the portfolio does not exist.
         HTTPException: 500 if an unexpected error prevents metrics calculation.
@@ -768,6 +913,47 @@ async def get_crypto_portfolio_holdings(
         raise HTTPException(status_code=500, detail=f"Failed to calculate holdings: {str(e)}")
 
 
+@router.get("/portfolios/{portfolio_id}/holdings/{symbol}", response_model=CryptoHolding)
+async def get_crypto_holding(
+    portfolio_id: int,
+    symbol: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve a specific crypto holding by symbol for a portfolio.
+
+    Parameters:
+        portfolio_id (int): ID of the portfolio.
+        symbol (str): Crypto symbol (e.g., BTC, ETH).
+
+    Returns:
+        CryptoHolding: The holding for the specified symbol.
+
+    Raises:
+        HTTPException: 404 if the portfolio does not exist or symbol not held; 500 if calculation fails.
+    """
+    try:
+        calc_service = CryptoCalculationService(db)
+        holdings = await calc_service.calculate_holdings(portfolio_id)
+
+        if holdings is None:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # Find the specific holding by symbol (case-insensitive)
+        symbol_upper = symbol.upper()
+        holding = next((h for h in holdings if h.symbol == symbol_upper), None)
+
+        if not holding:
+            raise HTTPException(status_code=404, detail=f"No holdings found for symbol {symbol}")
+
+        return holding
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get holding: {str(e)}")
+
+
 @router.get("/portfolios/{portfolio_id}/performance")
 async def get_crypto_portfolio_performance(
     portfolio_id: int,
@@ -802,7 +988,13 @@ async def get_crypto_portfolio_performance(
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
         # Calculate date range based on range parameter
-        end_date = datetime.utcnow().date()
+        original_end_date = datetime.utcnow().date()
+        end_date = original_end_date
+
+        # Adjust end_date to exclude dates that likely don't have market data yet
+        if end_date >= date.today():
+            end_date = date.today() - timedelta(days=2)
+            logger.info(f"API: Adjusted end_date from {original_end_date} to {end_date} for data availability")
 
         if range == "1D":
             start_date = end_date - timedelta(days=1)
@@ -818,6 +1010,8 @@ async def get_crypto_portfolio_performance(
             start_date = end_date - timedelta(days=365)
         else:  # ALL
             start_date = end_date - timedelta(days=365 * 5)  # 5 years max
+
+        logger.info(f"API: Using date range {start_date} to {end_date} for performance calculation")
 
         calc_service = CryptoCalculationService(db)
         performance_data = await calc_service.calculate_performance_history(
@@ -954,9 +1148,9 @@ async def get_crypto_prices(
     batch_results = price_fetcher.fetch_realtime_prices_batch(tickers)
     by_ticker = {d["ticker"]: d for d in batch_results if d and d.get("ticker")}
 
-    eur_rate = None
-    if currency.lower() == "eur":
-        eur_rate = await _get_usd_to_eur_rate()
+    conversion_rate = None
+    if currency.upper() != "USD":
+        conversion_rate = await _get_usd_to_eur_rate()
 
     prices: list[CryptoPriceData] = []
     for s in symbol_list:
@@ -964,8 +1158,8 @@ async def get_crypto_prices(
         if not data or not data.get("current_price"):
             continue
         price = data["current_price"]
-        if currency.lower() == "eur" and eur_rate:
-            price = price * eur_rate
+        if currency.upper() != "USD" and conversion_rate:
+            price = price * conversion_rate
         prices.append(CryptoPriceData(
             symbol=s,
             price=price,
@@ -1030,14 +1224,14 @@ async def get_crypto_price_history(
             yahoo_symbol, start_date=start_date, end_date=end_date
         )
 
-        eur_rate = None
-        if currency.lower() == "eur":
-            eur_rate = await _get_usd_to_eur_rate()
+        conversion_rate = None
+        if currency.upper() != "USD":
+            conversion_rate = await _get_usd_to_eur_rate()
 
         prices = []
         for dp in historical_prices:
             px = dp["close"]
-            px_conv = px * eur_rate if (eur_rate and currency.lower() == "eur") else px
+            px_conv = px * conversion_rate if (conversion_rate and currency.upper() != "USD") else px
             prices.append(CryptoHistoricalPrice(
                 date=dp["date"],
                 symbol=symbol.upper(),

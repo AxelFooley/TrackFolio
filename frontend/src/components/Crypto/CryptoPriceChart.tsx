@@ -41,7 +41,7 @@ export function CryptoPriceChart({ portfolioId, timeRange, height = 400, currenc
       date: new Date(data.date),
       displayDate: formatDate(data.date, timeRange === '1D' ? 'HH:mm' : 'MMM dd'),
       portfolio: data.portfolio_value,
-      benchmark: data.benchmark_value,
+      benchmark: data.benchmark_value || null,
     }));
   }, [performanceData, timeRange]);
 
@@ -115,7 +115,7 @@ export function CryptoPriceChart({ portfolioId, timeRange, height = 400, currenc
             name="Portfolio Value"
             activeDot={{ r: 6, fill: '#3B82F6' }}
           />
-          {chartData.some((data) => data.benchmark !== undefined) && (
+          {chartData.some((data) => data.benchmark !== null && data.benchmark !== undefined) && (
             <Line
               type="monotone"
               dataKey="benchmark"

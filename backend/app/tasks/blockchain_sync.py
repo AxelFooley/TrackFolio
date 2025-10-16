@@ -140,13 +140,15 @@ def _sync_bitcoin_wallets_impl():
         total_failed = 0
         wallet_results = []
 
-        # Sync each wallet
+        # Sync each wallet (using config defaults for automatic syncs)
         for portfolio in portfolios:
             try:
                 wallet_result = sync_single_wallet(
                     portfolio.wallet_address,
                     portfolio.id,
-                    db
+                    db,
+                    max_transactions=settings.blockchain_max_transactions_per_sync,
+                    days_back=settings.blockchain_sync_days_back
                 )
 
                 wallet_results.append({
@@ -228,21 +230,37 @@ def sync_single_wallet(
         wallet_address: Bitcoin wallet address to sync
         portfolio_id: Portfolio ID to associate transactions with
         db_session: Database session
-        max_transactions: Maximum number of transactions to fetch (from config if None)
-        days_back: Number of days to look back for new transactions (from config if None)
+        max_transactions: Maximum number of transactions to fetch. None = unlimited
+        days_back: Number of days to look back. None = unlimited (all history)
 
     Returns:
         dict: Sync result for this wallet
     """
-    # Use configuration defaults if not provided
-    if max_transactions is None:
-        max_transactions = settings.blockchain_max_transactions_per_sync
-    if days_back is None:
-        days_back = settings.blockchain_sync_days_back
+    # Note: We don't use config defaults here - we pass through None to allow unlimited fetching
+    # For automatic scheduled syncs, the sync_all_wallets function will use config defaults
+    # For manual syncs, pass None to fetch complete history
 
     logger.info(f"Syncing Bitcoin wallet {wallet_address} (portfolio {portfolio_id})")
 
     try:
+        # Get portfolio to retrieve base_currency
+        portfolio_result = db_session.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            return {
+                "status": "error",
+                "error": f"Portfolio {portfolio_id} not found",
+                "transactions_added": 0,
+                "transactions_skipped": 0,
+                "transactions_failed": 0
+            }
+
+        # Get base currency for price fetching
+        base_currency = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
+
         # Get existing transaction hashes for this portfolio using deduplication service
         existing_hashes = blockchain_deduplication.get_portfolio_transaction_hashes(portfolio_id)
         logger.info(f"Found {len(existing_hashes)} existing transactions for wallet {wallet_address}")
@@ -282,40 +300,32 @@ def sync_single_wallet(
                     skipped_transactions.append(tx_data)
                     continue
 
-                # Get historical price at transaction time
+                # Get historical price at transaction time in wallet's base currency
                 price_at_time = get_historical_price_at_time(
                     symbol='BTC',
                     timestamp=tx_data['timestamp'],
-                    base_currency='EUR'
+                    base_currency=base_currency
                 )
 
                 if price_at_time:
                     tx_data['price_at_execution'] = price_at_time
                     tx_data['total_amount'] = tx_data['quantity'] * price_at_time
-                    tx_data['currency'] = CryptoCurrency.EUR
+                    tx_data['currency'] = CryptoCurrency(base_currency)
                 else:
                     # Fallback to current price if historical price not available
                     logger.warning(f"Could not get historical price for transaction {tx_hash}, using current price from Yahoo Finance")
                     try:
                         price_fetcher = PriceFetcher()
-                        current_price_data = price_fetcher.fetch_realtime_price('BTC-USD')
+                        # Fetch price in wallet's base currency
+                        ticker = f'BTC-{base_currency.upper()}'
+                        current_price_data = price_fetcher.fetch_realtime_price(ticker)
 
                         if current_price_data and current_price_data.get('current_price'):
-                            current_price_usd = current_price_data['current_price']
-
-                            # Convert USD to EUR
-                            eur_rate = get_usd_to_eur_rate()
-                            if eur_rate:
-                                current_price_eur = current_price_usd * eur_rate
-                                logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price_eur} EUR (converted from {current_price_usd} USD)")
-                                tx_data['price_at_execution'] = current_price_eur
-                            else:
-                                logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {current_price_usd}")
-                                tx_data['price_at_execution'] = current_price_usd
-                                tx_data['currency'] = CryptoCurrency.USD
-
-                            tx_data['total_amount'] = tx_data['quantity'] * tx_data['price_at_execution']
-                            tx_data['currency'] = CryptoCurrency.EUR if eur_rate else CryptoCurrency.USD
+                            current_price = current_price_data['current_price']
+                            logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price} {base_currency}")
+                            tx_data['price_at_execution'] = current_price
+                            tx_data['total_amount'] = tx_data['quantity'] * current_price
+                            tx_data['currency'] = CryptoCurrency(base_currency)
                         else:
                             raise Exception("Yahoo Finance returned no price data")
 
@@ -370,6 +380,17 @@ def sync_single_wallet(
                 logger.error(f"Error saving transaction {transaction.transaction_hash}: {e}")
                 failed_transactions.append(transaction.transaction_hash)
                 continue
+
+        # Update wallet_last_sync_time if transactions were processed or if it's the first sync
+        total_processed = transactions_added + len(skipped_transactions)
+        if total_processed > 0 or portfolio.wallet_last_sync_time is None:
+            try:
+                portfolio.wallet_last_sync_time = datetime.utcnow()
+                db_session.commit()
+                logger.info(f"Updated wallet_last_sync_time for portfolio {portfolio_id} to {portfolio.wallet_last_sync_time}")
+            except Exception as e:
+                db_session.rollback()
+                logger.error(f"Error updating wallet_last_sync_time for portfolio {portfolio_id}: {e}")
 
         result = {
             "status": "success",
@@ -427,9 +448,9 @@ def get_historical_price_at_time(
         # Initialize price fetcher
         price_fetcher = PriceFetcher()
 
-        # Map crypto symbol to Yahoo Finance ticker
-        yahoo_ticker = f"{symbol}-USD"
-        logger.debug(f"Fetching historical price for {symbol} using Yahoo ticker: {yahoo_ticker}")
+        # Map crypto symbol to Yahoo Finance ticker (fetch in requested currency)
+        yahoo_ticker = f"{symbol}-{base_currency.upper()}"
+        logger.debug(f"Fetching historical price for {symbol} in {base_currency.upper()} using Yahoo ticker: {yahoo_ticker}")
 
         # Try to get historical price from Yahoo Finance for the target date
         # Use a wider range to ensure we capture the data (target date ± 1 day)
@@ -459,37 +480,16 @@ def get_historical_price_at_time(
                     closest_price = price_data.get('close')
 
             if closest_price:
-                # Convert USD to EUR if needed
-                if base_currency.upper() == 'EUR':
-                    eur_rate = get_usd_to_eur_rate()
-                    if eur_rate:
-                        closest_price_eur = closest_price * eur_rate
-                        logger.debug(f"Found historical price for {symbol} at {timestamp}: {closest_price_eur} EUR (converted from {closest_price} USD)")
-                        return closest_price_eur
-                    else:
-                        logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {closest_price}")
-
-                logger.debug(f"Found historical price for {symbol} at {timestamp}: {closest_price}")
+                logger.debug(f"Found historical price for {symbol} at {timestamp}: {closest_price} {base_currency.upper()}")
                 return closest_price
 
         # Fallback: try to get current price if historical not available
-        logger.warning(f"No historical price available for {symbol} at {timestamp}, trying current price")
+        logger.warning(f"No historical price available for {symbol} at {timestamp}, trying current price in {base_currency.upper()}")
         current_price_data = price_fetcher.fetch_realtime_price(yahoo_ticker)
 
         if current_price_data and current_price_data.get('current_price'):
             current_price = current_price_data['current_price']
-
-            # Convert USD to EUR if needed
-            if base_currency.upper() == 'EUR':
-                eur_rate = get_usd_to_eur_rate()
-                if eur_rate:
-                    current_price_eur = current_price * eur_rate
-                    logger.debug(f"Using current price for {symbol}: {current_price_eur} EUR (converted from {current_price} USD)")
-                    return current_price_eur
-                else:
-                    logger.warning(f"Could not get USD to EUR conversion rate, using USD price: {current_price}")
-
-            logger.debug(f"Using current price for {symbol}: {current_price}")
+            logger.debug(f"Using current price for {symbol}: {current_price} {base_currency.upper()}")
             return current_price
 
         return None
@@ -505,21 +505,23 @@ def get_historical_price_at_time(
     retry_kwargs={'max_retries': 2, 'countdown': 60}
 )
 def sync_wallet_manually(
-    self, 
-    wallet_address: str, 
+    self,
+    wallet_address: str,
     portfolio_id: int,
-    max_transactions: Optional[int] = 200,
-    days_back: Optional[int] = 30
+    max_transactions: Optional[int] = None,
+    days_back: Optional[int] = None
 ):
     """
     Manually trigger a synchronization of transactions for a single Bitcoin wallet and return the per-wallet sync result.
-    
+
+    Fetches ALL historical transactions from the blockchain with NO limits on quantity or time period.
+
     Parameters:
     	wallet_address (str): Bitcoin wallet address to synchronize.
     	portfolio_id (int): ID of the portfolio that must own the wallet.
-    	max_transactions (Optional[int]): Maximum number of transactions to fetch for this sync (default 200).
-    	days_back (Optional[int]): Lookback window in days for transactions to fetch (default 30).
-    
+    	max_transactions (Optional[int]): Maximum number of transactions to fetch. None = unlimited (fetch all).
+    	days_back (Optional[int]): Lookback window in days. None = unlimited (fetch from beginning of blockchain).
+
     Returns:
     	dict: Summary of the sync outcome containing keys such as `status`, `transactions_added`, `transactions_skipped`, `transactions_failed`, and optionally `error` with details when the sync cannot be performed.
     """

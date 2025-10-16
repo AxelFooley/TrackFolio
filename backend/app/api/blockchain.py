@@ -32,8 +32,8 @@ class WalletSyncRequest(BaseModel):
     """Request model for manual wallet synchronization."""
     portfolio_id: int = Field(..., description="Portfolio ID to sync")
     wallet_address: str = Field(..., description="Bitcoin wallet address to sync")
-    max_transactions: Optional[int] = Field(100, description="Maximum number of transactions to fetch", ge=1, le=500)
-    days_back: Optional[int] = Field(30, description="Number of days to look back", ge=1, le=365)
+    max_transactions: Optional[int] = Field(None, description="Maximum number of transactions to fetch (None for unlimited)", ge=1, le=500)
+    days_back: Optional[int] = Field(None, description="Number of days to look back (None for all history)", ge=1, le=365)
 
     @validator('wallet_address')
     def validate_wallet_address(cls, v):

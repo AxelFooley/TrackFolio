@@ -81,10 +81,9 @@ def downgrade() -> None:
     # Drop indexes
     """
     Revert the migration by removing crypto_transactions indexes and dropping the crypto_transactions and crypto_portfolios tables.
-    
-    Drops the following non-unique indexes from the `crypto_transactions` table: `ix_crypto_transactions_transaction_hash`, `ix_crypto_transactions_type_date`, `ix_crypto_transactions_symbol_date`, `ix_crypto_transactions_portfolio_date`, `ix_crypto_transactions_timestamp`, `ix_crypto_transactions_symbol`, and `ix_crypto_transactions_portfolio_id`. Then drops the `crypto_transactions` and `crypto_portfolios` tables.
+
+    Drops the following non-unique indexes from the `crypto_transactions` table: `ix_crypto_transactions_type_date`, `ix_crypto_transactions_symbol_date`, `ix_crypto_transactions_portfolio_date`, `ix_crypto_transactions_timestamp`, `ix_crypto_transactions_symbol`, and `ix_crypto_transactions_portfolio_id`. Then drops the `crypto_transactions` and `crypto_portfolios` tables.
     """
-    op.drop_index('ix_crypto_transactions_transaction_hash', table_name='crypto_transactions')
     op.drop_index('ix_crypto_transactions_type_date', table_name='crypto_transactions')
     op.drop_index('ix_crypto_transactions_symbol_date', table_name='crypto_transactions')
     op.drop_index('ix_crypto_transactions_portfolio_date', table_name='crypto_transactions')

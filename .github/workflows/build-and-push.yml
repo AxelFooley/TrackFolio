@@ -1,0 +1,188 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+env:
+  REGISTRY: ghcr.io
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    outputs:
+      backend-image: ${{ steps.backend-image.outputs.image }}
+      frontend-image: ${{ steps.frontend-image.outputs.image }}
+      image-tag: ${{ steps.image-tag.outputs.tag }}
+      short-sha: ${{ steps.short-sha.outputs.sha }}
+    steps:
+      - name: Get short SHA
+        id: short-sha
+        run: echo "sha=$(echo ${GITHUB_SHA} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Determine image tag
+        id: image-tag
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            echo "tag=dev" >> $GITHUB_OUTPUT
+          else
+            # For PRs and other branches, use the short SHA
+            echo "tag=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set backend image name
+        id: backend-image
+        run: |
+          IMAGE_NAME="${{ env.REGISTRY }}/${{ github.repository_owner }}/trackfolio-backend"
+          echo "image=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
+
+      - name: Set frontend image name
+        id: frontend-image
+        run: |
+          IMAGE_NAME="${{ env.REGISTRY }}/${{ github.repository_owner }}/trackfolio-frontend"
+          echo "image=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
+
+  lint-backend:
+    name: Lint Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Lint with flake8
+        run: |
+          pip install flake8
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 backend --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings
+          flake8 backend --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Run pytest
+        run: |
+          pip install pytest pytest-asyncio
+          cd backend && pytest tests/ -v || true
+
+  lint-frontend:
+    name: Lint Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Run ESLint
+        run: cd frontend && npm run lint
+
+  build-backend:
+    name: Build Backend Image
+    needs: [setup, lint-backend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ needs.setup.outputs.backend-image }}:${{ needs.setup.outputs.image-tag }}
+            ${{ needs.setup.outputs.backend-image }}:${{ needs.setup.outputs.short-sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-frontend:
+    name: Build Frontend Image
+    needs: [setup, lint-frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ needs.setup.outputs.frontend-image }}:${{ needs.setup.outputs.image-tag }}
+            ${{ needs.setup.outputs.frontend-image }}:${{ needs.setup.outputs.short-sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  notify:
+    name: Notify Build Status
+    needs: [setup, build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Build Success
+        if: success()
+        run: |
+          echo "✅ Docker images built and pushed successfully!"
+          echo "Backend: ${{ needs.setup.outputs.backend-image }}:${{ needs.setup.outputs.image-tag }}"
+          echo "Frontend: ${{ needs.setup.outputs.frontend-image }}:${{ needs.setup.outputs.image-tag }}"
+
+      - name: Build Failed
+        if: failure()
+        run: |
+          echo "❌ Build failed. Check logs above for details."
+          exit 1

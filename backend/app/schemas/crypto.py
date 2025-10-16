@@ -49,7 +49,15 @@ class CryptoPortfolioResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # Optional computed fields
+    # Currency-specific computed fields for frontend compatibility
+    total_value_usd: Optional[Decimal] = None
+    total_value_eur: Optional[Decimal] = None
+    total_profit_usd: Optional[Decimal] = None
+    total_profit_eur: Optional[Decimal] = None
+    profit_percentage_usd: Optional[float] = None
+    profit_percentage_eur: Optional[float] = None
+
+    # Original computed fields for backward compatibility
     total_value: Optional[Decimal] = None
     total_cost_basis: Optional[Decimal] = None
     total_profit_loss: Optional[Decimal] = None
@@ -135,9 +143,11 @@ class CryptoTransactionResponse(BaseModel):
 
 
 class CryptoTransactionList(BaseModel):
-    """Schema for list of crypto transactions."""
-    transactions: List[CryptoTransactionResponse]
-    total_count: int
+    """Schema for list of crypto transactions (paginated response)."""
+    items: List[CryptoTransactionResponse]
+    total: int
+    skip: int = 0
+    limit: int = 50
 
 
 # Holdings and Metrics Schemas
@@ -154,6 +164,7 @@ class CryptoHolding(BaseModel):
     realized_gain_loss: Optional[Decimal] = None
     first_purchase_date: Optional[date] = None
     last_transaction_date: Optional[date] = None
+    currency: Optional[CryptoCurrency] = None
 
 
 class CryptoPortfolioMetrics(BaseModel):
@@ -186,6 +197,11 @@ class CryptoPortfolioMetrics(BaseModel):
 
     # Asset allocation (by value)
     asset_allocation: List[dict] = Field(default_factory=list)
+
+    # Performance insights
+    best_performer: Optional[dict] = None
+    worst_performer: Optional[dict] = None
+    largest_position: Optional[dict] = None
 
 class CryptoPriceData(BaseModel):
     """Schema for crypto price data."""

@@ -40,7 +40,7 @@ export function TodaysMovers() {
         const changeAmount = realtimePrice.change_amount ??
           (hasPrevClose ? (realtimePrice.current_price - realtimePrice.previous_close) : 0);
         const changePercent = realtimePrice.change_percent ??
-          (realtimePrice.previous_close > 0 ?
+        (realtimePrice.previous_close && realtimePrice.previous_close > 0 ?
             ((realtimePrice.current_price - realtimePrice.previous_close) / realtimePrice.previous_close) * 100 : 0);
 
         return {
