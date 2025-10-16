@@ -96,8 +96,7 @@ jobs:
       - name: Run pytest
         run: |
           pip install pytest pytest-asyncio
-          cd backend && pytest tests/ -v || true
-
+          cd backend && pytest tests/ -v
   lint-frontend:
     name: Lint Frontend
     runs-on: ubuntu-latest
