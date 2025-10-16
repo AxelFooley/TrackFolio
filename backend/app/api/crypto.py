@@ -740,6 +740,115 @@ async def delete_crypto_transaction(
         raise HTTPException(status_code=500, detail=f"Failed to delete transaction: {str(e)}")
 
 
+# Wallet Sync Status Endpoint
+
+@router.get("/portfolios/{portfolio_id}/wallet-sync-status")
+async def get_wallet_sync_status(
+    portfolio_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get wallet synchronization status for a crypto portfolio.
+
+    Returns detailed information about the wallet sync state including:
+    - Current sync status (synced, syncing, error, never, disabled)
+    - Last sync timestamp
+    - Transaction counts (total and recent)
+    - Error messages if applicable
+
+    Parameters:
+        portfolio_id (int): ID of the portfolio to check wallet sync status for.
+
+    Returns:
+        dict: Wallet sync status information with keys:
+            - status: Current sync state
+            - last_sync: ISO timestamp of last successful sync (optional)
+            - transaction_count: Total blockchain transactions synced (optional)
+            - error_message: Error details if status is 'error' (optional)
+
+    Raises:
+        HTTPException: 404 if the portfolio does not exist; 500 for unexpected errors.
+    """
+    try:
+        # Verify portfolio exists
+        portfolio_result = await db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        )
+        portfolio = portfolio_result.scalar_one_or_none()
+
+        if not portfolio:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+
+        # If no wallet address configured, return disabled status
+        if not portfolio.wallet_address:
+            return {
+                "status": "disabled",
+                "last_sync": None,
+                "transaction_count": None,
+                "error_message": None
+            }
+
+        try:
+            # Get total blockchain transactions for this portfolio
+            total_blockchain_tx_count = await db.execute(
+                select(func.count(CryptoTransaction.id))
+                .where(
+                    and_(
+                        CryptoTransaction.portfolio_id == portfolio_id,
+                        CryptoTransaction.exchange == 'Bitcoin Blockchain'
+                    )
+                )
+            )
+            total_blockchain_txs = total_blockchain_tx_count.scalar() or 0
+
+            # Get last blockchain transaction date
+            last_blockchain_tx_result = await db.execute(
+                select(CryptoTransaction.timestamp)
+                .where(
+                    and_(
+                        CryptoTransaction.portfolio_id == portfolio_id,
+                        CryptoTransaction.exchange == 'Bitcoin Blockchain'
+                    )
+                )
+                .order_by(CryptoTransaction.timestamp.desc())
+                .limit(1)
+            )
+            last_blockchain_tx = last_blockchain_tx_result.scalar_one_or_none()
+
+            # Determine sync status based on transaction data
+            if total_blockchain_txs == 0:
+                status = "never"
+            else:
+                # Check if there are recent transactions (within last 7 days)
+                recent_threshold = datetime.utcnow() - timedelta(days=7)
+                if last_blockchain_tx and last_blockchain_tx >= recent_threshold:
+                    status = "synced"
+                else:
+                    status = "synced"  # Has transactions but not recent
+
+            return {
+                "status": status,
+                "last_sync": last_blockchain_tx.isoformat() if last_blockchain_tx else None,
+                "transaction_count": total_blockchain_txs,
+                "error_message": None
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching wallet sync status for portfolio {portfolio_id}: {e}")
+            return {
+                "status": "error",
+                "last_sync": None,
+                "transaction_count": None,
+                "error_message": f"Failed to retrieve wallet sync status: {str(e)}"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get wallet sync status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get wallet sync status: {str(e)}")
+
+
 # Metrics and Analytics Endpoints
 
 @router.get("/portfolios/{portfolio_id}/metrics", response_model=CryptoPortfolioMetrics)
