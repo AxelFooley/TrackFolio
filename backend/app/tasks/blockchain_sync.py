@@ -505,11 +505,11 @@ def get_historical_price_at_time(
     retry_kwargs={'max_retries': 2, 'countdown': 60}
 )
 def sync_wallet_manually(
-    self, 
-    wallet_address: str, 
+    self,
+    wallet_address: str,
     portfolio_id: int,
-    max_transactions: Optional[int] = 200,
-    days_back: Optional[int] = 30
+    max_transactions: Optional[int] = 500,
+    days_back: Optional[int] = 3650
 ):
     """
     Manually trigger a synchronization of transactions for a single Bitcoin wallet and return the per-wallet sync result.

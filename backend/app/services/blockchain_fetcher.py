@@ -265,7 +265,9 @@ class BlockchainFetcherService:
         api_config = self.APIS[api_name]
         session = self._sessions[api_name]
 
-        url = urljoin(api_config['base_url'], endpoint)
+        # Ensure base_url is a string (in case it's a Path object from config)
+        base_url = str(api_config['base_url'])
+        url = urljoin(base_url, endpoint)
 
         for attempt in range(api_config['max_retries']):
             try:
