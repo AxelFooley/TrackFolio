@@ -514,8 +514,10 @@ class TestBlockchainIntegration:
 
                     # Create a mock database session
                     mock_db = Mock()
+                    mock_portfolio = Mock()
+                    mock_portfolio.base_currency.value = 'USD'
                     mock_result = Mock()
-                    mock_result.scalar_one_or_none.return_value.base_currency.value.upper.return_value = 'USD'
+                    mock_result.scalar_one_or_none.return_value = mock_portfolio
                     mock_db.execute.return_value = mock_result
                     mock_db.add.return_value = None
                     mock_db.commit.return_value = None
