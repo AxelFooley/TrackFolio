@@ -49,7 +49,15 @@ class CryptoPortfolioResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # Optional computed fields
+    # Currency-specific computed fields for frontend compatibility
+    total_value_usd: Optional[Decimal] = None
+    total_value_eur: Optional[Decimal] = None
+    total_profit_usd: Optional[Decimal] = None
+    total_profit_eur: Optional[Decimal] = None
+    profit_percentage_usd: Optional[float] = None
+    profit_percentage_eur: Optional[float] = None
+
+    # Original computed fields for backward compatibility
     total_value: Optional[Decimal] = None
     total_cost_basis: Optional[Decimal] = None
     total_profit_loss: Optional[Decimal] = None

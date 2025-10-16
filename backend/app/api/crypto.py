@@ -196,6 +196,7 @@ async def list_crypto_portfolios(
                     "wallet_configured": False
                 }
 
+            # Build portfolio response with currency-specific fields
             portfolio_dict = {
                 "id": portfolio.id,
                 "name": portfolio.name,
@@ -205,6 +206,14 @@ async def list_crypto_portfolios(
                 "wallet_address": portfolio.wallet_address,
                 "created_at": portfolio.created_at,
                 "updated_at": portfolio.updated_at,
+                # Add currency-specific fields for frontend compatibility
+                "total_value_usd": metrics.total_value if portfolio.base_currency.value == 'USD' and metrics else None,
+                "total_value_eur": metrics.total_value if portfolio.base_currency.value == 'EUR' and metrics else None,
+                "total_profit_usd": metrics.total_profit_loss if portfolio.base_currency.value == 'USD' and metrics else None,
+                "total_profit_eur": metrics.total_profit_loss if portfolio.base_currency.value == 'EUR' and metrics else None,
+                "profit_percentage_usd": metrics.total_profit_loss_pct if portfolio.base_currency.value == 'USD' and metrics else None,
+                "profit_percentage_eur": metrics.total_profit_loss_pct if portfolio.base_currency.value == 'EUR' and metrics else None,
+                # Keep original fields for backward compatibility
                 "total_value": metrics.total_value if metrics else None,
                 "total_cost_basis": metrics.total_cost_basis if metrics else None,
                 "total_profit_loss": metrics.total_profit_loss if metrics else None,
