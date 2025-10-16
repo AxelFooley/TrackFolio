@@ -359,7 +359,13 @@ export default function CryptoTransactionsPage() {
               <CardContent>
                 <div className="text-sm font-medium">
                   {transactionsData.items.length > 0
-                    ? formatDate(transactionsData.items[0].timestamp)
+                    ? formatDate(
+                        [...transactionsData.items]
+                          .sort(
+                            (a, b) =>
+                              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+                          )[0].timestamp
+                      )
                     : 'No transactions'}
                 </div>
               </CardContent>
