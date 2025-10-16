@@ -564,34 +564,25 @@ class CryptoCalculationService:
 
         for symbol in symbols:
             try:
-                # Yahoo Finance only supports crypto tickers in USD format (BTC-USD, ETH-USD, etc)
-                # For non-USD currencies, fetch USD price and convert
-                yahoo_symbol = f"{symbol}-USD"
+                # Construct ticker with target currency
+                yahoo_symbol = f"{symbol}-{currency.upper()}"
 
-                # Use Yahoo Finance to fetch current price in USD
+                # Use Yahoo Finance to fetch current price
                 price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
                 if price_data and price_data.get('current_price'):
                     price = price_data['current_price']
 
-                    # Convert to target currency if needed
-                    if currency.upper() != 'USD':
-                        conversion_rate = await self._get_usd_to_eur_rate()  # Currently supports USD->EUR
-                        if conversion_rate:
-                            price = price * conversion_rate
-                        else:
-                            logger.warning(f"Could not convert {symbol} price to {currency}, using USD")
-
                     prices[symbol] = {
                         'symbol': symbol,
                         'price': price,
                         'currency': currency.upper(),
-                        'price_usd': price_data['current_price'],
+                        'price_usd': price_data.get('price_usd', price_data.get('current_price')),
                         'timestamp': datetime.utcnow(),
                         'source': 'yahoo'
                     }
                 else:
-                    logger.warning(f"Could not fetch price for {symbol} from Yahoo Finance - skipping")
+                    logger.warning(f"Could not fetch price for {symbol}-{currency.upper()} from Yahoo Finance - skipping")
             except Exception as e:
                 logger.warning(f"Error getting current price for {symbol}: {e}")
 
@@ -629,12 +620,11 @@ class CryptoCalculationService:
         prices = {}
         price_fetcher = PriceFetcher()
 
-        # Yahoo Finance only supports crypto tickers in USD format
-        # Fetch USD prices and convert to target currency if needed
+        # Fetch prices in target currency using currency-aware tickers
         for symbol in symbols:
             try:
-                # Fetch in USD format (BTC-USD, ETH-USD, etc)
-                yahoo_symbol = f"{symbol}-USD"
+                # Construct ticker with target currency
+                yahoo_symbol = f"{symbol}-{currency.upper()}"
 
                 # Use Yahoo Finance to fetch historical prices
                 price_data = await PriceFetcher.fetch_historical_prices(
@@ -644,42 +634,25 @@ class CryptoCalculationService:
                 )
 
                 if price_data:
-                    # Convert to target currency if needed (Yahoo returns USD)
-                    if currency.upper() != 'USD':
-                        conversion_rate = await self._get_usd_to_eur_rate()  # Currently supports USD->EUR
-                        if conversion_rate:
-                            for data_point in price_data:
-                                data_point['price'] = data_point['close'] * conversion_rate
-                                data_point['currency'] = currency.upper()
-                        else:
-                            logger.warning(f"Could not convert {symbol} prices to {currency}, using USD")
-                            for data_point in price_data:
-                                data_point['price'] = data_point['close']
-                                data_point['currency'] = 'USD'
-                    else:
-                        for data_point in price_data:
-                            data_point['price'] = data_point['close']
-                            data_point['currency'] = 'USD'
-
                     # Format to match expected structure
                     formatted_data = []
                     for data_point in price_data:
                         formatted_data.append({
                             'date': data_point['date'],
                             'symbol': symbol,
-                            'price': data_point['price'],
-                            'currency': data_point['currency'],
-                            'price_usd': data_point['close'],
+                            'price': data_point['close'],
+                            'currency': currency.upper(),
+                            'price_usd': data_point.get('price_usd', data_point['close']),
                             'timestamp': datetime.utcnow(),
                             'source': 'yahoo'
                         })
 
                     prices[symbol] = formatted_data
-                    logger.info(f"Found {len(formatted_data)} price points for {symbol}")
+                    logger.info(f"Found {len(formatted_data)} price points for {symbol} in {currency.upper()}")
                 else:
-                    logger.warning(f"No historical data available for {symbol}")
+                    logger.warning(f"No historical data available for {symbol}-{currency.upper()}")
             except Exception as e:
-                logger.warning(f"Error getting historical prices for {symbol}: {e}")
+                logger.warning(f"Error getting historical prices for {symbol}-{currency.upper()}: {e}")
 
         return prices
 
