@@ -317,10 +317,10 @@ class PriceFetcher:
 
             # Try to fetch price with resolved ticker, with fallback to original ticker
             price_data = None
-            fallback_used = False
 
             # First attempt: use resolved ticker
-            price_data, fallback_used = self._fetch_price_with_fallback(resolved_ticker, ticker)
+            # Logging about which ticker was used happens inside _fetch_price_with_fallback
+            price_data, _ = self._fetch_price_with_fallback(resolved_ticker, ticker)
 
             if price_data is None:
                 logger.warning(f"Failed to fetch price for {ticker}")
