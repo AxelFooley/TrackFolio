@@ -74,7 +74,7 @@ def calculate_all_metrics(self):
 
             try:
                 # Calculate position metrics
-                metrics = await_calculate_position_metrics(db, ticker)
+                metrics = calculate_position_metrics(db, ticker)
 
                 if not metrics:
                     logger.warning(f"Could not calculate metrics for {ticker}")
@@ -123,7 +123,7 @@ def calculate_all_metrics(self):
 
         # Calculate portfolio-level metrics
         try:
-            portfolio_metrics = await_calculate_portfolio_metrics(db)
+            portfolio_metrics = calculate_portfolio_metrics(db)
 
             if portfolio_metrics:
                 # Upsert portfolio metrics
@@ -201,7 +201,7 @@ def calculate_all_metrics(self):
         db.close()
 
 
-def await_calculate_position_metrics(db, ticker: str) -> dict:
+def calculate_position_metrics(db, ticker: str) -> dict:
     """
     Calculate all metrics for a single position.
 
@@ -330,7 +330,7 @@ def await_calculate_position_metrics(db, ticker: str) -> dict:
     return metrics
 
 
-def await_calculate_portfolio_metrics(db) -> dict:
+def calculate_portfolio_metrics(db) -> dict:
     """
     Calculate portfolio-level metrics.
 
