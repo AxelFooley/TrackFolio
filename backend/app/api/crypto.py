@@ -197,6 +197,7 @@ async def list_crypto_portfolios(
                 }
 
             # Build portfolio response with currency-specific fields
+            base_currency_str = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
             portfolio_dict = {
                 "id": portfolio.id,
                 "name": portfolio.name,
@@ -207,12 +208,12 @@ async def list_crypto_portfolios(
                 "created_at": portfolio.created_at,
                 "updated_at": portfolio.updated_at,
                 # Add currency-specific fields for frontend compatibility
-                "total_value_usd": metrics.total_value if metrics and str(portfolio.base_currency) == 'USD' else None,
-                "total_value_eur": metrics.total_value if metrics and str(portfolio.base_currency) == 'EUR' else None,
-                "total_profit_usd": metrics.total_profit_loss if metrics and str(portfolio.base_currency) == 'USD' else None,
-                "total_profit_eur": metrics.total_profit_loss if metrics and str(portfolio.base_currency) == 'EUR' else None,
-                "profit_percentage_usd": metrics.total_profit_loss_pct if metrics and str(portfolio.base_currency) == 'USD' else None,
-                "profit_percentage_eur": metrics.total_profit_loss_pct if metrics and str(portfolio.base_currency) == 'EUR' else None,
+                "total_value_usd": metrics.total_value if metrics and base_currency_str == 'USD' else None,
+                "total_value_eur": metrics.total_value if metrics and base_currency_str == 'EUR' else None,
+                "total_profit_usd": metrics.total_profit_loss if metrics and base_currency_str == 'USD' else None,
+                "total_profit_eur": metrics.total_profit_loss if metrics and base_currency_str == 'EUR' else None,
+                "profit_percentage_usd": metrics.total_profit_loss_pct if metrics and base_currency_str == 'USD' else None,
+                "profit_percentage_eur": metrics.total_profit_loss_pct if metrics and base_currency_str == 'EUR' else None,
                 # Keep original fields for backward compatibility
                 "total_value": metrics.total_value if metrics else None,
                 "total_cost_basis": metrics.total_cost_basis if metrics else None,
@@ -330,6 +331,7 @@ async def get_crypto_portfolio(
         metrics = await calc_service.calculate_portfolio_metrics(portfolio_id)
 
         # Convert portfolio to CryptoPortfolioResponse with currency-specific fields
+        base_currency_str = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
         if metrics:
             portfolio_response = CryptoPortfolioResponse(
                 id=portfolio.id,
@@ -341,12 +343,12 @@ async def get_crypto_portfolio(
                 created_at=portfolio.created_at,
                 updated_at=portfolio.updated_at,
                 # Add currency-specific fields for frontend compatibility
-                total_value_usd=metrics.total_value if str(portfolio.base_currency) == 'USD' else None,
-                total_value_eur=metrics.total_value if str(portfolio.base_currency) == 'EUR' else None,
-                total_profit_usd=metrics.total_profit_loss if str(portfolio.base_currency) == 'USD' else None,
-                total_profit_eur=metrics.total_profit_loss if str(portfolio.base_currency) == 'EUR' else None,
-                profit_percentage_usd=metrics.total_profit_loss_pct if str(portfolio.base_currency) == 'USD' else None,
-                profit_percentage_eur=metrics.total_profit_loss_pct if str(portfolio.base_currency) == 'EUR' else None,
+                total_value_usd=metrics.total_value if base_currency_str == 'USD' else None,
+                total_value_eur=metrics.total_value if base_currency_str == 'EUR' else None,
+                total_profit_usd=metrics.total_profit_loss if base_currency_str == 'USD' else None,
+                total_profit_eur=metrics.total_profit_loss if base_currency_str == 'EUR' else None,
+                profit_percentage_usd=metrics.total_profit_loss_pct if base_currency_str == 'USD' else None,
+                profit_percentage_eur=metrics.total_profit_loss_pct if base_currency_str == 'EUR' else None,
                 # Keep original fields for backward compatibility
                 total_value=metrics.total_value,
                 total_cost_basis=metrics.total_cost_basis,
