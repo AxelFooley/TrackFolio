@@ -193,7 +193,7 @@ export function CryptoHoldingsTable({ portfolioId, baseCurrency, limit, showSear
               const isPositive = holding.unrealized_gain_loss >= 0;
               const rawPct = holding.unrealized_gain_loss_pct;
               const hasPct = rawPct !== null && rawPct !== undefined;
-              const returnPercentage = hasPct ? rawPct * 100 : null;
+              const returnPercentage = hasPct ? rawPct : null;  // rawPct is already a percentage value from backend
               return (
                 <TableRow
                   key={holding.symbol}
