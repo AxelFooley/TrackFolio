@@ -1,0 +1,262 @@
+# Production Docker Compose configuration for Portfolio Tracker
+# This file demonstrates various production deployment scenarios
+#
+# Usage Examples:
+# 1. Single host deployment: docker-compose -f docker-compose.prod.yml up -d
+# 2. External database: docker-compose -f docker-compose.prod.yml -f docker-compose.prod.db.yml up -d
+# 3. Separate frontend/backend hosts: See documentation below
+#
+# Environment variables required:
+# - POSTGRES_PASSWORD: Database password (required)
+# - DATABASE_URL: Full database connection string (if using external DB)
+# - REDIS_URL: Redis connection string (if using external Redis)
+# - ALLOWED_ORIGINS: Comma-separated list of allowed frontend URLs
+# - SECRET_KEY: For session management (optional, auto-generated if not set)
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: portfolio-postgres-prod
+    environment:
+      POSTGRES_USER: portfolio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-portfolio_secure_password}
+      POSTGRES_DB: portfolio_db
+      TZ: Europe/Rome
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      # Optional: Mount custom PostgreSQL configuration
+      # - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    networks:
+      - portfolio-network-prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portfolio -d portfolio_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: always
+    # Resource limits for production
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: portfolio-redis-prod
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data_prod:/data
+    networks:
+      - portfolio-network-prod
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: always
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: portfolio-backend-prod
+    # In production, you might want to remove the port binding and use a reverse proxy
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+    environment:
+      # Database configuration
+      DATABASE_URL: ${DATABASE_URL:-postgresql://portfolio:${POSTGRES_PASSWORD:-portfolio_secure_password}@postgres:5432/portfolio_db}
+
+      # Redis configuration
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+
+      # Application configuration
+      TZ: Europe/Rome
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+
+      # CORS - IMPORTANT: Set this to your frontend domain in production
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-'["http://localhost:3000", "http://localhost"]'}
+
+      # Security
+      SECRET_KEY: ${SECRET_KEY:-$(openssl rand -hex 32)}
+
+      # Optional: External API keys
+      # COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - portfolio-network-prod
+    restart: always
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    # Add labels for load balancer or monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`api.yourdomain.com`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.celery-worker
+    container_name: portfolio-celery-worker-prod
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://portfolio:${POSTGRES_PASSWORD:-portfolio_secure_password}@postgres:5432/portfolio_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      TZ: Europe/Rome
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      # Worker configuration
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-4}
+      CELERY_WORKER_PREFETCH_MULTIPLIER: ${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - portfolio-network-prod
+    restart: always
+    # Resource limits for worker
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # Celery Beat Scheduler
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.celery-beat
+    container_name: portfolio-celery-beat-prod
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://portfolio:${POSTGRES_PASSWORD:-portfolio_secure_password}@postgres:5432/portfolio_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      TZ: Europe/Rome
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - portfolio-network-prod
+    restart: always
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: portfolio-frontend-prod
+    # In production, use reverse proxy instead of direct port binding
+    # ports:
+    #   - "127.0.0.1:3000:3000"
+    environment:
+      # Runtime backend API URL - CRITICAL for production
+      BACKEND_API_URL: ${BACKEND_API_URL:-http://backend:8000}
+
+      # Client-side API URL - Set to your public API domain
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.yourdomain.com/api}
+
+      NODE_ENV: production
+      DOCKER_ENV: true
+
+      # Optional: Analytics and monitoring
+      # NEXT_PUBLIC_GA_ID: ${NEXT_PUBLIC_GA_ID:-}
+      # NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - portfolio-network-prod
+    restart: always
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    # Add labels for load balancer
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`yourdomain.com`, `www.yourdomain.com`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+
+networks:
+  portfolio-network-prod:
+    driver: bridge
+    # Optional: Use external network for multi-host deployments
+    # external: true
+    # name: portfolio-network
+
+volumes:
+  postgres_data_prod:
+    name: portfolio_postgres_data_prod
+    # Optional: Use external volume for persistent storage
+    # external: true
+    # name: portfolio_postgres_data
+  redis_data_prod:
+    name: portfolio_redis_data_prod
+
+# Example Nginx reverse proxy configuration (create separate nginx-compose.yml)
+# This would be used to terminate SSL and route traffic to appropriate services
+#
+# nginx:
+#   image: nginx:alpine
+#   ports:
+#     - "80:80"
+#     - "443:443"
+#   volumes:
+#     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+#     - ./nginx/ssl:/etc/nginx/ssl:ro
+#   depends_on:
+#     - frontend
+#     - backend
+#   networks:
+#     - portfolio-network-prod

@@ -29,7 +29,8 @@ import type {
 } from './types';
 
 // API Configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+// Use the Next.js API route proxy which handles backend URL detection dynamically
+const API_BASE_URL = '/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
