@@ -302,12 +302,12 @@ export default function CryptoTransactionsPage() {
               className="pl-9"
             />
           </div>
-          <Select value={symbolFilter} onValueChange={setSymbolFilter}>
+          <Select value={symbolFilter || ""} onValueChange={(value) => setSymbolFilter(value === "all" ? "" : value)}>
             <SelectTrigger className="w-48">
               <SelectValue placeholder="All symbols" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All symbols</SelectItem>
+              <SelectItem value="all">All symbols</SelectItem>
               {/* Generate unique symbols from transactions */}
               {transactionsData?.items
                 .map((t) => t.symbol)

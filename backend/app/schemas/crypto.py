@@ -143,9 +143,11 @@ class CryptoTransactionResponse(BaseModel):
 
 
 class CryptoTransactionList(BaseModel):
-    """Schema for list of crypto transactions."""
-    transactions: List[CryptoTransactionResponse]
-    total_count: int
+    """Schema for list of crypto transactions (paginated response)."""
+    items: List[CryptoTransactionResponse]
+    total: int
+    skip: int = 0
+    limit: int = 50
 
 
 # Holdings and Metrics Schemas

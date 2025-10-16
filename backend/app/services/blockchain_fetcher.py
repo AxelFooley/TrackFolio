@@ -64,7 +64,7 @@ class BlockchainFetcherService:
             },
             'blockchain_com': {
                 'base_url': settings.blockchain_com_api_url,
-                'rate_limit': settings.blockchain_rate_limit_requests_per_second * 0.5,  # More conservative
+                'rate_limit': 0.1,  # Enforce blockchain.info rate limit: 1 request per 10 seconds
                 'timeout': settings.blockchain_request_timeout_seconds,
                 'max_retries': settings.blockchain_max_retries
             },
