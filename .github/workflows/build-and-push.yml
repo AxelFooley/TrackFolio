@@ -13,6 +13,8 @@ on:
 env:
   REGISTRY: ghcr.io
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Only build images on push to main/dev, not on PRs
+  SHOULD_BUILD: ${{ github.event_name == 'push' }}
 
 jobs:
   setup:
@@ -118,6 +120,7 @@ jobs:
 
   build-backend:
     name: Build Backend Image
+    if: github.event_name == 'push'
     needs: [setup, lint-backend]
     runs-on: ubuntu-latest
     permissions:
@@ -151,6 +154,7 @@ jobs:
 
   build-frontend:
     name: Build Frontend Image
+    if: github.event_name == 'push'
     needs: [setup, lint-frontend]
     runs-on: ubuntu-latest
     permissions:
@@ -184,6 +188,7 @@ jobs:
 
   build-celery-worker:
     name: Build Celery Worker Image
+    if: github.event_name == 'push'
     needs: [setup, lint-backend]
     runs-on: ubuntu-latest
     permissions:
@@ -217,6 +222,7 @@ jobs:
 
   build-celery-beat:
     name: Build Celery Beat Image
+    if: github.event_name == 'push'
     needs: [setup, lint-backend]
     runs-on: ubuntu-latest
     permissions:
@@ -248,11 +254,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  notify:
+  notify-build:
     name: Notify Build Status
+    if: github.event_name == 'push'
     needs: [setup, build-backend, build-frontend, build-celery-worker, build-celery-beat]
     runs-on: ubuntu-latest
-    if: always()
     steps:
       - name: Build Success
         if: success()
@@ -267,4 +273,23 @@ jobs:
         if: failure()
         run: |
           echo "❌ Build failed. Check logs above for details."
+          exit 1
+
+  notify-lint:
+    name: Notify Lint Status
+    if: always()
+    needs: [lint-backend, lint-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Linting Success
+        if: success()
+        run: |
+          echo "✅ Code linting passed!"
+          echo "Backend: flake8 + pytest passed"
+          echo "Frontend: ESLint passed"
+
+      - name: Linting Failed
+        if: failure()
+        run: |
+          echo "❌ Code linting failed. Check logs above for details."
           exit 1
