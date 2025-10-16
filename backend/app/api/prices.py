@@ -68,7 +68,7 @@ async def refresh_prices(
         )
 
 
-async def _update_current_prices(symbols: Optional[List[str]] = None):
+def _update_current_prices(symbols: Optional[List[str]] = None):
     """Background task to update current day's prices only."""
     if symbols is None:
         symbols = list(price_history_manager.get_all_active_symbols())
@@ -85,10 +85,10 @@ async def _update_current_prices(symbols: Optional[List[str]] = None):
                 force_update=True
             )
         except Exception as e:
-            logger.error(f"Error updating current price for {symbol}: {e}")
+            logger.exception(f"Error updating current price for {symbol}: {e}")
 
 
-async def _update_complete_history(symbols: Optional[List[str]] = None):
+def _update_complete_history(symbols: Optional[List[str]] = None):
     """Background task to update complete price history."""
     logger.info(f"Starting complete history update for symbols: {symbols or 'all'}")
 

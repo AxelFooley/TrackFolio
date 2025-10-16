@@ -160,8 +160,8 @@ class BlockchainDeduplicationService:
             key=lambda x: x[1]
         )
 
-        # Keep only the most recent half
-        items_to_keep = sorted_items[self.BULK_CACHE_SIZE // 2:]
+        # Keep only the most recent up to BULK_CACHE_SIZE entries
+        items_to_keep = sorted_items[-self.BULK_CACHE_SIZE:]
 
         self._memory_cache = {
             portfolio_id: self._memory_cache[portfolio_id]

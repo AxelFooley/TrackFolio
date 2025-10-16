@@ -292,7 +292,6 @@ class CryptoError(BaseModel):
 class CryptoImportResult(BaseModel):
     """Schema for crypto transaction import result."""
     imported_count: int
-    imported_count: int
     skipped_count: int
     error_count: int
     errors: List[str] = Field(default_factory=list)

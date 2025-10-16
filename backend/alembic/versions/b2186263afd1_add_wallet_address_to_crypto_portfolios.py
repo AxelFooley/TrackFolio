@@ -25,10 +25,10 @@ def upgrade() -> None:
     """
     Add an optional `wallet_address` column to the `crypto_portfolios` table and create an index on it.
     
-    Adds a nullable `wallet_address` column (String(90)) with comment "Bitcoin wallet address for paper wallet tracking (optional)" to the `crypto_portfolios` table, and creates a non-unique index named `ix_crypto_portfolios_wallet_address` on that column to improve query performance.
+    Adds a nullable `wallet_address` column (String(62)) with comment "Bitcoin wallet address for paper wallet tracking (optional)" to the `crypto_portfolios` table, and creates a non-unique index named `ix_crypto_portfolios_wallet_address` on that column to improve query performance.
     """
     op.add_column('crypto_portfolios',
-        sa.Column('wallet_address', sa.String(length=90), nullable=True,
+        sa.Column('wallet_address', sa.String(length=62), nullable=True,
                  comment='Bitcoin wallet address for paper wallet tracking (optional)')
     )
 

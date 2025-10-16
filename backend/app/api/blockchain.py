@@ -11,11 +11,11 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy import select, func, and_
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field, validator
 import logging
 
-from app.database import SyncSessionLocal
+from app.database import get_db
 from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
 from app.services.blockchain_fetcher import blockchain_fetcher, BlockchainFetchError
 from app.services.blockchain_deduplication import blockchain_deduplication
@@ -133,43 +133,29 @@ class WalletTransactionsResponse(BaseModel):
     timestamp: datetime
 
 
-def get_db():
-    """
-    Provide a database session for a request and ensure it is closed when the request completes.
-    
-    Returns:
-        db (Session): A SQLAlchemy session connected to the application's database.
-    """
-    db = SyncSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 @router.post("/sync/wallet", response_model=WalletSyncResponse)
 async def sync_wallet(
     request: WalletSyncRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Manually trigger synchronization for a Bitcoin wallet and start a background task to fetch transactions.
-    
+
     Parameters:
         request (WalletSyncRequest): Sync parameters including portfolio_id, wallet_address, max_transactions, and days_back.
-        db (Session): Database session dependency.
-    
+        db (AsyncSession): Async database session dependency.
+
     Returns:
         WalletSyncResponse: Status and metadata indicating the sync task was started, with initial transaction counts and a timestamp.
-    
+
     Raises:
         HTTPException: 404 if the portfolio does not exist; 400 if the provided wallet address does not match the portfolio; 500 on unexpected errors when starting the sync.
     """
     try:
         # Verify portfolio exists
-        portfolio = db.execute(
+        portfolio = (await db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.id == request.portfolio_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
 
         if not portfolio:
             raise HTTPException(
@@ -222,22 +208,22 @@ async def sync_wallet(
 @router.post("/config/wallet")
 async def configure_wallet(
     request: WalletConfigRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Configure or update the Bitcoin wallet address for a portfolio.
-    
+
     Parameters:
         request (WalletConfigRequest): Contains `portfolio_id` and the `wallet_address` to set.
-    
+
     Returns:
         dict: Response with keys `status` ("success"), `message`, `portfolio_id`, `wallet_address`, and `timestamp` (UTC).
     """
     try:
         # Verify portfolio exists
-        portfolio = db.execute(
+        portfolio = (await db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.id == request.portfolio_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
 
         if not portfolio:
             raise HTTPException(
@@ -249,7 +235,7 @@ async def configure_wallet(
         try:
             # The model will validate the address format
             portfolio.wallet_address = request.wallet_address
-            db.commit()
+            await db.commit()
         except ValueError as e:
             raise HTTPException(
                 status_code=400,
@@ -275,7 +261,7 @@ async def configure_wallet(
         raise
     except Exception as e:
         logger.error(f"Error configuring wallet: {e}")
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to configure wallet: {str(e)}"
@@ -288,16 +274,16 @@ async def get_wallet_transactions(
     portfolio_id: int = Query(..., description="Portfolio ID"),
     max_transactions: int = Query(50, description="Maximum transactions to fetch", ge=1, le=200),
     days_back: int = Query(30, description="Days to look back", ge=1, le=365),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Fetches transactions for the given Bitcoin wallet for preview and does not persist them.
-    
+
     Filters out transactions already present for the portfolio and returns the new unique transactions along with counts and a timestamp.
-    
+
     Returns:
         WalletTransactionsResponse: Response containing the wallet_address, list of unique transactions, `count` of new transactions, `total_fetched` from the fetch result, `status`, `message`, and `timestamp`.
-    
+
     Raises:
         HTTPException: 404 if the portfolio is not found.
         HTTPException: 400 if the blockchain fetch returns an error or no transactions.
@@ -306,9 +292,9 @@ async def get_wallet_transactions(
     """
     try:
         # Verify portfolio exists
-        portfolio = db.execute(
+        portfolio = (await db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
 
         if not portfolio:
             raise HTTPException(
@@ -458,11 +444,11 @@ async def get_portfolio_blockchain_transactions(
     portfolio_id: int,
     limit: int = Query(50, description="Maximum transactions to return", ge=1, le=200),
     offset: int = Query(0, description="Number of transactions to skip", ge=0),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieve blockchain transactions (exchange == "Bitcoin Blockchain") for the given portfolio, applying limit/offset paging.
-    
+
     Returns:
         A dictionary containing:
         - portfolio_id (int): The requested portfolio ID.
@@ -475,9 +461,9 @@ async def get_portfolio_blockchain_transactions(
     """
     try:
         # Verify portfolio exists
-        portfolio = db.execute(
+        portfolio = (await db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
 
         if not portfolio:
             raise HTTPException(
@@ -486,7 +472,7 @@ async def get_portfolio_blockchain_transactions(
             )
 
         # Get blockchain transactions (those with exchange = 'Bitcoin Blockchain')
-        result = db.execute(
+        result = (await db.execute(
             select(CryptoTransaction)
             .where(
                 and_(
@@ -497,12 +483,12 @@ async def get_portfolio_blockchain_transactions(
             .order_by(CryptoTransaction.timestamp.desc())
             .limit(limit)
             .offset(offset)
-        )
+        ))
 
         transactions = result.scalars().all()
 
         # Get total count
-        total_count = db.execute(
+        total_count = (await db.execute(
             select(func.count(CryptoTransaction.id))
             .where(
                 and_(
@@ -510,7 +496,7 @@ async def get_portfolio_blockchain_transactions(
                     CryptoTransaction.exchange == 'Bitcoin Blockchain'
                 )
             )
-        ).scalar()
+        )).scalar()
 
         return {
             "portfolio_id": portfolio_id,
@@ -533,21 +519,21 @@ async def get_portfolio_blockchain_transactions(
 
 
 @router.delete("/portfolio/{portfolio_id}/cache")
-async def clear_portfolio_cache(portfolio_id: int, db: Session = Depends(get_db)):
+async def clear_portfolio_cache(portfolio_id: int, db: AsyncSession = Depends(get_db)):
     """
     Clear the deduplication cache for a given portfolio.
-    
+
     Parameters:
         portfolio_id (int): ID of the portfolio whose deduplication cache should be cleared.
-    
+
     Returns:
         dict: Result object containing `status` ("success"), `message`, `portfolio_id`, and `timestamp`.
     """
     try:
         # Verify portfolio exists
-        portfolio = db.execute(
+        portfolio = (await db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
 
         if not portfolio:
             raise HTTPException(
@@ -581,17 +567,17 @@ async def clear_portfolio_cache(portfolio_id: int, db: Session = Depends(get_db)
 async def get_sync_history(
     portfolio_id: int,
     days: int = Query(30, description="Days of history to fetch", ge=1, le=365),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieve per-day synchronization summaries of blockchain transactions for a portfolio over a recent period.
-    
+
     Returns a dictionary containing the portfolio id, configured wallet address, a list of daily sync summaries (each with date, transaction_count, total_amount, and transaction_types map), the number of days with activity, total transactions found, the requested period in days, and a timestamp of the response.
-    
+
     Parameters:
         portfolio_id (int): ID of the portfolio to query.
         days (int): Number of days to include in the history (1–365).
-    
+
     Returns:
         dict: {
             "portfolio_id": int,
@@ -607,15 +593,15 @@ async def get_sync_history(
             "period_days": int,                # requested `days` value
             "timestamp": datetime              # UTC timestamp when response was generated
         }
-    
+
     Raises:
         HTTPException: 404 if the portfolio is not found; 500 if an unexpected error occurs.
     """
     try:
         # Verify portfolio exists
-        portfolio = db.execute(
+        portfolio = (await db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
 
         if not portfolio:
             raise HTTPException(
@@ -626,7 +612,7 @@ async def get_sync_history(
         # Get recent blockchain transactions
         since_date = datetime.utcnow() - timedelta(days=days)
 
-        result = db.execute(
+        result = (await db.execute(
             select(CryptoTransaction)
             .where(
                 and_(
@@ -636,7 +622,7 @@ async def get_sync_history(
                 )
             )
             .order_by(CryptoTransaction.timestamp.desc())
-        )
+        ))
 
         transactions = result.scalars().all()
 
