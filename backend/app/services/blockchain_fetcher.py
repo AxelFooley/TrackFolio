@@ -73,8 +73,9 @@ class BlockchainFetcherService:
     ADDRESS_CACHE_TTL = settings.blockchain_address_cache_ttl
 
     # Transaction limits
-    MAX_TRANSACTIONS_PER_REQUEST = 50  # Blockstream limit
+    MAX_TRANSACTIONS_PER_REQUEST = 50  # Blockchain.info limit per request
     MAX_HISTORY_DAYS = 365  # Don't fetch more than 1 year of history by default
+    MAX_PAGES = 1000  # Safety limit to prevent infinite loops (~50k transactions per wallet)
 
     def _get_cache_key(self, prefix: str, *args) -> str:
         """
@@ -375,17 +376,8 @@ class BlockchainFetcherService:
             # Convert timestamp to datetime
             timestamp = datetime.fromtimestamp(timestamp_seconds)
 
-            # Calculate the actual amount received/sent by our wallet
-            # Look through outputs to find those belonging to our wallet
-            wallet_total = 0
-            for output in tx_data.get('out', []):
-                if output.get('addr') == wallet_address:
-                    wallet_total += output.get('value', 0)
-
-            # Convert from satoshis to BTC
-            quantity = Decimal(str(abs(wallet_total))) / Decimal('100000000')
-
             # Detect transaction type based on result (positive = incoming, negative = outgoing)
+            # result field from blockchain.info is the net change in wallet balance for this transaction
             if result > 0:
                 tx_type = CryptoTransactionType.TRANSFER_IN
             elif result < 0:
@@ -394,7 +386,7 @@ class BlockchainFetcherService:
                 # Zero result, default to TRANSFER_IN
                 tx_type = CryptoTransactionType.TRANSFER_IN
 
-            # Use net result in satoshis for this wallet; fallback to 'balance' if present in test/mocks
+            # Convert net result in satoshis to BTC; fallback to 'balance' if present in test/mocks
             satoshis = abs(int(tx_data.get('result', tx_data.get('balance', 0))))
             quantity = Decimal(satoshis) / Decimal('100000000')
 
@@ -524,7 +516,7 @@ class BlockchainFetcherService:
 
             logger.info(f"Starting paginated fetch for wallet {wallet_address} (max: {max_str})")
 
-            while True:
+            while page_num <= self.MAX_PAGES:
                 params = {
                     'limit': 50,  # Blockchain.info max per request
                     'offset': offset
@@ -581,6 +573,19 @@ class BlockchainFetcherService:
 
                 # Add small delay between pages to respect rate limits
                 time.sleep(0.2)
+
+            # Check if we hit the safety limit
+            if page_num > self.MAX_PAGES:
+                logger.warning(
+                    f"Pagination safety limit reached for wallet {wallet_address}: "
+                    f"fetched {len(transactions)} transactions across {page_num - 1} pages. "
+                    f"Set MAX_PAGES={self.MAX_PAGES} to increase limit."
+                )
+                return self._build_result(
+                    transactions,
+                    'success',
+                    f'Fetched {len(transactions)} transactions (pagination limit reached)'
+                )
 
             logger.info(f"Pagination complete for wallet {wallet_address}: fetched {len(transactions)} total transactions")
             return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions')
