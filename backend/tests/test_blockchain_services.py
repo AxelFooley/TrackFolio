@@ -252,6 +252,9 @@ class TestBlockchainFetcherService:
     @patch('app.services.blockchain_fetcher.BlockchainFetcherService._make_request')
     def test_pagination_fetching(self, mock_make_request, blockchain_fetcher):
         """Test pagination fetching for addresses with many transactions."""
+        # Valid Bitcoin address for testing
+        wallet_address = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa'
+
         # Mock multiple pages of transactions
         page1 = {
             'txs': [
@@ -259,7 +262,7 @@ class TestBlockchainFetcherService:
                     'hash': f'tx_{i}',
                     'time': 1640995200 + i,
                     'result': 100000,
-                    'out': [{'addr': 'test_wallet', 'value': 100000}]
+                    'out': [{'addr': wallet_address, 'value': 100000}]
                 }
                 for i in range(50)
             ]
@@ -270,7 +273,7 @@ class TestBlockchainFetcherService:
                     'hash': f'tx_{i}',
                     'time': 1640995200 + i + 50,
                     'result': 100000,
-                    'out': [{'addr': 'test_wallet', 'value': 100000}]
+                    'out': [{'addr': wallet_address, 'value': 100000}]
                 }
                 for i in range(30)
             ]
@@ -280,7 +283,7 @@ class TestBlockchainFetcherService:
         mock_make_request.side_effect = [page1, page2, page3]
 
         result = blockchain_fetcher.fetch_transactions(
-            wallet_address='test_wallet',
+            wallet_address=wallet_address,
             portfolio_id=1,
             max_transactions=None,  # Fetch all
             days_back=None
@@ -297,7 +300,10 @@ class TestBlockchainDeduplicationService:
     @pytest.fixture
     def deduplication_service(self):
         """Create a deduplication service instance for testing."""
-        with patch('app.services.blockchain_deduplication.redis.from_url') as mock_redis:
+        with patch('app.services.blockchain_deduplication.redis.from_url') as mock_redis, \
+             patch('app.services.blockchain_deduplication.SyncSessionLocal') as mock_db, \
+             patch('app.services.blockchain_deduplication.BlockchainDeduplicationService._get_portfolio_hashes_from_db') as mock_get_hashes:
+            # Configure Redis mocks
             mock_redis.return_value.ping.return_value = True
             mock_redis.return_value.get.return_value = None
             mock_redis.return_value.setex.return_value = True
@@ -306,10 +312,19 @@ class TestBlockchainDeduplicationService:
             mock_redis.return_value.smembers.return_value = []
             mock_redis.return_value.sadd.return_value = True
             mock_redis.return_value.expire.return_value = True
-            with patch('app.services.blockchain_deduplication.SyncSessionLocal') as mock_db:
-                mock_db.return_value.__enter__.return_value.execute.return_value.all.return_value = []
-                service = BlockchainDeduplicationService()
-                return service
+
+            # Configure database mock
+            mock_db.return_value.__enter__.return_value.execute.return_value.all.return_value = []
+
+            # Mock _get_portfolio_hashes_from_db to return NEW empty set each time (not the same object)
+            # This prevents set mutations from affecting subsequent calls
+            mock_get_hashes.side_effect = lambda portfolio_id: set()
+
+            # Create service with all mocks active
+            service = BlockchainDeduplicationService()
+
+            # Ensure the mock remains active throughout the test by yielding
+            yield service
 
     @pytest.fixture
     def sample_transactions(self):
@@ -533,9 +548,12 @@ class TestBlockchainIntegration:
             with patch('app.services.blockchain_deduplication.blockchain_deduplication.get_portfolio_transaction_hashes') as mock_hashes:
                 mock_hashes.return_value = set()
 
-                # Mock the price fetcher to avoid Yahoo Finance calls
-                with patch('app.services.price_fetcher_integration.UnifiedPriceFetcher.fetch_price_with_auto_detection') as mock_prices:
-                    mock_prices.return_value = {'current_price': Decimal('50000'), 'currency': 'USD'}
+                # Mock the price prefetching function to return price data
+                with patch('app.tasks.blockchain_sync._prefetch_prices_for_dates') as mock_prefetch_prices:
+                    # Return a dict mapping date to price
+                    mock_prefetch_prices.return_value = {
+                        datetime.utcnow().date(): Decimal('50000')
+                    }
 
                     # Import the sync function
                     from app.tasks.blockchain_sync import sync_single_wallet
@@ -545,6 +563,7 @@ class TestBlockchainIntegration:
                     mock_db = Mock()
                     mock_portfolio = Mock()
                     mock_portfolio.base_currency.value = 'USD'
+                    mock_portfolio.wallet_last_sync_time = None
                     mock_result = Mock()
                     mock_result.scalar_one_or_none.return_value = mock_portfolio
                     mock_db.execute.return_value = mock_result
@@ -560,7 +579,7 @@ class TestBlockchainIntegration:
                         days_back=7
                     )
 
-                    # Verify the result - allow for 0 transactions if price fetch fails
+                    # Verify the result
                     assert result['status'] == 'success'
                     assert result['transactions_added'] >= 0
                     assert result['transactions_skipped'] >= 0
