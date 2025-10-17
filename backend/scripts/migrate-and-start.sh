@@ -13,6 +13,15 @@ MIGRATION_TIMEOUT=${MIGRATION_TIMEOUT:-300}  # 5 minutes default
 MIGRATION_LOCK_ID=${MIGRATION_LOCK_ID:-"portfolio_migrations"}  # Deterministic lock ID
 AUTO_ROLLBACK_ON_FAILURE=${AUTO_ROLLBACK_ON_FAILURE:-"false"}  # Auto-rollback on migration failure
 
+# Alembic command configuration (for custom alembic paths if needed)
+ALEMBIC_COMMAND=${ALEMBIC_COMMAND:-"alembic"}  # Path to alembic command
+ALEMBIC_DOWNGRADE_CMD=${ALEMBIC_DOWNGRADE_CMD:-"downgrade"}  # downgrade subcommand
+ALEMBIC_HEADS_CMD=${ALEMBIC_HEADS_CMD:-"heads --verbose"}  # heads subcommand with options
+ALEMBIC_UPGRADE_CMD=${ALEMBIC_UPGRADE_CMD:-"upgrade head"}  # upgrade subcommand with target
+
+# Debug configuration
+MIGRATION_DEBUG=${MIGRATION_DEBUG:-"false"}  # Enable verbose debug logging
+
 # Function to print colored output
 print_status() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -24,6 +33,12 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_debug() {
+    if [[ "$MIGRATION_DEBUG" == "true" ]]; then
+        echo -e "${YELLOW}[DEBUG]${NC} $1"
+    fi
 }
 
 # Function to handle migration failure and optional rollback
@@ -51,7 +66,7 @@ handle_migration_failure() {
     print_status "Rolling back to revision: $target_revision"
 
     # Perform the rollback
-    if alembic downgrade "$target_revision"; then
+    if $ALEMBIC_COMMAND $ALEMBIC_DOWNGRADE_CMD "$target_revision"; then
         print_status "Successfully rolled back to revision: $target_revision"
 
         # Verify rollback
@@ -72,13 +87,22 @@ handle_migration_failure() {
 cleanup() {
     # Release advisory lock if acquired
     if [[ -n "$LOCK_ACQUIRED" && "$LOCK_ACQUIRED" == "t" ]] && [[ -n "$DB_HOST" && -n "$DB_PORT" && -n "$DB_USER" && -n "$DB_DATABASE" && -f "$PGPASS_FILE" ]]; then
-        PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -c "
-            SELECT pg_advisory_unlock(hashtext('$MIGRATION_LOCK_ID'));
-        " > /dev/null 2>&1 || true
+        if [[ -n "$MIGRATION_LOCK_HASH" ]]; then
+            # Use pre-computed hash if available
+            PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -c "
+                SELECT pg_advisory_unlock($MIGRATION_LOCK_HASH);
+            " > /dev/null 2>&1 || true
+        else
+            # Fallback to computing hash (should not happen with normal flow)
+            PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -c "
+                SELECT pg_advisory_unlock(hashtext('$MIGRATION_LOCK_ID'));
+            " > /dev/null 2>&1 || true
+        fi
     fi
 
     # Remove temporary .pgpass file
     if [[ -f "$PGPASS_FILE" ]]; then
+        print_debug "Cleaning up temporary .pgpass file: $PGPASS_FILE"
         rm -f "$PGPASS_FILE"
     fi
 }
@@ -94,10 +118,17 @@ if [[ "$RUN_MIGRATIONS" != "true" ]]; then
 fi
 
 print_status "Starting automated database migration process..."
+print_debug "Configuration: MIGRATION_TIMEOUT=$MIGRATION_TIMEOUT, MIGRATION_LOCK_ID=$MIGRATION_LOCK_ID, AUTO_ROLLBACK_ON_FAILURE=$AUTO_ROLLBACK_ON_FAILURE"
+print_debug "Configuration: MIGRATION_DEBUG=$MIGRATION_DEBUG, ALEMBIC_COMMAND=$ALEMBIC_COMMAND"
 
 # Check required dependencies
 if ! command -v psql &> /dev/null; then
     print_error "psql command not found. Please ensure PostgreSQL client is installed."
+    exit 1
+fi
+
+if ! command -v python3 &> /dev/null; then
+    print_error "python3 command not found. Please ensure Python 3 is installed."
     exit 1
 fi
 
@@ -144,6 +175,7 @@ fi
 # Parse database connection info safely
 eval "$DB_PARSE_RESULT"
 
+print_debug "Parsed database connection: host=$DB_HOST, port=$DB_PORT, database=$DB_DATABASE, user=$DB_USER"
 print_status "Database: $DB_HOST:$DB_PORT/$DB_DATABASE"
 
 # Create .pgpass file for secure password handling
@@ -151,6 +183,7 @@ PGPASS_FILE=$(mktemp)
 chmod 600 "$PGPASS_FILE"
 echo "$DB_HOST:$DB_PORT:$DB_DATABASE:$DB_USER:$DB_PASSWORD" > "$PGPASS_FILE"
 export PGPASSFILE="$PGPASS_FILE"
+print_debug "Created temporary .pgpass file: $PGPASS_FILE"
 
 # Wait for database to be ready
 print_status "Waiting for database to be ready..."
@@ -179,7 +212,7 @@ cd /app
 CURRENT_REVISION=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | xargs || echo "")
 
 # Get latest revision from alembic and validate there's only one head
-LATEST_REVISIONS=$(alembic heads --verbose 2>/dev/null | grep "Rev:" | awk '{print $2}' || echo "")
+LATEST_REVISIONS=$($ALEMBIC_COMMAND $ALEMBIC_HEADS_CMD 2>/dev/null | grep "Rev:" | awk '{print $2}' || echo "")
 LATEST_REVISION_COUNT=$(echo "$LATEST_REVISIONS" | wc -w)
 
 if [[ $LATEST_REVISION_COUNT -gt 1 ]]; then
@@ -192,6 +225,8 @@ LATEST_REVISION=$(echo "$LATEST_REVISIONS" | head -1)
 
 print_status "Current revision: ${CURRENT_REVISION:-'None'}"
 print_status "Latest revision: ${LATEST_REVISION:-'None'}"
+print_debug "Alembic command executed: $ALEMBIC_COMMAND $ALEMBIC_HEADS_CMD"
+print_debug "Migration check: CURRENT_REVISION=$CURRENT_REVISION, LATEST_REVISION=$LATEST_REVISION"
 
 # Run migrations if needed
 if [[ "$CURRENT_REVISION" == "$LATEST_REVISION" ]]; then
@@ -205,9 +240,19 @@ else
 
     # Acquire PostgreSQL advisory lock to prevent concurrent migrations
     print_status "Acquiring migration lock to prevent concurrent executions..."
-    LOCK_ACQUIRED=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "
-        SELECT pg_try_advisory_lock(hashtext('$MIGRATION_LOCK_ID'));
+    print_debug "Attempting to acquire advisory lock with ID: $MIGRATION_LOCK_ID"
+
+    # Pre-compute hash for advisory lock (optimization)
+    MIGRATION_LOCK_HASH=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "
+        SELECT hashtext('$MIGRATION_LOCK_ID');
     " 2>/dev/null | xargs)
+    print_debug "Pre-computed lock hash: $MIGRATION_LOCK_HASH"
+
+    # Use pre-computed hash for lock acquisition
+    LOCK_ACQUIRED=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "
+        SELECT pg_try_advisory_lock($MIGRATION_LOCK_HASH);
+    " 2>/dev/null | xargs)
+    print_debug "Lock acquisition result: $LOCK_ACQUIRED"
 
     if [[ "$LOCK_ACQUIRED" != "t" ]]; then
         print_error "Could not acquire migration lock. Another instance may be running migrations."
@@ -215,18 +260,46 @@ else
         exit 1
     fi
 
-    print_status "Migration lock acquired. Running migrations..."
+    print_status "Migration lock acquired. Re-checking migration status to prevent race conditions..."
+
+    # Re-check current revision after acquiring lock to prevent race conditions
+    CURRENT_REVISION_AFTER_LOCK=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | xargs || echo "")
+
+    if [[ "$CURRENT_REVISION_AFTER_LOCK" != "$CURRENT_REVISION" ]]; then
+        print_warning "Migration revision changed while waiting for lock (${CURRENT_REVISION:-'None'} -> ${CURRENT_REVISION_AFTER_LOCK:-'None'})"
+        print_status "Updating migration plan with new revision..."
+        CURRENT_REVISION="$CURRENT_REVISION_AFTER_LOCK"
+
+        # Update decision about whether to run migrations
+        if [[ "$CURRENT_REVISION" == "$LATEST_REVISION" ]]; then
+            print_status "Database is already up to date after re-check. Skipping migrations."
+            # Release lock and start app
+            if [[ -n "$MIGRATION_LOCK_HASH" ]]; then
+                PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -c "
+                    SELECT pg_advisory_unlock($MIGRATION_LOCK_HASH);
+                " > /dev/null 2>&1 || true
+            else
+                PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -c "
+                    SELECT pg_advisory_unlock(hashtext('$MIGRATION_LOCK_ID'));
+                " > /dev/null 2>&1 || true
+            fi
+            LOCK_ACQUIRED="f"
+        fi
+    fi
 
     # Run alembic upgrade with timeout and proper error handling
+    print_debug "Starting migration with command: $ALEMBIC_COMMAND $ALEMBIC_UPGRADE_CMD"
     MIGRATION_EXIT_CODE=0
     if command -v timeout &> /dev/null; then
-        timeout $MIGRATION_TIMEOUT alembic upgrade head
+        print_debug "Using timeout command with ${MIGRATION_TIMEOUT}s timeout"
+        timeout $MIGRATION_TIMEOUT $ALEMBIC_COMMAND $ALEMBIC_UPGRADE_CMD
         MIGRATION_EXIT_CODE=$?
     else
         print_warning "timeout command not available, running without timeout protection"
-        alembic upgrade head
+        $ALEMBIC_COMMAND $ALEMBIC_UPGRADE_CMD
         MIGRATION_EXIT_CODE=$?
     fi
+    print_debug "Migration command completed with exit code: $MIGRATION_EXIT_CODE"
 
     # Handle different exit codes
     if [[ $MIGRATION_EXIT_CODE -eq 0 ]]; then

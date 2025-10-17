@@ -38,6 +38,8 @@ from app.schemas.crypto import (
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
+from app.tasks.blockchain_sync import sync_wallet_manually
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +108,23 @@ async def create_crypto_portfolio(
         db.add(portfolio)
         await db.commit()
         await db.refresh(portfolio)
+
+        # Trigger automatic full sync if wallet address is provided
+        sync_task_started = False
+        if portfolio.wallet_address:
+            try:
+                # Start background sync task with no limits (fetch all history)
+                task = sync_wallet_manually.delay(
+                    wallet_address=portfolio.wallet_address,
+                    portfolio_id=portfolio.id,
+                    max_transactions=None,  # No limit - fetch all transactions
+                    days_back=None           # No date limit - fetch complete history
+                )
+                sync_task_started = True
+                logger.info(f"Started automatic full sync for new portfolio {portfolio.id} with wallet {portfolio.wallet_address}")
+            except Exception as e:
+                logger.error(f"Failed to start automatic sync for wallet {portfolio.wallet_address}: {e}")
+                # Don't fail the portfolio creation, just log the error
 
         return portfolio
 
@@ -772,6 +791,39 @@ async def get_wallet_sync_status(
         HTTPException: 404 if the portfolio does not exist; 500 for unexpected errors.
     """
     try:
+        # Check if wallet is currently syncing (Redis-based real-time status)
+        logger.info(f"Checking Redis sync status for portfolio {portfolio_id}")
+        try:
+            import redis
+            import json
+
+            # Connect to Redis directly
+            redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+            key = f"wallet_sync:{portfolio_id}"
+            value = redis_client.get(key)
+            logger.info(f"Redis key {key}: {value}")
+
+            if value:
+                try:
+                    sync_status = json.loads(value)
+                    logger.info(f"Parsed sync status: {sync_status}")
+                    if sync_status.get("status") == "syncing":
+                        logger.info(f"Returning syncing status for portfolio {portfolio_id}")
+                        return {
+                            "status": "syncing",
+                            "last_sync": None,
+                            "transaction_count": None,
+                            "error_message": None,
+                            "task_id": sync_status.get("task_id"),
+                            "started_at": sync_status.get("started_at")
+                        }
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid sync status JSON for portfolio {portfolio_id}")
+                    # Clear invalid data
+                    redis_client.delete(key)
+        except Exception as e:
+            logger.error(f"Error checking Redis sync status for portfolio {portfolio_id}: {e}")
+            # Continue with normal status checking if Redis fails
         # Verify portfolio exists
         portfolio_result = await db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
