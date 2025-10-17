@@ -25,8 +25,16 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Cleanup function for temporary files
+# Cleanup function for temporary files and locks
 cleanup() {
+    # Release advisory lock if acquired
+    if [[ -n "$LOCK_ACQUIRED" && "$LOCK_ACQUIRED" == "t" ]] && [[ -n "$HOST" && -n "$PORT" && -n "$USER" && -n "$DATABASE" && -f "$PGPASS_FILE" ]]; then
+        PGPASSFILE="$PGPASS_FILE" psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DATABASE" -c "
+            SELECT pg_advisory_unlock(hashtext('$MIGRATION_LOCK_ID'));
+        " > /dev/null 2>&1 || true
+    fi
+
+    # Remove temporary .pgpass file
     if [[ -f "$PGPASS_FILE" ]]; then
         rm -f "$PGPASS_FILE"
     fi
@@ -175,11 +183,6 @@ else
         alembic upgrade head
         MIGRATION_EXIT_CODE=$?
     fi
-
-    # Release the lock
-    PGPASSFILE="$PGPASS_FILE" psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DATABASE" -c "
-        SELECT pg_advisory_unlock(hashtext('$MIGRATION_LOCK_ID'));
-    " > /dev/null 2>&1
 
     # Handle different exit codes
     if [[ $MIGRATION_EXIT_CODE -eq 0 ]]; then
