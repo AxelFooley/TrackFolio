@@ -52,6 +52,7 @@ services:
       ENVIRONMENT: production
       LOG_LEVEL: INFO
       ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      RUN_MIGRATIONS: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,9 +118,9 @@ services:
       - "127.0.0.1:3000:3000"  # Bind to localhost only for security
     environment:
       # Runtime backend API URL - used by Next.js API routes for proxying
-      BACKEND_API_URL: http://backend:8000
+      BACKEND_API_URL: http://10.0.120.198:8001
       # Client-side API URL - fallback for client-side API calls
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      # NEXT_PUBLIC_API_URL: http://localhost:8000/api
       NODE_ENV: production
       DOCKER_ENV: true
     depends_on:

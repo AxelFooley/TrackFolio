@@ -65,6 +65,7 @@ docker-compose -f docker-compose.prod.yml up --build -d
 | `ENVIRONMENT` | Application environment | `production` | `production` |
 | `LOG_LEVEL` | Logging level | `INFO` | `INFO` |
 | `SECRET_KEY` | Security secret key | `random_string` | Auto-generated |
+| `RUN_MIGRATIONS` | Auto-run database migrations | `"true"` | `"true"` |
 
 ### Frontend Configuration
 
@@ -142,15 +143,22 @@ docker-compose exec backend pytest
 cp .env.prod.example .env
 nano .env  # Edit with your values
 
-# 2. Start production services
+# 2. Start production services (migrations run automatically)
 docker-compose -f docker-compose.prod.yml up --build -d
 
-# 3. Run database migrations
-docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
-
-# 4. Verify services
+# 3. Verify services and migrations
 docker-compose -f docker-compose.prod.yml ps
 docker-compose -f docker-compose.prod.yml logs
+```
+
+**Note**: Database migrations now run automatically during container startup! The backend container will:
+1. Wait for the database to be ready
+2. Run `alembic upgrade head` automatically if needed
+3. Start the FastAPI application
+
+You can check migration status via the health endpoint:
+```bash
+curl http://localhost:8000/api/health
 ```
 
 ### Production with Nginx Reverse Proxy
@@ -208,13 +216,14 @@ REDIS_URL=redis://redis:6379/0
 ALLOWED_ORIGINS=["https://yourdomain.com"]
 ENVIRONMENT=production
 LOG_LEVEL=INFO
+RUN_MIGRATIONS=true
 EOF
 
-# 2. Start backend services only
+# 2. Start backend services only (migrations run automatically)
 docker-compose -f docker-compose.prod.yml up -d postgres redis backend celery-worker celery-beat
 
-# 3. Run migrations
-docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
+# 3. Verify migrations completed
+curl http://localhost:8000/api/health
 ```
 
 #### Frontend Host Setup
@@ -498,6 +507,25 @@ async def test():
 
 asyncio.run(test())
 "
+```
+
+### Migration Issues
+
+```bash
+# Check migration status
+curl http://localhost:8000/api/health
+
+# Manual migration (if automatic fails)
+docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
+
+# Check migration history
+docker-compose -f docker-compose.prod.yml exec backend alembic history
+
+# Check current revision
+docker-compose -f docker-compose.prod.yml exec backend alembic current
+
+# Skip migrations (emergency only)
+RUN_MIGRATIONS=false docker-compose -f docker-compose.prod.yml up -d backend
 ```
 
 #### Frontend Build Issues

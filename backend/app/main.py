@@ -57,12 +57,39 @@ app.include_router(blockchain_router)
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
-    return {
+    """Health check endpoint with database migration status."""
+    from app.database import get_db_session
+    import asyncio
+
+    health_data = {
         "status": "healthy",
         "app": settings.app_name,
-        "environment": settings.environment
+        "environment": settings.environment,
+        "database": "unknown"
     }
+
+    # Check database connectivity and migration status
+    try:
+        async with get_db_session() as session:
+            # Check if alembic_version table exists and get current revision
+            result = await session.execute(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            )
+            current_revision = result.scalar()
+
+            if current_revision:
+                health_data["database"] = "connected"
+                health_data["migration_revision"] = current_revision
+            else:
+                health_data["database"] = "connected_no_migrations"
+
+    except Exception as e:
+        logger.warning(f"Database health check failed: {e}")
+        health_data["database"] = "error"
+        health_data["database_error"] = str(e)
+        # Still return 200 for basic health, but indicate database issues
+
+    return health_data
 
 
 @app.get("/")
