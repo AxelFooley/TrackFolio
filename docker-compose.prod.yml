@@ -101,6 +101,7 @@ services:
 
       # Database migrations
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-"true"}
+      MIGRATION_TIMEOUT: ${MIGRATION_TIMEOUT:-"300"}
 
       # Optional: External API keys
       # COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}

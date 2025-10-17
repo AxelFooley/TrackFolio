@@ -66,6 +66,7 @@ docker-compose -f docker-compose.prod.yml up --build -d
 | `LOG_LEVEL` | Logging level | `INFO` | `INFO` |
 | `SECRET_KEY` | Security secret key | `random_string` | Auto-generated |
 | `RUN_MIGRATIONS` | Auto-run database migrations | `"true"` | `"true"` |
+| `MIGRATION_TIMEOUT` | Migration timeout in seconds | `"600"` | `"300"` |
 
 ### Frontend Configuration
 
@@ -163,32 +164,57 @@ curl http://localhost:8000/api/health
 
 ### ⚠️ Important: Concurrent Deployment Safety
 
-**Single Instance Requirement**: When running multiple backend containers (load balancing, blue-green deployments), only ONE container should have `RUN_MIGRATIONS=true` at a time. Multiple containers attempting to run migrations simultaneously can cause database lock conflicts.
+**Automatic Locking Protection**: The migration system now uses PostgreSQL advisory locks to prevent concurrent migrations. When multiple containers start simultaneously, only one will acquire the lock and run migrations, while others will wait or fail gracefully.
+
+**Lock Behavior**:
+- Lock ID: `portfolio_migrations` (deterministic based on project)
+- First container to acquire lock runs migrations
+- Other containers fail with clear error message about concurrent execution
+- Lock is automatically released after migration completion
 
 **Safe Deployment Strategies**:
 
-1. **Rolling Update**: Deploy with `RUN_MIGRATIONS=false` on all instances, then run migrations manually:
+1. **Automated (Recommended)**: Let the advisory lock handle concurrency automatically:
    ```bash
-   # Deploy new version without migrations
+   # All containers can have RUN_MIGRATIONS=true
+   # First container will run migrations, others will wait/fail safely
+   docker-compose up -d
+   ```
+
+2. **Rolling Update**: Deploy with `RUN_MIGRATIONS=false` on additional instances:
+   ```bash
+   # Deploy first instance (runs migrations)
+   docker-compose up -d backend
+
+   # Deploy additional instances without migrations
+   RUN_MIGRATIONS=false docker-compose up -d --scale backend=3
+   ```
+
+3. **Separate Migration Container**: Use a dedicated migration container in production:
+   ```bash
+   # Run migrations in separate container
+   docker-compose run --rm backend alembic upgrade head
+
+   # Then start application containers without migrations
    RUN_MIGRATIONS=false docker-compose up -d
-
-   # Run migrations once on a single container
-   docker-compose exec backend alembic upgrade head
-
-   # Restart all instances
-   docker-compose restart backend
    ```
 
-2. **Maintenance Mode**: Stop all services, update, then start with migrations:
-   ```bash
-   docker-compose down
-   # Update images/code
-   docker-compose up -d  # First instance will run migrations
-   ```
+**Troubleshooting Concurrent Issues**:
+```bash
+# Check for stuck locks
+docker-compose exec postgres psql -U portfolio portfolio_db -c "
+SELECT pid, state, query
+FROM pg_stat_activity
+WHERE query LIKE '%advisory_lock%' AND state = 'active';
+"
 
-3. **Init Container**: Use a separate migration container in production environments.
+# Force release stuck locks (emergency only)
+docker-compose exec postgres psql -U portfolio portfolio_db -c "
+SELECT pg_advisory_unlock(hashtext('portfolio_migrations'));
+"
+```
 
-**Risk**: Ignoring this constraint can lead to database corruption or failed deployments.
+**Note**: While advisory locks provide protection, it's still recommended to follow proper deployment practices for production environments.
 
 ### Production with Nginx Reverse Proxy
 
@@ -555,6 +581,102 @@ docker-compose -f docker-compose.prod.yml exec backend alembic current
 
 # Skip migrations (emergency only)
 RUN_MIGRATIONS=false docker-compose -f docker-compose.prod.yml up -d backend
+```
+
+### Migration Rollback and Recovery
+
+**⚠️ Important**: Rollbacks should be performed carefully and always with a recent database backup.
+
+#### Database Backup Before Rollback
+
+```bash
+# Create backup before rollback
+docker-compose -f docker-compose.prod.yml exec postgres pg_dump -U portfolio portfolio_db > backup_before_rollback_$(date +%Y%m%d_%H%M%S).sql
+```
+
+#### Manual Migration Rollback
+
+```bash
+# Check available revisions for rollback
+docker-compose -f docker-compose.prod.yml exec backend alembic history
+
+# Rollback to specific revision (replace with target revision)
+docker-compose -f docker-compose.prod.yml exec backend alembic downgrade <revision_id>
+
+# Rollback one step
+docker-compose -f docker-compose.prod.yml exec backend alembic downgrade -1
+
+# Verify current revision after rollback
+docker-compose -f docker-compose.prod.yml exec backend alembic current
+```
+
+#### Recovery from Failed Migrations
+
+**Scenario 1: Migration timed out or failed midway**
+```bash
+# 1. Stop all services
+docker-compose -f docker-compose.prod.yml down
+
+# 2. Check database state
+docker-compose -f docker-compose.prod.yml up -d postgres
+docker-compose -f docker-compose.prod.yml exec postgres psql -U portfolio portfolio_db -c "SELECT version_num FROM alembic_version;"
+
+# 3. If migration is partially applied, rollback to previous working state
+docker-compose -f docker-compose.prod.yml run --rm backend alembic downgrade <previous_revision>
+
+# 4. Restart services
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+**Scenario 2: Multiple heads detected**
+```bash
+# This requires manual resolution. Check the migration history:
+docker-compose -f docker-compose.prod.yml exec backend alembic history
+
+# Identify where branches diverged and merge them manually in the migration files
+# Then create a new migration to merge the branches
+```
+
+#### Configuration for Extended Migration Times
+
+For large databases or complex migrations, adjust timeout settings:
+
+```yaml
+# In docker-compose.prod.yml
+backend:
+  environment:
+    MIGRATION_TIMEOUT: "600"  # 10 minutes for large migrations
+```
+
+#### Emergency Recovery Procedures
+
+**Complete database restoration (last resort)**:
+```bash
+# 1. Stop all services
+docker-compose -f docker-compose.prod.yml down
+
+# 2. Restore from backup (most recent working backup)
+gunzip -c /path/to/backup/portfolio_db_YYYYMMDD_HHMMSS.sql.gz | \
+docker-compose -f docker-compose.prod.yml run --rm postgres psql -U portfolio -d portfolio_db
+
+# 3. Restart services
+docker-compose -f docker-compose.prod.yml up -d
+
+# 4. Verify application health
+curl http://localhost:8000/api/health
+```
+
+**Monitoring migration progress**:
+```bash
+# Watch migration logs in real-time
+docker-compose -f docker-compose.prod.yml logs -f backend
+
+# Check database locks during migration
+docker-compose -f docker-compose.prod.yml exec postgres psql -U portfolio portfolio_db -c "
+SELECT pid, state, query
+FROM pg_stat_activity
+WHERE state = 'active' AND query LIKE '%alembic%';
+"
 ```
 
 #### Frontend Build Issues
