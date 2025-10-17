@@ -161,6 +161,35 @@ You can check migration status via the health endpoint:
 curl http://localhost:8000/api/health
 ```
 
+### ⚠️ Important: Concurrent Deployment Safety
+
+**Single Instance Requirement**: When running multiple backend containers (load balancing, blue-green deployments), only ONE container should have `RUN_MIGRATIONS=true` at a time. Multiple containers attempting to run migrations simultaneously can cause database lock conflicts.
+
+**Safe Deployment Strategies**:
+
+1. **Rolling Update**: Deploy with `RUN_MIGRATIONS=false` on all instances, then run migrations manually:
+   ```bash
+   # Deploy new version without migrations
+   RUN_MIGRATIONS=false docker-compose up -d
+
+   # Run migrations once on a single container
+   docker-compose exec backend alembic upgrade head
+
+   # Restart all instances
+   docker-compose restart backend
+   ```
+
+2. **Maintenance Mode**: Stop all services, update, then start with migrations:
+   ```bash
+   docker-compose down
+   # Update images/code
+   docker-compose up -d  # First instance will run migrations
+   ```
+
+3. **Init Container**: Use a separate migration container in production environments.
+
+**Risk**: Ignoring this constraint can lead to database corruption or failed deployments.
+
 ### Production with Nginx Reverse Proxy
 
 ```bash

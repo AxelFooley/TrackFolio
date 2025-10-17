@@ -29,6 +29,16 @@ fi
 
 print_status "Starting automated database migration process..."
 
+# Check required dependencies
+if ! command -v psql &> /dev/null; then
+    print_error "psql command not found. Please ensure PostgreSQL client is installed."
+    exit 1
+fi
+
+if ! command -v timeout &> /dev/null; then
+    print_warning "timeout command not found. Migration timeout protection disabled."
+fi
+
 # Get database connection details from DATABASE_URL
 if [[ -z "$DATABASE_URL" ]]; then
     print_error "DATABASE_URL environment variable is not set"
@@ -92,9 +102,14 @@ else
         print_status "Running initial database migration..."
     fi
 
-    # Run alembic upgrade with timeout
+    # Run alembic upgrade with timeout (if available)
     MIGRATION_TIMEOUT=300  # 5 minutes
-    timeout $MIGRATION_TIMEOUT alembic upgrade head
+    if command -v timeout &> /dev/null; then
+        timeout $MIGRATION_TIMEOUT alembic upgrade head
+    else
+        print_warning "timeout command not available, running without timeout protection"
+        alembic upgrade head
+    fi
 
     if [[ $? -eq 0 ]]; then
         print_status "Database migrations completed successfully!"

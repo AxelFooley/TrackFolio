@@ -59,6 +59,7 @@ app.include_router(blockchain_router)
 async def health_check():
     """Health check endpoint with database migration status."""
     from app.database import AsyncSessionLocal
+    from sqlalchemy import text
 
     health_data = {
         "status": "healthy",
@@ -71,15 +72,20 @@ async def health_check():
     try:
         async with AsyncSessionLocal() as session:
             # Check if alembic_version table exists and get current revision
-            result = await session.execute(
-                "SELECT version_num FROM alembic_version LIMIT 1"
-            )
-            current_revision = result.scalar()
+            try:
+                result = await session.execute(
+                    text("SELECT version_num FROM alembic_version LIMIT 1")
+                )
+                current_revision = result.scalar()
 
-            if current_revision:
-                health_data["database"] = "connected"
-                health_data["migration_revision"] = current_revision
-            else:
+                if current_revision:
+                    health_data["database"] = "connected"
+                    health_data["migration_revision"] = current_revision
+                else:
+                    health_data["database"] = "connected_no_migrations"
+            except Exception as table_error:
+                # Table doesn't exist - first deployment
+                logger.debug("alembic_version table not found (expected for first deployment)")
                 health_data["database"] = "connected_no_migrations"
 
     except Exception as e:
