@@ -99,6 +99,11 @@ services:
       # Security
       SECRET_KEY: ${SECRET_KEY:-$(openssl rand -hex 32)}
 
+      # Database migrations
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-"true"}
+      MIGRATION_TIMEOUT: ${MIGRATION_TIMEOUT:-"300"}
+      AUTO_ROLLBACK_ON_FAILURE: ${AUTO_ROLLBACK_ON_FAILURE:-"false"}
+
       # Optional: External API keys
       # COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
 
