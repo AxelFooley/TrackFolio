@@ -58,8 +58,7 @@ app.include_router(blockchain_router)
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint with database migration status."""
-    from app.database import get_db_session
-    import asyncio
+    from app.database import AsyncSessionLocal
 
     health_data = {
         "status": "healthy",
@@ -70,7 +69,7 @@ async def health_check():
 
     # Check database connectivity and migration status
     try:
-        async with get_db_session() as session:
+        async with AsyncSessionLocal() as session:
             # Check if alembic_version table exists and get current revision
             result = await session.execute(
                 "SELECT version_num FROM alembic_version LIMIT 1"
