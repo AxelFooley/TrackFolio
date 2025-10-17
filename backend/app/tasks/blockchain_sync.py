@@ -12,6 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from typing import Optional
 import logging
 import time
+import json
+import redis
 
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
@@ -22,6 +24,39 @@ from app.services.price_fetcher import PriceFetcher
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Redis client for sync status tracking
+redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+
+def set_syncing_status(portfolio_id: int, task_id: str):
+    """Set wallet syncing status in Redis"""
+    key = f"wallet_sync:{portfolio_id}"
+    value = {
+        "status": "syncing",
+        "task_id": task_id,
+        "started_at": datetime.utcnow().isoformat()
+    }
+    redis_client.setex(key, 600, json.dumps(value))  # 10 minute TTL
+    logger.info(f"Set sync status for portfolio {portfolio_id}: syncing")
+
+def clear_syncing_status(portfolio_id: int):
+    """Clear wallet syncing status from Redis"""
+    key = f"wallet_sync:{portfolio_id}"
+    redis_client.delete(key)
+    logger.info(f"Cleared sync status for portfolio {portfolio_id}")
+
+def get_syncing_status(portfolio_id: int) -> Optional[dict]:
+    """Get wallet syncing status from Redis"""
+    key = f"wallet_sync:{portfolio_id}"
+    value = redis_client.get(key)
+    if value:
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid sync status JSON for portfolio {portfolio_id}")
+            # Clear invalid data
+            redis_client.delete(key)
+    return None
 
 
 def get_usd_to_eur_rate() -> Optional[Decimal]:
@@ -143,12 +178,26 @@ def _sync_bitcoin_wallets_impl():
         # Sync each wallet (using config defaults for automatic syncs)
         for portfolio in portfolios:
             try:
+                # Check if this is the first sync (wallet_last_sync_time is None)
+                is_first_sync = portfolio.wallet_last_sync_time is None
+
+                # For first sync: fetch everything (no limits)
+                # For subsequent syncs: use configured limits to keep updated efficiently
+                if is_first_sync:
+                    max_txs = None  # Unlimited
+                    days = None  # All history
+                    logger.info(f"First sync detected for wallet {portfolio.wallet_address}: fetching all transactions")
+                else:
+                    max_txs = settings.blockchain_max_transactions_per_sync
+                    days = settings.blockchain_sync_days_back
+                    logger.info(f"Subsequent sync for wallet {portfolio.wallet_address}: applying configured limits (max: {max_txs}, days: {days})")
+
                 wallet_result = sync_single_wallet(
                     portfolio.wallet_address,
                     portfolio.id,
                     db,
-                    max_transactions=settings.blockchain_max_transactions_per_sync,
-                    days_back=settings.blockchain_sync_days_back
+                    max_transactions=max_txs,
+                    days_back=days
                 )
 
                 wallet_results.append({
@@ -214,6 +263,66 @@ def _sync_bitcoin_wallets_impl():
 
     finally:
         db.close()
+
+
+def _prefetch_prices_for_dates(symbol: str, dates: list, base_currency: str, logger) -> dict:
+    """
+    Prefetch historical prices for multiple dates to avoid per-transaction API calls.
+
+    Batches price requests by date range to minimize API calls. For 1000 transactions
+    across 100 dates, this makes ~1-2 calls instead of 1000.
+
+    Args:
+        symbol: Cryptocurrency symbol (e.g., 'BTC')
+        dates: List of datetime.date objects to fetch prices for
+        base_currency: Currency for prices (e.g., 'EUR', 'USD')
+        logger: Logger instance
+
+    Returns:
+        dict: Mapping of date -> price (Decimal)
+    """
+    if not dates:
+        return {}
+
+    price_cache = {}
+
+    try:
+        # Sort dates and find min/max for efficient range fetching
+        sorted_dates = sorted(dates)
+        start_date = sorted_dates[0]
+        end_date = sorted_dates[-1]
+
+        # Fetch all prices for the date range in one call
+        price_fetcher = PriceFetcher()
+        yahoo_ticker = f"{symbol}-{base_currency.upper()}"
+
+        logger.info(
+            f"Batch fetching {len(set(dates))} unique prices for {symbol} "
+            f"from {start_date} to {end_date} in {base_currency}"
+        )
+
+        historical_prices = price_fetcher.fetch_historical_prices_sync(
+            ticker=yahoo_ticker,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if historical_prices:
+            # Build lookup map: date -> price
+            for price_data in historical_prices:
+                price_date = price_data.get('date')
+                close_price = price_data.get('close')
+                if price_date and close_price:
+                    price_cache[price_date] = close_price
+
+            logger.info(f"Successfully fetched {len(price_cache)} price records for {symbol}")
+        else:
+            logger.warning(f"No historical prices returned for {symbol} in date range {start_date} to {end_date}")
+
+    except Exception as e:
+        logger.error(f"Error prefetching prices for {symbol}: {e}")
+
+    return price_cache
 
 
 def sync_single_wallet(
@@ -285,6 +394,21 @@ def sync_single_wallet(
         blockchain_transactions = blockchain_result.get('transactions', [])
         logger.info(f"Fetched {len(blockchain_transactions)} transactions from blockchain for wallet {wallet_address}")
 
+        # Pre-fetch all unique prices to avoid per-transaction API calls
+        # Group transactions by date to minimize API requests
+        unique_dates = set()
+        for tx in blockchain_transactions:
+            if tx.get('timestamp'):
+                unique_dates.add(tx['timestamp'].date())
+
+        price_cache = _prefetch_prices_for_dates(
+            symbol='BTC',
+            dates=list(unique_dates),
+            base_currency=base_currency,
+            logger=logger
+        )
+        logger.info(f"Pre-fetched prices for {len(price_cache)} unique transaction dates")
+
         # Process and filter transactions
         new_transactions = []
         skipped_transactions = []
@@ -300,40 +424,19 @@ def sync_single_wallet(
                     skipped_transactions.append(tx_data)
                     continue
 
-                # Get historical price at transaction time in wallet's base currency
-                price_at_time = get_historical_price_at_time(
-                    symbol='BTC',
-                    timestamp=tx_data['timestamp'],
-                    base_currency=base_currency
-                )
+                # Get historical price from pre-fetched cache
+                tx_date = tx_data['timestamp'].date()
+                price_at_time = price_cache.get(tx_date)
 
                 if price_at_time:
                     tx_data['price_at_execution'] = price_at_time
                     tx_data['total_amount'] = tx_data['quantity'] * price_at_time
                     tx_data['currency'] = CryptoCurrency(base_currency)
                 else:
-                    # Fallback to current price if historical price not available
-                    logger.warning(f"Could not get historical price for transaction {tx_hash}, using current price from Yahoo Finance")
-                    try:
-                        price_fetcher = PriceFetcher()
-                        # Fetch price in wallet's base currency
-                        ticker = f'BTC-{base_currency.upper()}'
-                        current_price_data = price_fetcher.fetch_realtime_price(ticker)
-
-                        if current_price_data and current_price_data.get('current_price'):
-                            current_price = current_price_data['current_price']
-                            logger.debug(f"Using current Yahoo Finance price for {tx_hash}: {current_price} {base_currency}")
-                            tx_data['price_at_execution'] = current_price
-                            tx_data['total_amount'] = tx_data['quantity'] * current_price
-                            tx_data['currency'] = CryptoCurrency(base_currency)
-                        else:
-                            raise Exception("Yahoo Finance returned no price data")
-
-                    except Exception as e:
-                        # No fallback - skip transactions without valid price data
-                        logger.error(f"Could not get any price data for transaction {tx_hash}: {e}. Skipping transaction.")
-                        failed_transactions.append(tx_data)
-                        continue
+                    # No price found in cache - skip this transaction
+                    logger.error(f"Could not get price for transaction {tx_hash} at {tx_date}. Skipping transaction.")
+                    failed_transactions.append(tx_data)
+                    continue
 
                 # Create transaction record
                 transaction = CryptoTransaction(
@@ -359,27 +462,52 @@ def sync_single_wallet(
                 failed_transactions.append(tx_data)
                 continue
 
-        # Save new transactions to database
+        # Save new transactions to database in batch for better performance
+        # Batch commit instead of per-transaction commit to reduce database I/O
         transactions_added = 0
+
+        # Add all transactions to the session first
         for transaction in new_transactions:
-            try:
-                db_session.add(transaction)
-                db_session.commit()
-                transactions_added += 1
-                logger.debug(f"Added new transaction: {transaction.transaction_hash}")
+            db_session.add(transaction)
 
-            except IntegrityError as e:
-                db_session.rollback()
-                # This could happen due to race conditions or duplicate hash constraints
-                logger.warning(f"Integrity error adding transaction {transaction.transaction_hash}: {e}")
-                skipped_transactions.append(transaction.transaction_hash)
-                continue
+        # Then commit all at once
+        try:
+            db_session.commit()
+            transactions_added = len(new_transactions)
+            logger.info(f"Batch committed {transactions_added} new transactions to database")
+        except IntegrityError as e:
+            # Some transactions may have integrity errors (duplicates, constraints)
+            # Rollback and try one-by-one to identify which ones fail
+            db_session.rollback()
+            logger.warning(f"Batch commit failed with integrity error, retrying individually: {e}")
 
-            except Exception as e:
-                db_session.rollback()
-                logger.error(f"Error saving transaction {transaction.transaction_hash}: {e}")
-                failed_transactions.append(transaction.transaction_hash)
-                continue
+            for transaction in new_transactions:
+                try:
+                    db_session.add(transaction)
+                    db_session.commit()
+                    transactions_added += 1
+                    logger.debug(f"Added new transaction: {transaction.transaction_hash}")
+                except IntegrityError as ie:
+                    db_session.rollback()
+                    logger.warning(f"Integrity error adding transaction {transaction.transaction_hash}: {ie}")
+                    skipped_transactions.append(transaction.transaction_hash)
+                except Exception as ex:
+                    db_session.rollback()
+                    logger.error(f"Error saving transaction {transaction.transaction_hash}: {ex}")
+                    failed_transactions.append(transaction.transaction_hash)
+        except Exception as e:
+            db_session.rollback()
+            logger.error(f"Error batch committing transactions: {e}")
+            # Try again one-by-one to salvage what we can
+            for transaction in new_transactions:
+                try:
+                    db_session.add(transaction)
+                    db_session.commit()
+                    transactions_added += 1
+                except Exception as ex:
+                    db_session.rollback()
+                    logger.error(f"Error saving transaction {transaction.transaction_hash}: {ex}")
+                    failed_transactions.append(transaction.transaction_hash)
 
         # Update wallet_last_sync_time if transactions were processed or if it's the first sync
         total_processed = transactions_added + len(skipped_transactions)
@@ -530,6 +658,9 @@ def sync_wallet_manually(
         f"max_transactions={max_transactions}, days_back={days_back}"
     )
 
+    # Set syncing status in Redis
+    set_syncing_status(portfolio_id, self.request.id)
+
     db = SyncSessionLocal()
 
     try:
@@ -571,6 +702,8 @@ def sync_wallet_manually(
         raise
 
     finally:
+        # Clear syncing status from Redis
+        clear_syncing_status(portfolio_id)
         db.close()
 
 
@@ -581,39 +714,44 @@ def sync_wallet_manually(
 )
 def test_blockchain_connection(self):
     """
-    Test connectivity to configured blockchain API services.
-    
+    Test connectivity to Blockchain.info API.
+
     Returns:
         dict: Summary of the connection test. On success includes:
             - status (str): "success"
-            - message (str): human-readable summary like "Connected to X/Y blockchain APIs"
-            - api_results (dict): mapping of API identifiers to boolean connection results
+            - message (str): human-readable summary
+            - api_result (bool): connection result
             - timestamp (str): ISO-formatted UTC timestamp
         On failure includes:
             - status (str): "error"
             - error (str): error message
             - timestamp (str): ISO-formatted UTC timestamp
     """
-    logger.info("Testing blockchain API connections")
+    logger.info("Testing Blockchain.info API connection")
 
     try:
-        results = blockchain_fetcher.test_api_connection()
+        result = blockchain_fetcher.test_api_connection()
 
-        success_count = sum(1 for status in results.values() if status)
-        total_count = len(results)
-
-        summary = {
-            "status": "success",
-            "message": f"Connected to {success_count}/{total_count} blockchain APIs",
-            "api_results": results,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        if result:
+            summary = {
+                "status": "success",
+                "message": "Successfully connected to Blockchain.info API",
+                "api_result": result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        else:
+            summary = {
+                "status": "error",
+                "message": "Failed to connect to Blockchain.info API",
+                "api_result": result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
         logger.info(f"Blockchain API connection test: {summary}")
         return summary
 
     except Exception as e:
-        logger.error(f"Error testing blockchain API connections: {e}")
+        logger.error(f"Error testing Blockchain.info API connection: {e}")
         return {
             "status": "error",
             "error": str(e),

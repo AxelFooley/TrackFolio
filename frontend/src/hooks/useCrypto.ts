@@ -77,6 +77,8 @@ export function useCryptoPortfolio(id: number) {
  * Provides a React Query mutation hook for creating a crypto portfolio.
  *
  * The mutation calls the `createCryptoPortfolio` API and, on success, invalidates the cached portfolios list.
+ * If a wallet address is provided, it also immediately invalidates the wallet sync status to trigger
+ * an immediate status check for automatic sync detection.
  *
  * @returns A mutation result that executes the createCryptoPortfolio API and invalidates the `['crypto','portfolios']` query on success.
  */
@@ -85,8 +87,23 @@ export function useCreateCryptoPortfolio() {
 
   return useMutation({
     mutationFn: createCryptoPortfolio,
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios'] });
+
+      // If the portfolio was created with a wallet address, immediately check sync status
+      if (data?.wallet_address && data?.id) {
+        queryClient.invalidateQueries({
+          queryKey: ['crypto', 'portfolios', data.id, 'wallet-sync-status']
+        });
+
+        // Also trigger immediate refetch for faster UI update
+        setTimeout(() => {
+          queryClient.fetchQuery({
+            queryKey: ['crypto', 'portfolios', data.id, 'wallet-sync-status'],
+            queryFn: () => getWalletSyncStatus(data.id)
+          });
+        }, 1000); // Wait 1 second for backend to start the sync task
+      }
     },
   });
 }
@@ -399,9 +416,18 @@ export function useWalletSyncStatus(portfolioId: number) {
   return useQuery({
     queryKey,
     queryFn: () => getWalletSyncStatus(portfolioId),
-    staleTime: 60000, // 1 minute
+    staleTime: 10000, // 10 seconds - more responsive
     enabled: !!portfolioId,
-    refetchInterval: 300000, // Default: 5 minutes
+    refetchInterval: (query) => {
+      // Poll more frequently when syncing, normally when idle
+      const data = query.state.data;
+      if (data?.status === 'syncing') {
+        return 5000; // Every 5 seconds during sync
+      }
+      return 60000; // Every 1 minute when not syncing
+    },
+    // Add window focus refetch for immediate updates when user returns
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -445,11 +471,8 @@ export function useSyncWallet() {
       // Update with the full response data from the server
       queryClient.setQueryData(['crypto', 'portfolios', portfolioId, 'wallet-sync-status'], data);
 
-      // Invalidate related queries
-      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId] });
-      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'holdings'] });
-      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'metrics'] });
+      // Note: Query invalidation is handled in WalletSync component when sync actually completes,
+      // not here when the API returns (the background task hasn't finished yet at this point)
     },
   });
 }
@@ -457,7 +480,7 @@ export function useSyncWallet() {
 /**
  * Provides a mutation hook to configure a wallet address for a portfolio.
  *
- * @returns A mutation object that accepts `{ portfolioId, walletAddress }` and configures the wallet address for that portfolio. On success, invalidates the portfolio cache, the portfolio's wallet-sync-status cache, and the portfolio list cache.
+ * @returns A mutation object that accepts `{ portfolioId, walletAddress }` and configures the wallet address for that portfolio. On success, invalidates the portfolio cache, the portfolio's wallet-sync-status cache, and the portfolio list cache. Also immediately checks sync status for automatic sync detection.
  */
 export function useConfigureWalletAddress() {
   const queryClient = useQueryClient();
@@ -470,6 +493,14 @@ export function useConfigureWalletAddress() {
       queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId] });
       queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'wallet-sync-status'] });
       queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios'] }); // Update the portfolio list
+
+      // Immediately check sync status for automatic sync detection
+      setTimeout(() => {
+        queryClient.fetchQuery({
+          queryKey: ['crypto', 'portfolios', portfolioId, 'wallet-sync-status'],
+          queryFn: () => getWalletSyncStatus(portfolioId)
+        });
+      }, 1000); // Wait 1 second for backend to start the sync task
     },
   });
 }

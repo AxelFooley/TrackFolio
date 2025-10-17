@@ -35,7 +35,7 @@ class BlockchainFetchError(Exception):
 
 class BlockchainFetcherService:
     """
-    Service for fetching Bitcoin blockchain transactions.
+    Service for fetching Bitcoin blockchain transactions using ONLY Blockchain.info API.
 
     Uses blockchain.info API (https://blockchain.info/rawaddr/{address}) for reliable transaction fetching.
     """
@@ -43,37 +43,20 @@ class BlockchainFetcherService:
     def __init__(self):
         """
         Create and configure a BlockchainFetcherService instance.
-        
-        Initializes per-API configuration (base URLs, timeouts, rate limits, retries), attempts to connect to Redis for optional caching, and creates dedicated HTTP sessions and rate-tracking state for each supported API. Sets instance attributes:
-        - APIS: per-API configuration mapping.
-        - _redis_client: Redis client if connected, otherwise None (caching disabled).
-        - _sessions: requests.Session objects keyed by API name.
-        - _last_request_time: timestamp of last request per API for rate limiting.
+
+        Initializes configuration for blockchain.info API, attempts to connect to Redis for optional caching,
+        and creates HTTP session for API requests.
         """
-        self._sessions = {}
-        self._last_request_time = {}
+        self._session = requests.Session()
+        self._last_request_time = 0
         self._redis_client = None
 
-        # Initialize API configuration from settings
-        self.APIS = {
-            'blockstream': {
-                'base_url': settings.blockstream_api_url,
-                'rate_limit': settings.blockchain_rate_limit_requests_per_second,
-                'timeout': settings.blockchain_request_timeout_seconds,
-                'max_retries': settings.blockchain_max_retries
-            },
-            'blockchain_com': {
-                'base_url': settings.blockchain_com_api_url,
-                'rate_limit': 0.1,  # Enforce blockchain.info rate limit: 1 request per 10 seconds
-                'timeout': settings.blockchain_request_timeout_seconds,
-                'max_retries': settings.blockchain_max_retries
-            },
-            'blockcypher': {
-                'base_url': settings.blockcypher_api_url,
-                'rate_limit': settings.blockchain_rate_limit_requests_per_second * 0.33,  # Much more conservative
-                'timeout': settings.blockchain_request_timeout_seconds,
-                'max_retries': settings.blockchain_max_retries - 1
-            }
+        # Initialize blockchain.info API configuration
+        self.api_config = {
+            'base_url': str(settings.blockchain_com_api_url),
+            'rate_limit': 0.1,  # Enforce blockchain.info rate limit: 1 request per 10 seconds
+            'timeout': settings.blockchain_request_timeout_seconds,
+            'max_retries': settings.blockchain_max_retries
         }
 
         # Initialize Redis connection
@@ -85,19 +68,14 @@ class BlockchainFetcherService:
             logger.warning(f"Blockchain fetcher: Could not connect to Redis: {e}. Caching will be disabled.")
             self._redis_client = None
 
-        # Initialize HTTP sessions for each API
-        for api_name, config in self.APIS.items():
-            session = requests.Session()
-            self._sessions[api_name] = session
-            self._last_request_time[api_name] = 0
-
     # Cache TTL (seconds) - from configuration
     TRANSACTION_CACHE_TTL = settings.blockchain_transaction_cache_ttl
     ADDRESS_CACHE_TTL = settings.blockchain_address_cache_ttl
 
     # Transaction limits
-    MAX_TRANSACTIONS_PER_REQUEST = 50  # Blockstream limit
+    MAX_TRANSACTIONS_PER_REQUEST = 50  # Blockchain.info limit per request
     MAX_HISTORY_DAYS = 365  # Don't fetch more than 1 year of history by default
+    MAX_PAGES = 1000  # Safety limit to prevent infinite loops (~50k transactions per wallet)
 
     def _get_cache_key(self, prefix: str, *args) -> str:
         """
@@ -225,76 +203,66 @@ class BlockchainFetcherService:
 
         return obj
 
-    def _rate_limit(self, api_name: str) -> None:
+    def _rate_limit(self) -> None:
         """
-        Enforces per-API rate limiting based on the configured requests-per-second.
-        
-        Ensures at least 1 / rate_limit seconds elapse between consecutive requests for the given API by sleeping when needed, and updates the API's last-request timestamp stored on the instance.
-        
-        Parameters:
-            api_name (str): Key name of the API as present in self.APIS.
+        Enforces rate limiting for blockchain.info API based on the configured requests-per-second.
+
+        Ensures at least 1 / rate_limit seconds elapse between consecutive requests
+        by sleeping when needed, and updates the last-request timestamp.
         """
         current_time = time.time()
-        api_config = self.APIS[api_name]
-
-        time_since_last = current_time - self._last_request_time[api_name]
-        rate_limit_delay = 1.0 / api_config['rate_limit']
+        time_since_last = current_time - self._last_request_time
+        rate_limit_delay = 1.0 / self.api_config['rate_limit']
 
         if time_since_last < rate_limit_delay:
             sleep_time = rate_limit_delay - time_since_last
-            logger.debug(f"Rate limiting {api_name}: sleeping for {sleep_time:.3f} seconds")
+            logger.debug(f"Rate limiting blockchain.info API: sleeping for {sleep_time:.3f} seconds")
             time.sleep(sleep_time)
 
-        self._last_request_time[api_name] = time.time()
+        self._last_request_time = time.time()
 
-    def _make_request(self, api_name: str, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict]:
         """
-        Make HTTP request to blockchain API with retry logic.
+        Make HTTP request to blockchain.info API with retry logic.
 
         Args:
-            api_name: Name of the API to use
-            endpoint: API endpoint
+            endpoint: API endpoint (e.g., "/rawaddr/{address}")
             params: Query parameters
 
         Returns:
             JSON response data or None if failed
         """
-        api_config = self.APIS[api_name]
-        session = self._sessions[api_name]
+        url = urljoin(self.api_config['base_url'], endpoint)
 
-        # Ensure base_url is a string (in case it's a Path object from config)
-        base_url = str(api_config['base_url'])
-        url = urljoin(base_url, endpoint)
-
-        for attempt in range(api_config['max_retries']):
+        for attempt in range(self.api_config['max_retries']):
             try:
                 # Rate limiting
-                self._rate_limit(api_name)
+                self._rate_limit()
 
-                logger.debug(f"{api_name} API request: {url} (attempt {attempt + 1})")
+                logger.debug(f"Blockchain.info API request: {url} (attempt {attempt + 1})")
 
-                response = session.get(url, params=params)
+                response = self._session.get(url, params=params, timeout=self.api_config['timeout'])
                 response.raise_for_status()
 
                 data = response.json()
-                logger.debug(f"{api_name} API response received successfully")
+                logger.debug("Blockchain.info API response received successfully")
                 return data
 
             except requests.exceptions.RequestException as e:
                 wait_time = 2 ** attempt  # Exponential backoff
                 logger.warning(
-                    f"{api_name} API request failed (attempt {attempt + 1}/{api_config['max_retries']}): {e}. "
+                    f"Blockchain.info API request failed (attempt {attempt + 1}/{self.api_config['max_retries']}): {e}. "
                     f"Retrying in {wait_time} seconds..."
                 )
 
-                if attempt < api_config['max_retries'] - 1:
+                if attempt < self.api_config['max_retries'] - 1:
                     time.sleep(wait_time)
                 else:
-                    logger.error(f"{api_name} API request failed after {api_config['max_retries']} attempts: {e}")
+                    logger.error(f"Blockchain.info API request failed after {self.api_config['max_retries']} attempts: {e}")
                     return None
 
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to decode {api_name} API response: {e}")
+                logger.error(f"Failed to decode Blockchain.info API response: {e}")
                 return None
 
     def _validate_bitcoin_address(self, address: str) -> bool:
@@ -383,83 +351,7 @@ class BlockchainFetcherService:
             # Default to transfer_in for zero-value transactions
             return CryptoTransactionType.TRANSFER_IN
 
-    def _convert_blockstream_transaction(self, tx_data: Dict, wallet_address: str) -> Optional[Dict]:
-        """
-        Convert a Blockstream-format transaction into the internal transaction dictionary.
-        
-        Parameters:
-            tx_data (Dict): Transaction object returned by the Blockstream API.
-            wallet_address (str): Wallet address being tracked; used to infer transaction direction.
-        
-        Returns:
-            result (Optional[Dict]): A dict with the unified transaction fields or `None` if required data is missing or conversion fails.
-            When present, the dict contains:
-                - transaction_hash: original transaction id (txid)
-                - timestamp: Python datetime of the transaction/block time
-                - transaction_type: Enum value indicating IN/OUT (from _detect_transaction_type)
-                - symbol: 'BTC'
-                - quantity: Decimal BTC amount related to the tracked address
-                - price_at_execution: Decimal estimated price (placeholder)
-                - total_amount: Decimal total in fiat (quantity * price_at_execution)
-                - currency: fiat currency enum (e.g., USD)
-                - fee: Decimal fee amount (BTC)
-                - fee_currency: currency for fee or None
-                - exchange: source label (e.g., 'Bitcoin Blockchain')
-                - notes: short human-readable note
-                - raw_data: original `tx_data` for debugging
-        """
-        try:
-            # Extract relevant data
-            txid = tx_data.get('txid')
-            status = tx_data.get('status', {})
-            block_time = status.get('block_time', 0)
-
-            if not txid or not block_time:
-                logger.warning(f"Missing required fields in transaction data: {tx_data}")
-                return None
-
-            # Convert timestamp to datetime
-            timestamp = datetime.fromtimestamp(block_time)
-
-            # Calculate the value for this wallet address
-            # Blockstream API returns vout.value in satoshis (not BTC)
-            total_satoshis = 0
-            # Sum outputs; tolerate BTC vs satoshis in test/mocks
-            v_values = [v.get('value', 0) for v in tx_data.get('vout', [])]
-            if any(isinstance(v, float) for v in v_values) or any(0 < float(v) < 1 for v in v_values):
-                # Treat as BTC values
-                quantity = sum(Decimal(str(v)) for v in v_values)
-            else:
-                # Treat as satoshis
-                total_satoshis = sum(int(v) for v in v_values)
-                quantity = Decimal(total_satoshis) / Decimal("100000000")
-
-            # Detect transaction type
-            tx_type = self._detect_transaction_type(tx_data, wallet_address)
-
-            # TODO: replace with market price at timestamp
-            estimated_price = Decimal("1.0")
-
-            return {
-                'transaction_hash': txid,
-                'timestamp': timestamp,
-                'transaction_type': tx_type,
-                'symbol': 'BTC',
-                'quantity': quantity,
-                'price_at_execution': estimated_price,
-                'total_amount': quantity * estimated_price,
-                'currency': CryptoCurrency.USD,
-                'fee': Decimal("0"),
-                'fee_currency': None,
-                'exchange': 'Bitcoin Blockchain',
-                'notes': f'Transaction {tx_type.value} detected from blockchain data',
-                'raw_data': tx_data  # Store raw data for debugging
-            }
-
-        except Exception as e:
-            logger.error(f"Error converting Blockstream transaction: {e}")
-            return None
-
+    
     def _convert_blockchaincom_transaction(self, tx_data: Dict, wallet_address: str) -> Optional[Dict]:
         """
         Converts a Blockchain.com transaction payload into the service's internal transaction representation.
@@ -484,17 +376,8 @@ class BlockchainFetcherService:
             # Convert timestamp to datetime
             timestamp = datetime.fromtimestamp(timestamp_seconds)
 
-            # Calculate the actual amount received/sent by our wallet
-            # Look through outputs to find those belonging to our wallet
-            wallet_total = 0
-            for output in tx_data.get('out', []):
-                if output.get('addr') == wallet_address:
-                    wallet_total += output.get('value', 0)
-
-            # Convert from satoshis to BTC
-            quantity = Decimal(str(abs(wallet_total))) / Decimal('100000000')
-
             # Detect transaction type based on result (positive = incoming, negative = outgoing)
+            # result field from blockchain.info is the net change in wallet balance for this transaction
             if result > 0:
                 tx_type = CryptoTransactionType.TRANSFER_IN
             elif result < 0:
@@ -503,7 +386,7 @@ class BlockchainFetcherService:
                 # Zero result, default to TRANSFER_IN
                 tx_type = CryptoTransactionType.TRANSFER_IN
 
-            # Use net result in satoshis for this wallet; fallback to 'balance' if present in test/mocks
+            # Convert net result in satoshis to BTC; fallback to 'balance' if present in test/mocks
             satoshis = abs(int(tx_data.get('result', tx_data.get('balance', 0))))
             quantity = Decimal(satoshis) / Decimal('100000000')
 
@@ -530,67 +413,7 @@ class BlockchainFetcherService:
             logger.error(f"Error converting Blockchain.com transaction: {e}")
             return None
 
-    def _convert_blockcypher_transaction(self, tx_data: Dict, wallet_address: str) -> Optional[Dict]:
-        """
-        Convert a BlockCypher transaction payload into the service's internal transaction dictionary.
-        
-        Parameters:
-            tx_data (dict): Raw transaction object returned by the BlockCypher API.
-            wallet_address (str): The wallet address being evaluated for this transaction.
-        
-        Returns:
-            dict: A normalized transaction containing keys such as `transaction_hash`, `timestamp`, `transaction_type`,
-            `symbol`, `quantity` (BTC), `price_at_execution`, `total_amount`, `currency`, `fee`, `fee_currency`,
-            `exchange`, `notes`, and `raw_data`.
-            `None` if required fields are missing or conversion cannot be performed.
-        """
-        try:
-            # Extract relevant data
-            tx_hash = tx_data.get('hash')
-            confirmed = tx_data.get('confirmed', '')
-            total_value = tx_data.get('total', 0)
-            fees = tx_data.get('fees', 0)
-
-            if not tx_hash:
-                logger.warning(f"Missing required fields in transaction data: {tx_data}")
-                return None
-
-            # Convert timestamp to datetime
-            if confirmed:
-                timestamp = datetime.fromisoformat(confirmed.replace('Z', '+00:00'))
-            else:
-                timestamp = datetime.utcnow()
-
-            # Convert from satoshis to BTC
-            quantity = Decimal(str(total_value)) / Decimal('100000000')
-            fee_amount = Decimal(str(fees)) / Decimal('100000000')
-
-            # For now, we'll estimate the price
-            estimated_price = Decimal("1.0")  # Placeholder
-
-            # Detect transaction type
-            tx_type = self._detect_transaction_type(tx_data, wallet_address)
-
-            return {
-                'transaction_hash': tx_hash,
-                'timestamp': timestamp,
-                'transaction_type': tx_type,
-                'symbol': 'BTC',
-                'quantity': quantity,
-                'price_at_execution': estimated_price,
-                'total_amount': abs(quantity) * estimated_price,
-                'currency': CryptoCurrency.USD,
-                'fee': fee_amount,
-                'fee_currency': 'BTC',
-                'exchange': 'Bitcoin Blockchain',
-                'notes': f'Transaction {tx_type.value} detected from blockchain data',
-                'raw_data': tx_data  # Store raw data for debugging
-            }
-
-        except Exception as e:
-            logger.error(f"Error converting BlockCypher transaction: {e}")
-            return None
-
+    
     def fetch_transactions(
         self,
         wallet_address: str,
@@ -599,7 +422,9 @@ class BlockchainFetcherService:
         days_back: int = None
     ) -> Dict[str, Any]:
         """
-        Fetch transactions for a Bitcoin wallet address.
+        Fetch transactions for a Bitcoin wallet address using only Blockchain.info API.
+
+        Returns error results instead of raising exceptions to allow consistent error handling by callers.
 
         Args:
             wallet_address: Bitcoin wallet address to fetch transactions for
@@ -608,10 +433,15 @@ class BlockchainFetcherService:
             days_back: Number of days to look back. None = fetch from blockchain beginning (all history)
 
         Returns:
-            Dictionary with fetched transactions and metadata
+            Dictionary with fetched transactions and metadata. Always returns a dict with 'status', 'message',
+            'transactions', 'count', and 'timestamp' keys. Status will be 'success' or 'error'.
+            Never raises exceptions - errors are returned in the result dict.
         """
+        # Validate address
         if not self._validate_bitcoin_address(wallet_address):
-            raise ValueError(f"Invalid Bitcoin address: {wallet_address}")
+            error_msg = f"Invalid Bitcoin address: {wallet_address}"
+            logger.warning(error_msg)
+            return self._build_result([], 'error', error_msg)
 
         # Set defaults for logging - None means unlimited
         max_str = "unlimited" if max_transactions is None else str(max_transactions)
@@ -625,149 +455,30 @@ class BlockchainFetcherService:
             logger.info(f"Cache hit for wallet transactions: {wallet_address}")
             return cached_result
 
-        # Use blockchain.info API (most reliable)
         try:
-            logger.info(f"Fetching transactions for wallet {wallet_address} using blockchain.info API")
-            result = self._fetch_transactions_from_api(
-                'blockchain_com', wallet_address, portfolio_id, max_transactions, days_back
-            )
+            logger.info(f"Fetching transactions for wallet {wallet_address} using Blockchain.info API")
+            result = self._fetch_from_blockchain_com(wallet_address, portfolio_id, max_transactions, days_back)
 
-            if result and result.get('transactions'):
-                logger.info(f"Successfully fetched {len(result['transactions'])} transactions using blockchain.info API")
+            if result and result.get('status') == 'success' and result.get('transactions'):
+                logger.info(f"Successfully fetched {len(result['transactions'])} transactions using Blockchain.info API")
 
                 # Cache the result
                 self._cache_set(cache_key, result, self.TRANSACTION_CACHE_TTL)
 
                 return result
             else:
-                # API returned no transactions
-                error_msg = f"No transactions returned from blockchain.info API for wallet {wallet_address}"
-                logger.error(error_msg)
-                raise BlockchainFetchError(error_msg)
+                # API returned no transactions or error status
+                error_msg = result.get('message', "No transactions from Blockchain.info API") if result else "Unknown error"
+                logger.warning(f"No transactions returned from Blockchain.info API for wallet {wallet_address}: {error_msg}")
+                return self._build_result([], 'error', error_msg)
 
         except Exception as e:
-            logger.error(f"Failed to fetch transactions from blockchain.info API: {e}")
-            raise BlockchainFetchError(f"Blockchain API error: {str(e)}")
+            # Return error result instead of raising exception for consistent error handling
+            error_msg = f"Failed to fetch transactions from Blockchain.info API: {str(e)}"
+            logger.error(error_msg)
+            return self._build_result([], 'error', error_msg)
 
-    def _fetch_transactions_from_api(
-        self,
-        api_name: str,
-        wallet_address: str,
-        portfolio_id: int,
-        max_transactions: int,
-        days_back: int
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Fetch transactions from a specific blockchain API.
-
-        Args:
-            api_name: Name of the API to use
-            wallet_address: Bitcoin wallet address
-            portfolio_id: Portfolio ID
-            max_transactions: Maximum number of transactions to fetch
-            days_back: Number of days to look back
-
-        Returns:
-            Dictionary with transactions and metadata
-        """
-        if api_name == 'blockstream':
-            return self._fetch_from_blockstream(wallet_address, portfolio_id, max_transactions, days_back)
-        elif api_name == 'blockchain_com':
-            return self._fetch_from_blockchain_com(wallet_address, portfolio_id, max_transactions, days_back)
-        elif api_name == 'blockcypher':
-            return self._fetch_from_blockcypher(wallet_address, portfolio_id, max_transactions, days_back)
-        else:
-            raise ValueError(f"Unknown API: {api_name}")
-
-    def _fetch_from_blockstream(
-        self,
-        wallet_address: str,
-        portfolio_id: int,
-        max_transactions: int,
-        days_back: int
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Fetch transactions using Blockstream API.
-
-        Args:
-            wallet_address: Bitcoin wallet address
-            portfolio_id: Portfolio ID
-            max_transactions: Maximum number of transactions (None = unlimited)
-            days_back: Number of days to look back (None = all history)
-
-        Returns:
-            Dictionary with transactions and metadata
-        """
-        try:
-            # Calculate date threshold (if specified)
-            threshold_timestamp = 0  # Default to no limit
-            if days_back is not None:
-                date_threshold = datetime.utcnow() - timedelta(days=days_back)
-                threshold_timestamp = int(date_threshold.timestamp())
-
-            transactions = []
-            last_txid = None
-
-            # Set loop condition - if max_transactions is None, fetch ALL, otherwise respect the limit
-            while True:
-                # Build request URL
-                endpoint = f"/address/{wallet_address}/txs"
-
-                # Calculate how many to request
-                if max_transactions is None:
-                    # Unlimited - fetch max possible per request
-                    request_limit = self.MAX_TRANSACTIONS_PER_REQUEST
-                else:
-                    # Limited - don't fetch more than we need
-                    remaining = max_transactions - len(transactions)
-                    if remaining <= 0:
-                        break
-                    request_limit = min(self.MAX_TRANSACTIONS_PER_REQUEST, remaining)
-
-                params = {'limit': request_limit}
-
-                if last_txid:
-                    params['last_seen_txid'] = last_txid
-
-                # Make request
-                data = self._make_request('blockstream', endpoint, params)
-
-                if not data:
-                    break
-
-                # Process transactions
-                for tx_data in data:
-                    # Check transaction timestamp (if threshold is set)
-                    if threshold_timestamp > 0 and tx_data.get('status', {}).get('block_time', 0) < threshold_timestamp:
-                        return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions within date range')
-
-                    # Convert transaction format
-                    converted_tx = self._convert_blockstream_transaction(tx_data, wallet_address)
-
-                    if converted_tx:
-                        # Add portfolio ID
-                        converted_tx['portfolio_id'] = portfolio_id
-
-                        # Add to results
-                        transactions.append(converted_tx)
-
-                        # Check if we've reached the limit (if specified)
-                        if max_transactions is not None and len(transactions) >= max_transactions:
-                            return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions (limit reached)')
-
-                # Check if there are more transactions
-                if len(data) < request_limit:
-                    break
-
-                # Set last_txid for pagination
-                last_txid = data[-1]['txid']
-
-            return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions (all available)')
-
-        except Exception as e:
-            logger.error(f"Error fetching from Blockstream API: {e}")
-            return self._build_result([], 'error', str(e))
-
+    
     def _fetch_from_blockchain_com(
         self,
         wallet_address: str,
@@ -776,12 +487,12 @@ class BlockchainFetcherService:
         days_back: int
     ) -> Optional[Dict[str, Any]]:
         """
-        Fetch transactions using Blockchain.info API.
+        Fetch transactions using Blockchain.info API with pagination support.
 
         Args:
             wallet_address: Bitcoin wallet address
             portfolio_id: Portfolio ID
-            max_transactions: Maximum number of transactions (None = unlimited)
+            max_transactions: Maximum number of transactions (None = unlimited, fetch all)
             days_back: Number of days to look back (None = all history)
 
         Returns:
@@ -797,170 +508,93 @@ class BlockchainFetcherService:
             # Build request URL - use the correct rawaddr endpoint structure
             endpoint = f"/rawaddr/{wallet_address}"
 
-            # Blockchain.info has a 50 transaction limit per request, but we can paginate
-            # For unlimited fetch, we'll need to handle pagination manually
-            params = {
-                'limit': 50  # Blockchain.info max per request
-            }
-
-            # Make request
-            data = self._make_request('blockchain_com', endpoint, params)
-
-            if not data:
-                return self._build_result([], 'error', 'No data received from Blockchain.info API')
-
+            # Blockchain.info has a 50 transaction limit per request, but supports pagination via offset
             transactions = []
+            offset = 0
+            page_num = 1
+            max_str = "unlimited" if max_transactions is None else str(max_transactions)
 
-            # Process transactions
-            for tx_data in data.get('txs', []):
-                # Check transaction timestamp (if threshold is set)
-                if threshold_timestamp > 0 and tx_data.get('time', 0) < threshold_timestamp:
-                    continue
+            logger.info(f"Starting paginated fetch for wallet {wallet_address} (max: {max_str})")
 
-                # Convert transaction format
-                converted_tx = self._convert_blockchaincom_transaction(tx_data, wallet_address)
+            while page_num <= self.MAX_PAGES:
+                params = {
+                    'limit': 50,  # Blockchain.info max per request
+                    'offset': offset
+                }
 
-                if converted_tx:
-                    # Add portfolio ID
-                    converted_tx['portfolio_id'] = portfolio_id
+                logger.debug(f"Fetching page {page_num} (offset: {offset}) for wallet {wallet_address}")
 
-                    # Add to results
-                    transactions.append(converted_tx)
+                # Make request
+                data = self._make_request(endpoint, params)
 
-                    # Check if we've reached the limit (if specified)
-                    if max_transactions is not None and len(transactions) >= max_transactions:
-                        return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions (limit reached)')
+                if not data:
+                    if offset == 0:
+                        # No data on first request
+                        return self._build_result([], 'error', 'No data received from Blockchain.info API')
+                    else:
+                        # Got some data before, this is end of pagination
+                        break
 
+                # Check if we got any transactions in this page
+                page_txs = data.get('txs', [])
+                if not page_txs:
+                    logger.debug(f"No more transactions at offset {offset}, pagination complete")
+                    break
+
+                # Process transactions on this page
+                page_added = 0
+                for tx_data in page_txs:
+                    # Check transaction timestamp (if threshold is set)
+                    if threshold_timestamp > 0 and tx_data.get('time', 0) < threshold_timestamp:
+                        logger.debug(f"Skipping transaction {tx_data.get('hash')} (outside time range)")
+                        continue
+
+                    # Convert transaction format
+                    converted_tx = self._convert_blockchaincom_transaction(tx_data, wallet_address)
+
+                    if converted_tx:
+                        # Add portfolio ID
+                        converted_tx['portfolio_id'] = portfolio_id
+
+                        # Add to results
+                        transactions.append(converted_tx)
+                        page_added += 1
+
+                        # Check if we've reached the limit (if specified)
+                        if max_transactions is not None and len(transactions) >= max_transactions:
+                            logger.info(f"Reached transaction limit of {max_transactions} after {page_num} pages")
+                            return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions (limit reached)')
+
+                logger.debug(f"Page {page_num}: added {page_added} transactions (total: {len(transactions)})")
+
+                # Move to next page
+                offset += 50
+                page_num += 1
+
+                # Add small delay between pages to respect rate limits
+                time.sleep(0.2)
+
+            # Check if we hit the safety limit
+            if page_num > self.MAX_PAGES:
+                logger.warning(
+                    f"Pagination safety limit reached for wallet {wallet_address}: "
+                    f"fetched {len(transactions)} transactions across {page_num - 1} pages. "
+                    f"Set MAX_PAGES={self.MAX_PAGES} to increase limit."
+                )
+                return self._build_result(
+                    transactions,
+                    'success',
+                    f'Fetched {len(transactions)} transactions (pagination limit reached)'
+                )
+
+            logger.info(f"Pagination complete for wallet {wallet_address}: fetched {len(transactions)} total transactions")
             return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions')
 
         except Exception as e:
             logger.error(f"Error fetching from Blockchain.info API: {e}")
             return self._build_result([], 'error', str(e))
 
-    def _get_block_height_at_timestamp(self, target_datetime: datetime) -> Optional[int]:
-        """
-        Get the approximate block height at a given timestamp using BlockCypher API.
-
-        Uses the current chain height and Bitcoin's ~10 minute average block time
-        to estimate the block height at the target timestamp.
-
-        Args:
-            target_datetime: The datetime to convert to block height
-
-        Returns:
-            Estimated block height as integer, or None if calculation fails
-        """
-        try:
-            # Get current chain info from BlockCypher
-            chain_data = self._make_request('blockcypher', '/v1/btc/main')
-
-            if not chain_data:
-                logger.warning("Failed to get chain data from BlockCypher for block height calculation")
-                return None
-
-            current_height = chain_data.get('height')
-            current_time_str = chain_data.get('time')
-
-            if not current_height or not current_time_str:
-                logger.warning(f"Missing height or time in chain data: {chain_data}")
-                return None
-
-            # Parse current blockchain time (ISO format with Z suffix)
-            current_time = datetime.fromisoformat(current_time_str.replace('Z', '+00:00'))
-
-            # Calculate time difference in seconds
-            time_diff_seconds = (current_time - target_datetime).total_seconds()
-
-            # Bitcoin's average block time is ~10 minutes (600 seconds)
-            BITCOIN_BLOCK_TIME_SECONDS = 600
-            blocks_diff = int(time_diff_seconds / BITCOIN_BLOCK_TIME_SECONDS)
-
-            # Calculate estimated block height
-            estimated_height = current_height - blocks_diff
-
-            # Ensure the height is positive
-            if estimated_height < 0:
-                logger.warning(f"Calculated negative block height: {estimated_height}, using 0 instead")
-                return 0
-
-            logger.info(f"Estimated block height for {target_datetime}: {estimated_height}")
-            return estimated_height
-
-        except Exception as e:
-            logger.warning(f"Error calculating block height at timestamp {target_datetime}: {e}")
-            return None
-
-    def _fetch_from_blockcypher(
-        self,
-        wallet_address: str,
-        portfolio_id: int,
-        max_transactions: int,
-        days_back: int
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Fetch transactions using BlockCypher API.
-
-        Args:
-            wallet_address: Bitcoin wallet address
-            portfolio_id: Portfolio ID
-            max_transactions: Maximum number of transactions (None = unlimited)
-            days_back: Number of days to look back (None = all history)
-
-        Returns:
-            Dictionary with transactions and metadata
-        """
-        try:
-            # Calculate date threshold and block height (if specified)
-            block_height = None
-            if days_back is not None:
-                date_threshold = datetime.utcnow() - timedelta(days=days_back)
-                block_height = self._get_block_height_at_timestamp(date_threshold)
-
-            # Build request URL
-            endpoint = f"/addrs/{wallet_address}/full"
-
-            # BlockCypher has a 50 transaction limit per request
-            params = {
-                'limit': 50,  # BlockCypher max per request
-            }
-
-            # Add 'before' parameter only if we successfully got a block height
-            if block_height is not None and isinstance(block_height, int):
-                params['before'] = block_height
-                logger.info(f"Using block height {block_height} for date threshold")
-            elif days_back is not None:
-                logger.warning(f"Could not determine block height for date threshold, fetching without 'before' parameter")
-
-            # Make request
-            data = self._make_request('blockcypher', endpoint, params)
-
-            if not data:
-                return self._build_result([], 'error', 'No data received from BlockCypher API')
-
-            transactions = []
-
-            # Process transactions
-            for tx_data in data.get('txs', []):
-                # Convert transaction format
-                converted_tx = self._convert_blockcypher_transaction(tx_data, wallet_address)
-
-                if converted_tx:
-                    # Add portfolio ID
-                    converted_tx['portfolio_id'] = portfolio_id
-
-                    # Add to results
-                    transactions.append(converted_tx)
-
-                    # Check if we've reached the limit (if specified)
-                    if max_transactions is not None and len(transactions) >= max_transactions:
-                        return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions (limit reached)')
-
-            return self._build_result(transactions, 'success', f'Fetched {len(transactions)} transactions (all available)')
-
-        except Exception as e:
-            logger.error(f"Error fetching from BlockCypher API: {e}")
-            return self._build_result([], 'error', str(e))
-
+    
     def _build_result(
         self,
         transactions: List[Dict],
@@ -991,36 +625,23 @@ class BlockchainFetcherService:
             'timestamp': datetime.utcnow()
         }
 
-    def test_api_connection(self) -> Dict[str, bool]:
+    def test_api_connection(self) -> bool:
         """
-        Verify connectivity to each configured blockchain API by issuing a lightweight request.
-        
+        Verify connectivity to Blockchain.info API by issuing a lightweight request.
+
         Returns:
-            dict: Mapping of API name to `True` if a valid response was received, `False` otherwise.
+            bool: True if a valid response was received, False otherwise.
         """
-        results = {}
+        try:
+            # Test with a simple request using the correct rawaddr endpoint
+            data = self._make_request('/rawaddr/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')  # Satoshi's address
+            result = data is not None
+            logger.info(f"Blockchain.info API connection test result: {result}")
+            return result
 
-        for api_name in self.APIS.keys():
-            try:
-                if api_name == 'blockstream':
-                    # Test with a simple request
-                    data = self._make_request('blockstream', '/blocks')
-                    results[api_name] = data is not None
-                elif api_name == 'blockchain_com':
-                    # Test with a simple request using the correct rawaddr endpoint
-                    data = self._make_request('blockchain_com', '/rawaddr/1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')  # Satoshi's address
-                    results[api_name] = data is not None
-                elif api_name == 'blockcypher':
-                    # Test with a simple request
-                    data = self._make_request('blockcypher', '/blocks')
-                    results[api_name] = data is not None
-
-            except Exception as e:
-                logger.error(f"Error testing {api_name} API connection: {e}")
-                results[api_name] = False
-
-        logger.info(f"API connection test results: {results}")
-        return results
+        except Exception as e:
+            logger.error(f"Error testing Blockchain.info API connection: {e}")
+            return False
 
 
 # Create a singleton instance

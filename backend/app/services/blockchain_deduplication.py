@@ -105,7 +105,8 @@ class BlockchainDeduplicationService:
             cache_age = datetime.utcnow() - self._cache_timestamps.get(portfolio_id, datetime.min)
             if cache_age < timedelta(minutes=30):  # Memory cache valid for 30 minutes
                 logger.debug(f"Memory cache hit for portfolio {portfolio_id} hashes: {len(self._memory_cache[portfolio_id])}")
-                return self._memory_cache[portfolio_id]
+                # Return a copy to prevent callers from modifying the internal cache
+                return set(self._memory_cache[portfolio_id])
 
         # Fetch from database
         hashes = self._get_portfolio_hashes_from_db(portfolio_id)

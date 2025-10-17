@@ -47,32 +47,18 @@ class UnifiedPriceFetcher:
         """
         try:
             if asset_type.lower() == "crypto":
-                # Use Yahoo Finance for cryptocurrencies with -USD suffix
-                yahoo_symbol = f"{ticker}-USD"
+                # Use Yahoo Finance for cryptocurrencies with appropriate currency suffix
+                if currency.lower() == "eur":
+                    yahoo_symbol = f"{ticker}-EUR"
+                else:
+                    yahoo_symbol = f"{ticker}-USD"
                 result = await asyncio.to_thread(self.yahoo_fetcher.fetch_realtime_price, yahoo_symbol)
                 if result and result.get("current_price"):
-                    price_usd = result["current_price"]
-
-                    # Convert to target currency if needed
+                    # Set the correct currency based on what we fetched
                     if currency.lower() == "eur":
-                        # Get USD to EUR conversion rate
-                        try:
-                            eur_rate = await self.yahoo_fetcher.fetch_fx_rate("USD", "EUR")
-                            if eur_rate:
-                                price_eur = price_usd * eur_rate
-                                result["current_price"] = price_eur
-                                result["currency"] = "EUR"
-                            else:
-                                # Fallback conversion
-                                price_eur = price_usd * Decimal("0.92")
-                                result["current_price"] = price_eur
-                                result["currency"] = "EUR"
-                        except Exception as e:
-                            logger.warning(f"Error converting to EUR: {e}, using fallback rate")
-                            # Fallback conversion
-                            price_eur = price_usd * Decimal("0.92")
-                            result["current_price"] = price_eur
-                            result["currency"] = "EUR"
+                        result["currency"] = "EUR"
+                    else:
+                        result["currency"] = "USD"
 
                     logger.info(f"Fetched crypto price for {ticker}: {result['current_price']} {result.get('currency', 'USD')}")
                     return result
@@ -136,33 +122,20 @@ class UnifiedPriceFetcher:
         """
         try:
             if asset_type.lower() == "crypto":
-                # Use Yahoo Finance for cryptocurrencies with -USD suffix
-                yahoo_symbol = f"{ticker}-USD"
+                # Use Yahoo Finance for cryptocurrencies with appropriate currency suffix
+                if currency.lower() == "eur":
+                    yahoo_symbol = f"{ticker}-EUR"
+                else:
+                    yahoo_symbol = f"{ticker}-USD"
                 result = await self.yahoo_fetcher.fetch_historical_prices(yahoo_symbol, start_date=start_date, end_date=end_date)
                 logger.info(f"Fetched {len(result)} crypto price points for {ticker}")
 
-
-                # Convert to target currency if needed
-                if currency.lower() == "eur" and result:
-                    try:
-                        eur_rate = await self.yahoo_fetcher.fetch_fx_rate("USD", "EUR")
-                        if eur_rate:
-                            for price_point in result:
-                                price_point['close'] = price_point['close'] * eur_rate
-                                price_point['open'] = price_point['open'] * eur_rate
-                                price_point['high'] = price_point['high'] * eur_rate
-                                price_point['low'] = price_point['low'] * eur_rate
-                                price_point['currency'] = 'EUR'
-                            logger.info(f"Converted {len(result)} crypto price points to EUR")
-                    except Exception as e:
-                        logger.warning(f"Error converting to EUR: {e}, using fallback rate")
-                        # Fallback conversion
-                        for price_point in result:
-                            price_point['close'] = price_point['close'] * Decimal("0.92")
-                            price_point['open'] = price_point['open'] * Decimal("0.92")
-                            price_point['high'] = price_point['high'] * Decimal("0.92")
-                            price_point['low'] = price_point['low'] * Decimal("0.92")
-                            price_point['currency'] = 'EUR'
+                # Set the correct currency for all price points
+                if result:
+                    target_currency = "EUR" if currency.lower() == "eur" else "USD"
+                    for price_point in result:
+                        price_point['currency'] = target_currency
+                    logger.info(f"Set currency to {target_currency} for {len(result)} crypto price points")
 
                 return result
             else:
@@ -310,10 +283,11 @@ class UnifiedPriceFetcher:
             logger.error(f"Yahoo Finance test failed: {e}")
             results['yahoo_finance'] = False
 
-        # Test crypto via Yahoo Finance
+        # Test crypto via Yahoo Finance (both USD and EUR)
         try:
-            crypto_result = await asyncio.to_thread(self.yahoo_fetcher.fetch_realtime_price, 'BTC-USD')
-            results['yahoo_finance_crypto'] = crypto_result is not None
+            crypto_result_usd = await asyncio.to_thread(self.yahoo_fetcher.fetch_realtime_price, 'BTC-USD')
+            crypto_result_eur = await asyncio.to_thread(self.yahoo_fetcher.fetch_realtime_price, 'BTC-EUR')
+            results['yahoo_finance_crypto'] = crypto_result_usd is not None and crypto_result_eur is not None
         except Exception as e:
             logger.error(f"Yahoo Finance crypto test failed: {e}")
             results['yahoo_finance_crypto'] = False
@@ -321,8 +295,9 @@ class UnifiedPriceFetcher:
         # Test mixed assets
         try:
             stock_price = await self.fetch_price_with_auto_detection('AAPL')
-            crypto_price = await self.fetch_price_with_auto_detection('BTC')
-            results['mixed_assets'] = stock_price is not None and crypto_price is not None
+            crypto_price_usd = await self.fetch_price_with_auto_detection('BTC', 'usd')
+            crypto_price_eur = await self.fetch_price_with_auto_detection('BTC', 'eur')
+            results['mixed_assets'] = stock_price is not None and crypto_price_usd is not None and crypto_price_eur is not None
         except Exception as e:
             logger.error(f"Mixed assets test failed: {e}")
             results['mixed_assets'] = False

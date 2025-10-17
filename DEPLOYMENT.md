@@ -194,7 +194,7 @@ curl http://localhost:8000/api/health
 3. **Separate Migration Container**: Use a dedicated migration container in production:
    ```bash
    # Run migrations in separate container
-   docker-compose run --rm backend alembic upgrade head
+   docker-compose exec backend alembic upgrade head
 
    # Then start application containers without migrations
    RUN_MIGRATIONS=false docker-compose up -d
@@ -701,7 +701,7 @@ docker-compose -f docker-compose.prod.yml up -d postgres
 docker-compose -f docker-compose.prod.yml exec postgres psql -U portfolio portfolio_db -c "SELECT version_num FROM alembic_version;"
 
 # 3. If migration is partially applied, rollback to previous working state
-docker-compose -f docker-compose.prod.yml run --rm backend alembic downgrade <previous_revision>
+docker-compose -f docker-compose.prod.yml exec backend alembic downgrade <previous_revision>
 
 # 4. Restart services
 docker-compose -f docker-compose.prod.yml up -d
@@ -736,7 +736,7 @@ docker-compose -f docker-compose.prod.yml down
 
 # 2. Restore from backup (most recent working backup)
 gunzip -c /path/to/backup/portfolio_db_YYYYMMDD_HHMMSS.sql.gz | \
-docker-compose -f docker-compose.prod.yml run --rm postgres psql -U portfolio -d portfolio_db
+docker-compose -f docker-compose.prod.yml exec postgres psql -U portfolio -d portfolio_db
 
 # 3. Restart services
 docker-compose -f docker-compose.prod.yml up -d
