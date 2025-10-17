@@ -11,6 +11,7 @@ NC='\033[0m' # No Color
 # Configuration
 MIGRATION_TIMEOUT=${MIGRATION_TIMEOUT:-300}  # 5 minutes default
 MIGRATION_LOCK_ID=${MIGRATION_LOCK_ID:-"portfolio_migrations"}  # Deterministic lock ID
+AUTO_ROLLBACK_ON_FAILURE=${AUTO_ROLLBACK_ON_FAILURE:-"false"}  # Auto-rollback on migration failure
 
 # Function to print colored output
 print_status() {
@@ -23,6 +24,48 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Function to handle migration failure and optional rollback
+handle_migration_failure() {
+    local failure_type="$1"
+
+    if [[ "$AUTO_ROLLBACK_ON_FAILURE" != "true" ]]; then
+        print_warning "Auto-rollback is disabled (AUTO_ROLLBACK_ON_FAILURE=false)"
+        print_warning "Database may be in an inconsistent state. Manual intervention required."
+        print_warning "To enable auto-rollback, set AUTO_ROLLBACK_ON_FAILURE=true"
+        return
+    fi
+
+    print_status "Auto-rollback enabled. Attempting to rollback to previous state..."
+
+    # Get the revision we were trying to migrate FROM
+    local target_revision="$CURRENT_REVISION"
+
+    if [[ -z "$target_revision" ]]; then
+        print_warning "No previous revision found. Cannot rollback from initial migration."
+        print_warning "Database may have partial tables created. Manual cleanup required."
+        return
+    fi
+
+    print_status "Rolling back to revision: $target_revision"
+
+    # Perform the rollback
+    if alembic downgrade "$target_revision"; then
+        print_status "Successfully rolled back to revision: $target_revision"
+
+        # Verify rollback
+        local verify_revision=$(PGPASSFILE="$PGPASS_FILE" psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DATABASE" -t -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | xargs || echo "")
+
+        if [[ "$verify_revision" == "$target_revision" ]]; then
+            print_status "Rollback verification successful."
+        else
+            print_error "Rollback verification failed. Database state uncertain."
+        fi
+    else
+        print_error "Rollback failed. Database may be in inconsistent state."
+        print_error "Manual intervention required to restore database consistency."
+    fi
 }
 
 # Cleanup function for temporary files and locks
@@ -190,9 +233,11 @@ else
         print_status "Database migrations completed successfully!"
     elif [[ $MIGRATION_EXIT_CODE -eq 124 ]]; then
         print_error "Migration timed out after ${MIGRATION_TIMEOUT} seconds"
+        handle_migration_failure "timeout"
         exit 1
     else
         print_error "Migration failed with exit code: $MIGRATION_EXIT_CODE"
+        handle_migration_failure "failure"
         exit 1
     fi
 

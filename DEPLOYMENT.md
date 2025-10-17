@@ -67,6 +67,7 @@ docker-compose -f docker-compose.prod.yml up --build -d
 | `SECRET_KEY` | Security secret key | `random_string` | Auto-generated |
 | `RUN_MIGRATIONS` | Auto-run database migrations | `"true"` | `"true"` |
 | `MIGRATION_TIMEOUT` | Migration timeout in seconds | `"600"` | `"300"` |
+| `AUTO_ROLLBACK_ON_FAILURE` | Auto-rollback on migration failure | `"true"` | `"false"` |
 
 ### Frontend Configuration
 
@@ -581,6 +582,84 @@ docker-compose -f docker-compose.prod.yml exec backend alembic current
 
 # Skip migrations (emergency only)
 RUN_MIGRATIONS=false docker-compose -f docker-compose.prod.yml up -d backend
+```
+
+### Auto-Rollback on Migration Failure
+
+The migration system supports automatic rollback when migrations fail, preventing database inconsistency.
+
+#### Enabling Auto-Rollback
+
+```yaml
+# In docker-compose.prod.yml
+backend:
+  environment:
+    AUTO_ROLLBACK_ON_FAILURE: "true"  # Enable automatic rollback
+```
+
+#### How Auto-Rollback Works
+
+1. **Migration Failure Detection**: When `alembic upgrade head` fails or times out
+2. **Automatic Rollback**: System automatically rolls back to the previous working revision
+3. **Verification**: Confirms rollback was successful
+4. **Graceful Exit**: Container exits with clear error messages
+
+#### Rollback Scenarios
+
+**✅ Successful Rollback (when previous revision exists)**:
+```
+[ERROR] Migration failed with exit code: 1
+[INFO] Auto-rollback enabled. Attempting to rollback to previous state...
+[INFO] Rolling back to revision: 70a3cd875f27
+[INFO] Successfully rolled back to revision: 70a3cd875f27
+[INFO] Rollback verification successful.
+```
+
+**⚠️ Limited Rollback (initial migration failure)**:
+```
+[ERROR] Migration failed with exit code: 1
+[INFO] Auto-rollback enabled. Attempting to rollback to previous state...
+[WARNING] No previous revision found. Cannot rollback from initial migration.
+[WARNING] Database may have partial tables created. Manual cleanup required.
+```
+
+#### Configuration for Production
+
+```yaml
+# Recommended production settings
+backend:
+  environment:
+    RUN_MIGRATIONS: "true"
+    MIGRATION_TIMEOUT: "600"  # 10 minutes for complex migrations
+    AUTO_ROLLBACK_ON_FAILURE: "true"  # Enable auto-rollback
+```
+
+#### When to Use Auto-Rollback
+
+**✅ Recommended for**:
+- Production environments where consistency is critical
+- CI/CD pipelines that need automatic recovery
+- Zero-downtime deployment scenarios
+- Large databases where manual rollback is time-consuming
+
+**❌ Not recommended for**:
+- Development environments (use manual rollback for learning)
+- When you need to debug failed migrations step-by-step
+- Database maintenance scenarios where partial states are expected
+
+#### Manual Override for Troubleshooting
+
+If you need to debug a failed migration without auto-rollback:
+
+```bash
+# Disable auto-rollback temporarily
+AUTO_ROLLBACK_ON_FAILURE=false docker-compose up -d backend
+
+# Check what went wrong
+docker-compose logs backend
+
+# Manually fix the issue, then:
+docker-compose exec backend alembic upgrade head
 ```
 
 ### Migration Rollback and Recovery
