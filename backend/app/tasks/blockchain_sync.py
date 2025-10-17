@@ -12,6 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from typing import Optional
 import logging
 import time
+import json
+import redis
 
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
@@ -22,6 +24,39 @@ from app.services.price_fetcher import PriceFetcher
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Redis client for sync status tracking
+redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+
+def set_syncing_status(portfolio_id: int, task_id: str):
+    """Set wallet syncing status in Redis"""
+    key = f"wallet_sync:{portfolio_id}"
+    value = {
+        "status": "syncing",
+        "task_id": task_id,
+        "started_at": datetime.utcnow().isoformat()
+    }
+    redis_client.setex(key, 600, json.dumps(value))  # 10 minute TTL
+    logger.info(f"Set sync status for portfolio {portfolio_id}: syncing")
+
+def clear_syncing_status(portfolio_id: int):
+    """Clear wallet syncing status from Redis"""
+    key = f"wallet_sync:{portfolio_id}"
+    redis_client.delete(key)
+    logger.info(f"Cleared sync status for portfolio {portfolio_id}")
+
+def get_syncing_status(portfolio_id: int) -> Optional[dict]:
+    """Get wallet syncing status from Redis"""
+    key = f"wallet_sync:{portfolio_id}"
+    value = redis_client.get(key)
+    if value:
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid sync status JSON for portfolio {portfolio_id}")
+            # Clear invalid data
+            redis_client.delete(key)
+    return None
 
 
 def get_usd_to_eur_rate() -> Optional[Decimal]:
@@ -143,12 +178,26 @@ def _sync_bitcoin_wallets_impl():
         # Sync each wallet (using config defaults for automatic syncs)
         for portfolio in portfolios:
             try:
+                # Check if this is the first sync (wallet_last_sync_time is None)
+                is_first_sync = portfolio.wallet_last_sync_time is None
+
+                # For first sync: fetch everything (no limits)
+                # For subsequent syncs: use configured limits to keep updated efficiently
+                if is_first_sync:
+                    max_txs = None  # Unlimited
+                    days = None  # All history
+                    logger.info(f"First sync detected for wallet {portfolio.wallet_address}: fetching all transactions")
+                else:
+                    max_txs = settings.blockchain_max_transactions_per_sync
+                    days = settings.blockchain_sync_days_back
+                    logger.info(f"Subsequent sync for wallet {portfolio.wallet_address}: applying configured limits (max: {max_txs}, days: {days})")
+
                 wallet_result = sync_single_wallet(
                     portfolio.wallet_address,
                     portfolio.id,
                     db,
-                    max_transactions=settings.blockchain_max_transactions_per_sync,
-                    days_back=settings.blockchain_sync_days_back
+                    max_transactions=max_txs,
+                    days_back=days
                 )
 
                 wallet_results.append({
@@ -530,6 +579,9 @@ def sync_wallet_manually(
         f"max_transactions={max_transactions}, days_back={days_back}"
     )
 
+    # Set syncing status in Redis
+    set_syncing_status(portfolio_id, self.request.id)
+
     db = SyncSessionLocal()
 
     try:
@@ -571,6 +623,8 @@ def sync_wallet_manually(
         raise
 
     finally:
+        # Clear syncing status from Redis
+        clear_syncing_status(portfolio_id)
         db.close()
 
 
@@ -581,39 +635,44 @@ def sync_wallet_manually(
 )
 def test_blockchain_connection(self):
     """
-    Test connectivity to configured blockchain API services.
-    
+    Test connectivity to Blockchain.info API.
+
     Returns:
         dict: Summary of the connection test. On success includes:
             - status (str): "success"
-            - message (str): human-readable summary like "Connected to X/Y blockchain APIs"
-            - api_results (dict): mapping of API identifiers to boolean connection results
+            - message (str): human-readable summary
+            - api_result (bool): connection result
             - timestamp (str): ISO-formatted UTC timestamp
         On failure includes:
             - status (str): "error"
             - error (str): error message
             - timestamp (str): ISO-formatted UTC timestamp
     """
-    logger.info("Testing blockchain API connections")
+    logger.info("Testing Blockchain.info API connection")
 
     try:
-        results = blockchain_fetcher.test_api_connection()
+        result = blockchain_fetcher.test_api_connection()
 
-        success_count = sum(1 for status in results.values() if status)
-        total_count = len(results)
-
-        summary = {
-            "status": "success",
-            "message": f"Connected to {success_count}/{total_count} blockchain APIs",
-            "api_results": results,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        if result:
+            summary = {
+                "status": "success",
+                "message": "Successfully connected to Blockchain.info API",
+                "api_result": result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        else:
+            summary = {
+                "status": "error",
+                "message": "Failed to connect to Blockchain.info API",
+                "api_result": result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
         logger.info(f"Blockchain API connection test: {summary}")
         return summary
 
     except Exception as e:
-        logger.error(f"Error testing blockchain API connections: {e}")
+        logger.error(f"Error testing Blockchain.info API connection: {e}")
         return {
             "status": "error",
             "error": str(e),
