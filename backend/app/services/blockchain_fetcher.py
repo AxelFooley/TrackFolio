@@ -432,6 +432,8 @@ class BlockchainFetcherService:
         """
         Fetch transactions for a Bitcoin wallet address using only Blockchain.info API.
 
+        Returns error results instead of raising exceptions to allow consistent error handling by callers.
+
         Args:
             wallet_address: Bitcoin wallet address to fetch transactions for
             portfolio_id: Portfolio ID to associate transactions with
@@ -439,10 +441,15 @@ class BlockchainFetcherService:
             days_back: Number of days to look back. None = fetch from blockchain beginning (all history)
 
         Returns:
-            Dictionary with fetched transactions and metadata
+            Dictionary with fetched transactions and metadata. Always returns a dict with 'status', 'message',
+            'transactions', 'count', and 'timestamp' keys. Status will be 'success' or 'error'.
+            Never raises exceptions - errors are returned in the result dict.
         """
+        # Validate address
         if not self._validate_bitcoin_address(wallet_address):
-            raise ValueError(f"Invalid Bitcoin address: {wallet_address}")
+            error_msg = f"Invalid Bitcoin address: {wallet_address}"
+            logger.warning(error_msg)
+            return self._build_result([], 'error', error_msg)
 
         # Set defaults for logging - None means unlimited
         max_str = "unlimited" if max_transactions is None else str(max_transactions)
@@ -469,13 +476,15 @@ class BlockchainFetcherService:
                 return result
             else:
                 # API returned no transactions or error status
-                error_msg = result.get('message', f"No transactions from Blockchain.info API")
+                error_msg = result.get('message', "No transactions from Blockchain.info API") if result else "Unknown error"
                 logger.warning(f"No transactions returned from Blockchain.info API for wallet {wallet_address}: {error_msg}")
                 return self._build_result([], 'error', error_msg)
 
         except Exception as e:
-            logger.error(f"Failed to fetch transactions from Blockchain.info API: {e}")
-            raise BlockchainFetchError(f"Blockchain.info API failed for wallet {wallet_address}: {str(e)}")
+            # Return error result instead of raising exception for consistent error handling
+            error_msg = f"Failed to fetch transactions from Blockchain.info API: {str(e)}"
+            logger.error(error_msg)
+            return self._build_result([], 'error', error_msg)
 
     
     def _fetch_from_blockchain_com(
