@@ -57,12 +57,59 @@ app.include_router(blockchain_router)
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
-    return {
+    """Health check endpoint with database migration status."""
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    health_data = {
         "status": "healthy",
         "app": settings.app_name,
-        "environment": settings.environment
+        "environment": settings.environment,
+        "database": "unknown"
     }
+
+    # Check database connectivity and migration status
+    try:
+        async with AsyncSessionLocal() as session:
+            # Test basic database connectivity first
+            try:
+                await session.execute(text("SELECT 1"))
+            except Exception as conn_error:
+                logger.warning(f"Database connection failed: {conn_error}")
+                health_data["database"] = "connection_failed"
+                health_data["database_error"] = f"Connection failed: {str(conn_error)}"
+                return health_data
+
+            # Check if alembic_version table exists and get current revision
+            try:
+                result = await session.execute(
+                    text("SELECT version_num FROM alembic_version LIMIT 1")
+                )
+                current_revision = result.scalar()
+
+                if current_revision:
+                    health_data["database"] = "connected"
+                    health_data["migration_revision"] = current_revision
+                else:
+                    health_data["database"] = "connected_no_migrations"
+            except Exception as table_error:
+                # Check if this is specifically a "table does not exist" error
+                error_str = str(table_error).lower()
+                if any(keyword in error_str for keyword in ["does not exist", "no such table", "relation", "table"]):
+                    logger.debug("alembic_version table not found (expected for first deployment)")
+                    health_data["database"] = "connected_no_migrations"
+                else:
+                    # Other SQL error (permissions, corrupted table, etc.)
+                    logger.warning(f"Database query failed: {table_error}")
+                    health_data["database"] = "query_failed"
+                    health_data["database_error"] = f"Query failed: {str(table_error)}"
+
+    except Exception as e:
+        logger.warning(f"Database health check failed: {e}")
+        health_data["database"] = "error"
+        health_data["database_error"] = f"Unexpected error: {str(e)}"
+
+    return health_data
 
 
 @app.get("/")
