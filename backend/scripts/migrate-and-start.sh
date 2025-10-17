@@ -28,8 +28,8 @@ print_error() {
 # Cleanup function for temporary files and locks
 cleanup() {
     # Release advisory lock if acquired
-    if [[ -n "$LOCK_ACQUIRED" && "$LOCK_ACQUIRED" == "t" ]] && [[ -n "$HOST" && -n "$PORT" && -n "$USER" && -n "$DATABASE" && -f "$PGPASS_FILE" ]]; then
-        PGPASSFILE="$PGPASS_FILE" psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DATABASE" -c "
+    if [[ -n "$LOCK_ACQUIRED" && "$LOCK_ACQUIRED" == "t" ]] && [[ -n "$DB_HOST" && -n "$DB_PORT" && -n "$DB_USER" && -n "$DB_DATABASE" && -f "$PGPASS_FILE" ]]; then
+        PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -c "
             SELECT pg_advisory_unlock(hashtext('$MIGRATION_LOCK_ID'));
         " > /dev/null 2>&1 || true
     fi
@@ -69,9 +69,9 @@ if [[ -z "$DATABASE_URL" ]]; then
 fi
 
 # Use Python for robust URL parsing
-DB_INFO=$(python3 -c "
+DB_PARSE_RESULT=$(python3 -c "
 import os
-import urllib.parse
+import sys
 from urllib.parse import urlparse
 
 url = os.environ['DATABASE_URL']
@@ -82,14 +82,15 @@ if parsed.scheme.startswith('postgresql+asyncpg'):
     parsed = urlparse(url.replace('postgresql+asyncpg://', 'postgresql://'))
 
 if not all([parsed.username, parsed.password, parsed.hostname, parsed.path]):
-    print('ERROR: Invalid DATABASE_URL format')
+    print('ERROR: Invalid DATABASE_URL format', file=sys.stderr)
     exit(1)
 
-print(f'USER={parsed.username}')
-print(f'PASSWORD={parsed.password}')
-print(f'HOST={parsed.hostname}')
-print(f'PORT={parsed.port or 5432}')
-print(f'DATABASE={parsed.path.lstrip(\"/\")}')
+# Output variables in a format that can be safely sourced
+print(f'DB_USER=\"{parsed.username}\"')
+print(f'DB_PASSWORD=\"{parsed.password}\"')
+print(f'DB_HOST=\"{parsed.hostname}\"')
+print(f'DB_PORT=\"{parsed.port or 5432}\"')
+print(f'DB_DATABASE=\"{parsed.path.lstrip(\"/\")}\"')
 " 2>/dev/null)
 
 if [[ $? -ne 0 ]]; then
@@ -97,15 +98,15 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
-# Parse database connection info
-eval "$DB_INFO"
+# Parse database connection info safely
+eval "$DB_PARSE_RESULT"
 
-print_status "Database: $HOST:$PORT/$DATABASE"
+print_status "Database: $DB_HOST:$DB_PORT/$DB_DATABASE"
 
 # Create .pgpass file for secure password handling
 PGPASS_FILE=$(mktemp)
 chmod 600 "$PGPASS_FILE"
-echo "$HOST:$PORT:$DATABASE:$USER:$PASSWORD" > "$PGPASS_FILE"
+echo "$DB_HOST:$DB_PORT:$DB_DATABASE:$DB_USER:$DB_PASSWORD" > "$PGPASS_FILE"
 export PGPASSFILE="$PGPASS_FILE"
 
 # Wait for database to be ready
@@ -114,7 +115,7 @@ MAX_RETRIES=30
 RETRY_INTERVAL=2
 
 for i in $(seq 1 $MAX_RETRIES); do
-    if PGPASSFILE="$PGPASS_FILE" psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DATABASE" -c "SELECT 1;" > /dev/null 2>&1; then
+    if PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -c "SELECT 1;" > /dev/null 2>&1; then
         print_status "Database is ready!"
         break
     else
@@ -132,7 +133,7 @@ print_status "Checking current migration status..."
 cd /app
 
 # Get current revision (will be empty if no migrations have been run)
-CURRENT_REVISION=$(PGPASSFILE="$PGPASS_FILE" psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DATABASE" -t -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | xargs || echo "")
+CURRENT_REVISION=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | xargs || echo "")
 
 # Get latest revision from alembic and validate there's only one head
 LATEST_REVISIONS=$(alembic heads --verbose 2>/dev/null | grep "Rev:" | awk '{print $2}' || echo "")
@@ -161,7 +162,7 @@ else
 
     # Acquire PostgreSQL advisory lock to prevent concurrent migrations
     print_status "Acquiring migration lock to prevent concurrent executions..."
-    LOCK_ACQUIRED=$(PGPASSFILE="$PGPASS_FILE" psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DATABASE" -t -c "
+    LOCK_ACQUIRED=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "
         SELECT pg_try_advisory_lock(hashtext('$MIGRATION_LOCK_ID'));
     " 2>/dev/null | xargs)
 
@@ -196,7 +197,7 @@ else
     fi
 
     # Verify migration success
-    NEW_REVISION=$(PGPASSFILE="$PGPASS_FILE" psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DATABASE" -t -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | xargs || echo "")
+    NEW_REVISION=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | xargs || echo "")
 
     if [[ "$NEW_REVISION" == "$LATEST_REVISION" ]]; then
         print_status "Migration verification successful. Current revision: $NEW_REVISION"
