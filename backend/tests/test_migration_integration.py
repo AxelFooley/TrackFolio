@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import os
 from typing import List, Dict, Any
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -174,9 +174,14 @@ class TestHealthEndpoint:
 
     def test_health_check_database_error_handling(self, client: TestClient):
         """Test health check handles database errors gracefully."""
+        # Clear health cache to ensure test isolation
+        from app.main import _health_cache
+        _health_cache.clear()
+
         # Mock database to raise an exception
-        with patch('app.main.AsyncSessionLocal') as mock_session:
-            mock_session.side_effect = Exception("Database connection failed")
+        # Patch where AsyncSessionLocal is imported from, not where it's used
+        with patch('app.database.AsyncSessionLocal') as mock_session_class:
+            mock_session_class.return_value.__aenter__.side_effect = Exception("Database connection failed")
 
             response = client.get("/api/health")
             assert response.status_code == 200
@@ -187,38 +192,53 @@ class TestHealthEndpoint:
 
     def test_health_check_table_not_found(self, client: TestClient):
         """Test health check handles missing alembic_version table."""
+        # Clear health cache to ensure test isolation
+        from app.main import _health_cache
+        _health_cache.clear()
+
         # Mock database session to simulate missing table
-        mock_session = MagicMock()
-        mock_session.execute.side_effect = [
-            MagicMock(),  # First SELECT 1 succeeds
-            Exception('relation "alembic_version" does not exist')  # Table doesn't exist
-        ]
+        async def mock_execute(query):
+            if "SELECT 1" in str(query):
+                return MagicMock(scalar=MagicMock(return_value=None))
+            else:
+                raise Exception('relation "alembic_version" does not exist')
 
-        with patch('app.main.AsyncSessionLocal', return_value=mock_session):
-            with patch('app.main.asynccontextmanager', return_value=mock_session):
-                response = client.get("/api/health")
-                assert response.status_code == 200
+        mock_session = AsyncMock()
+        mock_session.execute = mock_execute
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
 
-                data = response.json()
-                assert data["database"] == "connected_no_migrations"
+        with patch('app.database.AsyncSessionLocal', return_value=mock_session):
+            response = client.get("/api/health")
+            assert response.status_code == 200
+
+            data = response.json()
+            assert data["database"] == "connected_no_migrations"
 
     def test_health_check_with_migration_revision(self, client: TestClient):
         """Test health check reports migration revision when available."""
+        # Clear health cache to ensure test isolation
+        from app.main import _health_cache
+        _health_cache.clear()
+
         # Mock successful database query with revision
-        mock_result = MagicMock()
-        mock_result.scalar.return_value = "abc123def456"
+        async def mock_execute(query):
+            mock_result = MagicMock()
+            mock_result.scalar.return_value = "abc123def456"
+            return mock_result
 
-        mock_session = MagicMock()
-        mock_session.execute.return_value = mock_result
+        mock_session = AsyncMock()
+        mock_session.execute = mock_execute
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
 
-        with patch('app.main.AsyncSessionLocal', return_value=mock_session):
-            with patch('app.main.asynccontextmanager', return_value=mock_session):
-                response = client.get("/api/health")
-                assert response.status_code == 200
+        with patch('app.database.AsyncSessionLocal', return_value=mock_session):
+            response = client.get("/api/health")
+            assert response.status_code == 200
 
-                data = response.json()
-                assert data["database"] == "connected"
-                assert data["migration_revision"] == "abc123def456"
+            data = response.json()
+            assert data["database"] == "connected"
+            assert data["migration_revision"] == "abc123def456"
 
 
 class TestMigrationRaceCondition:
@@ -270,30 +290,30 @@ class TestMigrationErrorHandling:
     def test_auto_rollback_configuration(self):
         """Test auto-rollback configuration handling."""
         test_cases = [
-            {"AUTO_ROLLBACK_ON_FAILURE": "true", "expected": True},
-            {"AUTO_ROLLBACK_ON_FAILURE": "false", "expected": False},
-            {"AUTO_ROLLBACK_ON_FAILURE": "", "expected": False},
+            ({"AUTO_ROLLBACK_ON_FAILURE": "true"}, True),
+            ({"AUTO_ROLLBACK_ON_FAILURE": "false"}, False),
+            ({}, False),  # Missing env var should default to false
         ]
 
-        for case in test_cases:
-            with patch.dict(os.environ, case):
+        for env_dict, expected in test_cases:
+            with patch.dict(os.environ, env_dict, clear=False):
                 # Simulate the configuration parsing
                 auto_rollback = os.environ.get("AUTO_ROLLBACK_ON_FAILURE", "false") == "true"
-                assert auto_rollback == case["expected"]
+                assert auto_rollback == expected
 
     def test_migration_timeout_handling(self):
         """Test migration timeout configuration."""
         test_cases = [
-            {"MIGRATION_TIMEOUT": "300", "expected": 300},
-            {"MIGRATION_TIMEOUT": "600", "expected": 600},
-            {"MIGRATION_TIMEOUT": "", "expected": 300},  # Default value
+            ({"MIGRATION_TIMEOUT": "300"}, 300),
+            ({"MIGRATION_TIMEOUT": "600"}, 600),
+            ({}, 300),  # Default value when not set
         ]
 
-        for case in test_cases:
-            with patch.dict(os.environ, case):
+        for env_dict, expected in test_cases:
+            with patch.dict(os.environ, env_dict, clear=False):
                 # Simulate the configuration parsing
                 timeout = int(os.environ.get("MIGRATION_TIMEOUT", "300"))
-                assert timeout == case["expected"]
+                assert timeout == expected
 
     def test_lock_cleanup_on_error(self):
         """Test that advisory lock is cleaned up on errors."""
@@ -347,10 +367,14 @@ class TestIntegrationScenarios:
             "RUN_MIGRATIONS": "true"
         }
 
-        for key, expected_value in expected_defaults.items():
-            # Simulate default value resolution
-            actual_value = os.environ.get(key, expected_value)
-            assert actual_value == expected_value
+        # Test with clean environment (no pre-existing values)
+        clean_env = {k: v for k, v in os.environ.items() if k not in expected_defaults}
+
+        with patch.dict(os.environ, clean_env, clear=True):
+            for key, expected_value in expected_defaults.items():
+                # Simulate default value resolution
+                actual_value = os.environ.get(key, expected_value)
+                assert actual_value == expected_value, f"Expected {key}={expected_value}, got {actual_value}"
 
 
 if __name__ == "__main__":
