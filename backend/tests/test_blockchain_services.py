@@ -156,31 +156,8 @@ class TestBlockchainFetcherService:
         tx_data_zero = {'value': 0}
         assert blockchain_fetcher._detect_transaction_type(tx_data_zero, wallet_address) == CryptoTransactionType.TRANSFER_IN
 
-    def test_convert_blockstream_transaction(self, blockchain_fetcher, sample_blockstream_tx):
-        """Test Blockstream transaction conversion."""
-        wallet_address = 'test_wallet_address'
-
-        result = blockchain_fetcher._convert_blockstream_transaction(sample_blockstream_tx, wallet_address)
-
-        assert result is not None
-        assert result['transaction_hash'] == 'test_tx_hash_12345'
-        assert result['symbol'] == 'BTC'
-        assert result['quantity'] == Decimal('0.001')
-        assert result['exchange'] == 'Bitcoin Blockchain'
-        assert isinstance(result['timestamp'], datetime)
-        assert result['transaction_type'] in [CryptoTransactionType.TRANSFER_IN, CryptoTransactionType.TRANSFER_OUT]
-
-    def test_convert_blockstream_transaction_invalid(self, blockchain_fetcher):
-        """Test Blockstream transaction conversion with invalid data."""
-        # Missing required fields
-        invalid_tx = {'invalid': 'data'}
-        wallet_address = 'test_wallet_address'
-
-        result = blockchain_fetcher._convert_blockstream_transaction(invalid_tx, wallet_address)
-        assert result is None
-
-    def test_convert_blockchaincom_transaction(self, blockchain_fetcher, sample_blockchaincom_tx):
-        """Test Blockchain.com transaction conversion."""
+    def test_convert_blockchaincom_transaction_valid(self, blockchain_fetcher, sample_blockchaincom_tx):
+        """Test Blockchain.com transaction conversion with valid data."""
         wallet_address = 'test_wallet_address'
 
         result = blockchain_fetcher._convert_blockchaincom_transaction(sample_blockchaincom_tx, wallet_address)
@@ -191,6 +168,17 @@ class TestBlockchainFetcherService:
         assert result['quantity'] == Decimal('1.0')  # 100000000 satoshis = 1 BTC
         assert result['exchange'] == 'Bitcoin Blockchain'
         assert isinstance(result['timestamp'], datetime)
+        assert result['transaction_type'] in [CryptoTransactionType.TRANSFER_IN, CryptoTransactionType.TRANSFER_OUT]
+
+    def test_convert_blockchaincom_transaction_invalid(self, blockchain_fetcher):
+        """Test Blockchain.com transaction conversion with invalid data."""
+        # Missing required fields
+        invalid_tx = {'invalid': 'data'}
+        wallet_address = 'test_wallet_address'
+
+        result = blockchain_fetcher._convert_blockchaincom_transaction(invalid_tx, wallet_address)
+        assert result is None
+
 
     def test_build_result(self, blockchain_fetcher):
         """Test result building."""
@@ -219,7 +207,7 @@ class TestBlockchainFetcherService:
         mock_response.json.return_value = {'data': 'test_data'}
         mock_get.return_value = mock_response
 
-        result = blockchain_fetcher._make_request('blockstream', '/test')
+        result = blockchain_fetcher._make_request('/test')
 
         assert result == {'data': 'test_data'}
         mock_get.assert_called_once()
@@ -232,7 +220,7 @@ class TestBlockchainFetcherService:
         mock_response.json.return_value = {'data': 'test_data'}
         mock_get.return_value = mock_response
 
-        result = blockchain_fetcher._make_request('blockstream', '/test')
+        result = blockchain_fetcher._make_request('/test')
 
         assert result == {'data': 'test_data'}
         assert mock_get.call_count == 2  # Initial call + 1 retry
@@ -244,22 +232,63 @@ class TestBlockchainFetcherService:
         mock_response.raise_for_status.side_effect = requests.exceptions.RequestException("Network error")
         mock_get.return_value = mock_response
 
-        result = blockchain_fetcher._make_request('blockstream', '/test')
+        result = blockchain_fetcher._make_request('/test')
 
         assert result is None
-        assert mock_get.call_count == blockchain_fetcher.APIS['blockstream']['max_retries']
+        assert mock_get.call_count == blockchain_fetcher.api_config['max_retries']
 
     @patch('time.sleep')
     def test_rate_limiting(self, mock_sleep, blockchain_fetcher):
         """Test rate limiting functionality."""
         # Set last request time to simulate rate limiting
-        blockchain_fetcher._last_request_time['blockstream'] = time.time()
+        blockchain_fetcher._last_request_time = time.time()
 
         # This should trigger rate limiting
-        blockchain_fetcher._rate_limit('blockstream')
+        blockchain_fetcher._rate_limit()
 
         # Verify sleep was called (rate limiting was triggered)
         mock_sleep.assert_called()
+
+    @patch('app.services.blockchain_fetcher.BlockchainFetcherService._make_request')
+    def test_pagination_fetching(self, mock_make_request, blockchain_fetcher):
+        """Test pagination fetching for addresses with many transactions."""
+        # Mock multiple pages of transactions
+        page1 = {
+            'txs': [
+                {
+                    'hash': f'tx_{i}',
+                    'time': 1640995200 + i,
+                    'result': 100000,
+                    'out': [{'addr': 'test_wallet', 'value': 100000}]
+                }
+                for i in range(50)
+            ]
+        }
+        page2 = {
+            'txs': [
+                {
+                    'hash': f'tx_{i}',
+                    'time': 1640995200 + i + 50,
+                    'result': 100000,
+                    'out': [{'addr': 'test_wallet', 'value': 100000}]
+                }
+                for i in range(30)
+            ]
+        }
+        page3 = {'txs': []}  # Empty page to signal end
+
+        mock_make_request.side_effect = [page1, page2, page3]
+
+        result = blockchain_fetcher.fetch_transactions(
+            wallet_address='test_wallet',
+            portfolio_id=1,
+            max_transactions=None,  # Fetch all
+            days_back=None
+        )
+
+        assert result['status'] == 'success'
+        assert result['count'] == 80  # 50 + 30 transactions
+        assert mock_make_request.call_count == 3  # Three API calls for pagination
 
 
 class TestBlockchainDeduplicationService:
@@ -541,20 +570,20 @@ class TestBlockchainIntegration:
         """Test that API configuration is loaded correctly."""
         from app.services.blockchain_fetcher import blockchain_fetcher
 
-        # Verify that APIs are configured
-        assert 'blockstream' in blockchain_fetcher.APIS
-        assert 'blockchain_com' in blockchain_fetcher.APIS
-        assert 'blockcypher' in blockchain_fetcher.APIS
+        # Verify that blockchain.info API is configured
+        assert blockchain_fetcher.api_config is not None
+        assert 'base_url' in blockchain_fetcher.api_config
+        assert 'rate_limit' in blockchain_fetcher.api_config
+        assert 'timeout' in blockchain_fetcher.api_config
+        assert 'max_retries' in blockchain_fetcher.api_config
 
-        # Verify configuration values
-        assert blockchain_fetcher.APIS['blockstream']['base_url'] == settings.blockstream_api_url
-        assert blockchain_fetcher.APIS['blockchain_com']['base_url'] == settings.blockchain_com_api_url
-        assert blockchain_fetcher.APIS['blockcypher']['base_url'] == settings.blockcypher_api_url
+        # Verify configuration values for blockchain.info
+        assert str(blockchain_fetcher.api_config['base_url']) == str(settings.blockchain_com_api_url)
 
         # Verify rate limits are configured
-        assert blockchain_fetcher.APIS['blockstream']['rate_limit'] > 0
-        assert blockchain_fetcher.APIS['blockchain_com']['rate_limit'] > 0
-        assert blockchain_fetcher.APIS['blockcypher']['rate_limit'] > 0
+        assert blockchain_fetcher.api_config['rate_limit'] > 0
+        assert blockchain_fetcher.api_config['timeout'] > 0
+        assert blockchain_fetcher.api_config['max_retries'] > 0
 
     def test_error_handling_workflow(self):
         """Test error handling in the blockchain workflow."""
