@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { TrendingUp } from 'lucide-react';
+import { ThemeToggle } from './ThemeToggle';
 
 const navLinks = [
   { href: '/', label: 'Dashboard' },
@@ -17,7 +18,7 @@ export function Navbar() {
   const pathname = usePathname();
 
   return (
-    <nav className="border-b bg-white">
+    <nav className="border-b bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-8">
@@ -36,8 +37,8 @@ export function Navbar() {
                     className={cn(
                       'px-4 py-2 rounded-md text-sm font-medium transition-colors',
                       isActive
-                        ? 'bg-primary text-white'
-                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                     )}
                   >
                     {link.label}
@@ -45,6 +46,10 @@ export function Navbar() {
                 );
               })}
             </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <ThemeToggle />
           </div>
         </div>
       </div>

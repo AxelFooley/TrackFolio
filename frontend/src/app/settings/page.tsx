@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useBenchmark, useSetBenchmark } from '@/hooks/useBenchmark';
@@ -9,6 +9,8 @@ import { useToast } from '@/hooks/use-toast';
 import { formatDateTime } from '@/lib/utils';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { TickerAutocomplete } from '@/components/TickerAutocomplete';
+import { ThemeToggle, ThemeSelector, CompactThemeToggle } from '@/components/Shared/ThemeToggle';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export default function SettingsPage() {
   const { data: benchmark, isLoading: benchmarkLoading } = useBenchmark();
@@ -17,6 +19,28 @@ export default function SettingsPage() {
   const refreshPricesMutation = useRefreshPrices();
   const { toast } = useToast();
   const [benchmarkTicker, setBenchmarkTicker] = useState('');
+  const [mounted, setMounted] = useState(false);
+
+  // Try to get theme context, but handle errors gracefully
+  let theme: 'light' | 'dark' | 'system' = 'light';
+  let systemTheme: 'light' | 'dark' = 'light';
+  let resolvedTheme: 'light' | 'dark' = 'light';
+  let isDark = false;
+
+  try {
+    const themeContext = useTheme();
+    theme = themeContext.theme;
+    systemTheme = themeContext.systemTheme;
+    resolvedTheme = themeContext.resolvedTheme;
+    isDark = themeContext.isDark;
+  } catch (error) {
+    // Theme context not available (likely during SSR)
+    console.warn('Theme context not available');
+  }
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleSetBenchmark = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,6 +155,87 @@ await setBenchmarkMutation.mutateAsync({
                     )}
                   </Button>
                 </form>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Theme Settings */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Theme Settings</CardTitle>
+            <CardDescription>
+              Customize the appearance of the application
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {mounted ? (
+              <>
+                {/* Current Theme Information */}
+                <div className="p-4 bg-muted rounded-lg">
+                  <h4 className="font-medium mb-2">Current Theme</h4>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Active Theme:</span>
+                      <span className="font-medium capitalize">{theme}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Resolved Theme:</span>
+                      <span className="font-medium capitalize">{resolvedTheme}</span>
+                    </div>
+                    {theme === 'system' && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">System Preference:</span>
+                        <span className="font-medium capitalize">{systemTheme}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Dark Mode Active:</span>
+                      <span className="font-medium">{isDark ? 'Yes' : 'No'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Theme Selector */}
+                <div>
+                  <h4 className="font-medium mb-3">Choose Theme</h4>
+                  <ThemeSelector className="w-fit" />
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Select your preferred theme. System theme automatically follows your device preferences.
+                  </p>
+                </div>
+
+                {/* Theme Toggle Variants Showcase */}
+                <div>
+                  <h4 className="font-medium mb-3">Theme Toggle Styles</h4>
+                  <div className="flex flex-wrap gap-4 items-center">
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">Standard Toggle</p>
+                      <ThemeToggle />
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">With Label</p>
+                      <ThemeToggle showLabel variant="outline" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">Compact</p>
+                      <CompactThemeToggle />
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">Large Size</p>
+                      <ThemeToggle size="lg" variant="secondary" />
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="animate-pulse space-y-6">
+                <div className="h-32 bg-muted rounded-lg"></div>
+                <div className="h-24 bg-muted rounded-lg"></div>
+                <div className="h-24 bg-muted rounded-lg"></div>
               </div>
             )}
           </CardContent>
