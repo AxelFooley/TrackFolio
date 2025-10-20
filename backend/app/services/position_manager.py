@@ -32,7 +32,14 @@ class PositionManager:
 
         Returns:
             Updated Position object or None if no position exists
+
+        Raises:
+            ValueError: If neither ISIN nor ticker is provided
         """
+        # Validate that at least one identifier is provided
+        if not isin and not ticker:
+            raise ValueError("At least one identifier (ISIN or ticker) must be provided")
+
         # Get all transactions for this ISIN/ticker
         if isin:
             # Query by ISIN if provided
@@ -41,16 +48,13 @@ class PositionManager:
                 .where(Transaction.isin == isin)
                 .order_by(Transaction.operation_date)
             )
-        elif ticker:
+        else:
             # Query by ticker if ISIN is None
             result = await db.execute(
                 select(Transaction)
                 .where(Transaction.ticker == ticker)
                 .order_by(Transaction.operation_date)
             )
-        else:
-            # No identifier provided
-            return None
 
         transactions = result.scalars().all()
 
@@ -128,6 +132,24 @@ class PositionManager:
         asset_type = PositionManager._determine_asset_type(current_ticker)
 
         if position is None:
+            # Validate ticker uniqueness for ticker-only positions
+            if not isin and ticker:
+                # For ticker-only positions, check if another position already exists with this ticker
+                result = await db.execute(
+                    select(Position).where(
+                        and_(
+                            Position.current_ticker == ticker,
+                            Position.isin.is_(None)
+                        )
+                    )
+                )
+                existing_ticker_only = result.scalar_one_or_none()
+                if existing_ticker_only:
+                    raise ValueError(
+                        f"Duplicate ticker-only position: {ticker} already has a position without ISIN. "
+                        f"Each ticker can only have one position when ISIN is NULL."
+                    )
+
             # Create new position
             position = Position(
                 isin=isin,  # ISIN can be None
@@ -167,11 +189,20 @@ class PositionManager:
 
         Handles both ISIN-based and ticker-based transactions (when ISIN is NULL).
 
+        Position Uniqueness:
+        - Positions are identified by ISIN if available (one position per ISIN)
+        - If ISIN is NULL, positions are identified by ticker (one position per ticker)
+        - This means each ticker can have multiple positions if they have different ISINs
+        - But can only have one position when ISIN is NULL
+
         Args:
             db: Database session
 
         Returns:
             Number of positions recalculated
+
+        Raises:
+            ValueError: If duplicate ticker-only positions are detected
         """
         # Get all unique ISINs from transactions
         result = await db.execute(
