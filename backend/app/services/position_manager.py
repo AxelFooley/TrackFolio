@@ -204,19 +204,21 @@ class PositionManager:
         Raises:
             ValueError: If duplicate ticker-only positions are detected
         """
-        # Get all unique ISINs from transactions
+        # Optimized: Single query fetches both ISIN and ticker in one round trip
+        # Separates ISIN-based positions (where ISIN is not None) from
+        # ticker-only positions (where ISIN is None) in Python
         result = await db.execute(
-            select(Transaction.isin).distinct()
+            select(Transaction.isin, Transaction.ticker).distinct()
         )
-        isins = [row[0] for row in result.all() if row[0] is not None]
+        rows = result.all()
 
-        # Get all unique tickers with NULL ISINs (ticker-only transactions)
-        result_tickers = await db.execute(
-            select(Transaction.ticker).where(Transaction.isin.is_(None)).distinct()
-        )
-        tickers_without_isin = [row[0] for row in result_tickers.all()]
+        # Separate into ISIN-based and ticker-only positions
+        # Using sets to ensure uniqueness
+        isins = {row[0] for row in rows if row[0] is not None}
+        tickers_without_isin = {row[1] for row in rows if row[0] is None}
 
         count = 0
+
         # Recalculate ISIN-based positions
         for isin in isins:
             position = await PositionManager.recalculate_position(db, isin=isin)
