@@ -56,7 +56,7 @@ export class ApiError extends Error {
  * Normalize transaction type to lowercase for backend compatibility.
  * Frontend uses uppercase for better UX, backend expects lowercase.
  */
-function normalizeTransactionType<T extends { transaction_type?: string }>(data: T): T {
+export function normalizeTransactionType<T extends { transaction_type?: string }>(data: T): T {
   if (data.transaction_type) {
     return {
       ...data,
@@ -73,7 +73,7 @@ function normalizeTransactionType<T extends { transaction_type?: string }>(data:
  * - date -> operation_date
  * - Removes isin, broker, description fields (backend fetches these)
  */
-function transformTransactionForBackend(data: TransactionCreate): any {
+export function transformTransactionForBackend(data: TransactionCreate): any {
   const { transaction_type, date, isin, broker, description, ...rest } = data;
 
   return {
