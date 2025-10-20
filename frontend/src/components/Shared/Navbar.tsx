@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { TrendingUp } from 'lucide-react';
-import { ThemeToggle } from './ThemeToggle';
+import { DropdownThemeToggle } from './DropdownThemeToggle';
 
 const navLinks = [
   { href: '/', label: 'Dashboard' },
@@ -49,7 +49,7 @@ export function Navbar() {
           </div>
 
           <div className="flex items-center gap-4">
-            <ThemeToggle />
+            <DropdownThemeToggle />
           </div>
         </div>
       </div>
