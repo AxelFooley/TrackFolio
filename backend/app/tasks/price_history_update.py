@@ -10,7 +10,9 @@ import logging
 import time
 
 from app.celery_app import celery_app
+from app.database import SyncSessionLocal
 from app.services.price_history_manager import price_history_manager
+from app.services.system_state_manager import SystemStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,16 @@ def update_price_history_daily(self):
             )
         except Exception as e:
             logger.warning(f"Failed to schedule coverage check: {e}")
+
+        # Update last price update timestamp
+        try:
+            db = SyncSessionLocal()
+            SystemStateManager.update_price_last_update(db)
+            db.close()
+            logger.info("Updated price last update timestamp")
+        except Exception as e:
+            logger.error(f"Failed to update price last update timestamp: {e}")
+            # Don't fail the entire task if timestamp update fails
 
         summary = {
             "status": "success",

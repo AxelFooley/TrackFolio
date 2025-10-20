@@ -11,6 +11,7 @@ from app.models.position import Position
 from app.schemas.price import RealtimePriceResponse, RealtimePricesResponse, PriceHistoryResponse
 from app.services.price_fetcher import PriceFetcher
 from app.services.price_history_manager import price_history_manager
+from app.services.system_state_manager import SystemStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -186,12 +187,37 @@ async def get_price_history(
 
 @router.get("/last-update")
 async def get_last_update(db: AsyncSession = Depends(get_db)):
-    """Get timestamp of last successful price update."""
-    # Would query from a system state table or cache
-    return {
-        "last_update": datetime.utcnow(),
-        "status": "success"
-    }
+    """
+    Get timestamp of last successful price update.
+
+    Returns the persisted last price update timestamp from the database.
+    If no price update has been recorded yet, returns None.
+
+    Returns:
+        dict with keys:
+            - last_update: ISO format datetime string or None
+            - status: "success" or "no_data"
+    """
+    try:
+        last_update = await SystemStateManager.get_price_last_update_async(db)
+
+        if last_update:
+            return {
+                "last_update": last_update.isoformat(),
+                "status": "success"
+            }
+        else:
+            return {
+                "last_update": None,
+                "status": "no_data",
+                "message": "No price update has been recorded yet"
+            }
+    except Exception as e:
+        logger.error(f"Error retrieving last price update timestamp: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve last price update timestamp: {str(e)}"
+        )
 
 
 @router.post("/ensure-coverage")
