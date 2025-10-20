@@ -36,12 +36,12 @@ class Position(Base):
         index=True,
         comment="Current ticker symbol (may change after splits)"
     )
-    isin: Mapped[str] = mapped_column(
+    isin: Mapped[str | None] = mapped_column(
         String(12),
-        nullable=False,
+        nullable=True,
         unique=True,
         index=True,
-        comment="ISIN - unique identifier for the security"
+        comment="ISIN - unique identifier for the security (may be None for ticker-only positions)"
     )
     description: Mapped[str] = mapped_column(String(500), nullable=False)
 
