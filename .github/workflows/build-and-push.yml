@@ -93,10 +93,10 @@ jobs:
           # exit-zero treats all errors as warnings
           flake8 backend --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: Run pytest (unit tests only)
+      - name: Run pytest
         run: |
           pip install pytest pytest-asyncio
-          cd backend && PYTHONPATH=. pytest tests/ -v -m "not integration"
+          cd backend && PYTHONPATH=. pytest tests/ -v
   lint-frontend:
     name: Lint Frontend
     runs-on: ubuntu-latest
@@ -272,22 +272,6 @@ jobs:
         run: |
           echo "❌ Build failed. Check logs above for details."
           exit 1
-
-  copilot-review:
-    name: Copilot Code Review
-    if: github.event_name == 'pull_request'
-    needs: [lint-backend, lint-frontend]
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Request Copilot Code Review
-        uses: github/copilot-code-review-action@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   notify-lint:
     name: Notify Lint Status
