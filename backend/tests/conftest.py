@@ -5,13 +5,6 @@ Handles pytest-asyncio configuration and shared fixtures.
 """
 import pytest
 
-# Configure pytest-asyncio to use function-scoped event loops
-def pytest_configure(config):
-    """Configure pytest with asyncio mode."""
-    config.addinivalue_line(
-        "asyncio_mode", "auto"
-    )
-
 
 @pytest.fixture(scope="session")
 def event_loop_policy():
