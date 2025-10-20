@@ -17,50 +17,69 @@ module.exports = {
     },
     extend: {
       colors: {
-        border: "hsl(214.3 31.8% 91.4%)",
-        input: "hsl(214.3 31.8% 91.4%)",
-        ring: "hsl(221.2 83.2% 53.3%)",
-        background: "hsl(0 0% 100%)",
-        foreground: "hsl(222.2 84% 4.9%)",
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
         primary: {
-          DEFAULT: "#3B82F6",
-          foreground: "hsl(210 40% 98%)",
-        },
-        success: {
-          DEFAULT: "#10B981",
-          foreground: "hsl(0 0% 100%)",
-        },
-        danger: {
-          DEFAULT: "#EF4444",
-          foreground: "hsl(0 0% 100%)",
-        },
-        warning: {
-          DEFAULT: "#F59E0B",
-          foreground: "hsl(0 0% 100%)",
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
         },
         secondary: {
-          DEFAULT: "hsl(210 40% 96.1%)",
-          foreground: "hsl(222.2 47.4% 11.2%)",
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
         },
         destructive: {
-          DEFAULT: "#EF4444",
-          foreground: "hsl(0 0% 100%)",
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
         },
         muted: {
-          DEFAULT: "hsl(210 40% 96.1%)",
-          foreground: "hsl(215.4 16.3% 46.9%)",
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
         },
         accent: {
-          DEFAULT: "hsl(210 40% 96.1%)",
-          foreground: "hsl(222.2 47.4% 11.2%)",
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
         },
         popover: {
-          DEFAULT: "hsl(0 0% 100%)",
-          foreground: "hsl(222.2 84% 4.9%)",
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
         },
         card: {
-          DEFAULT: "hsl(0 0% 100%)",
-          foreground: "hsl(222.2 84% 4.9%)",
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
+        danger: {
+          DEFAULT: "hsl(var(--danger))",
+          foreground: "hsl(var(--danger-foreground))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          foreground: "hsl(var(--info-foreground))",
+        },
+        ghost: {
+          DEFAULT: "hsl(var(--ghost))",
+          foreground: "hsl(var(--ghost-foreground))",
+        },
+        // Chart colors for data visualization
+        chart: {
+          1: "hsl(var(--chart-1))",
+          2: "hsl(var(--chart-2))",
+          3: "hsl(var(--chart-3))",
+          4: "hsl(var(--chart-4))",
+          5: "hsl(var(--chart-5))",
+          6: "hsl(var(--chart-6))",
+          7: "hsl(var(--chart-7))",
+          8: "hsl(var(--chart-8))",
         },
       },
       borderRadius: {
