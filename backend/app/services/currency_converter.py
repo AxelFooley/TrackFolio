@@ -7,6 +7,7 @@ Uses Yahoo Finance as the primary data source via the PriceFetcher service.
 from decimal import Decimal
 from typing import Optional
 import logging
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
 from app.services.price_fetcher import PriceFetcher
@@ -51,8 +52,16 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
         # Note: Yahoo Finance uses base/quote format, so we need to call it with from_currency as base
         logger.info(f"Fetching exchange rate: {from_currency} -> {to_currency}")
 
-        # Call the sync version directly - it handles creating its own event loop in a thread
-        rate = _fetch_rate_sync(from_currency, to_currency)
+        # Check if we're in an async context
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context - submit to executor to run in a separate thread
+            # This avoids "Cannot run the event loop while another loop is running" error
+            future = _executor.submit(_fetch_rate_sync, from_currency, to_currency)
+            rate = future.result(timeout=30)  # concurrent.futures.Future supports timeout
+        except RuntimeError:
+            # No running loop, safe to use synchronous call directly
+            rate = _fetch_rate_sync(from_currency, to_currency)
 
         if rate is None:
             raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}")
