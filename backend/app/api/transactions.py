@@ -150,14 +150,15 @@ async def import_transactions(
             raise
 
         # Recalculate positions for affected ISINs
-        # Get transactions to extract tickers for position recalculation
-        result = await db.execute(select(Transaction))
-        all_transactions = result.scalars().all()
-
+        # Use targeted queries instead of loading all transactions into memory
         for isin in affected_isins:
-            # Find any transaction with this ISIN to get its ticker
-            txn_with_isin = next((t for t in all_transactions if t.isin == isin), None)
-            ticker = txn_with_isin.ticker if txn_with_isin else None
+            # Query for a single transaction with this ISIN to get its ticker
+            result = await db.execute(
+                select(Transaction.ticker)
+                .where(Transaction.isin == isin)
+                .limit(1)
+            )
+            ticker = result.scalar_one_or_none()
 
             await PositionManager.recalculate_position(db, isin=isin, ticker=ticker)
 
