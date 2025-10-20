@@ -17,10 +17,6 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const run_id = context.runId;
-            const octokit = github.getOctokit(context.token);
-
-            // Get the current PR
             const pr = context.payload.pull_request;
             console.log(`Waiting for lint jobs on PR #${pr.number}...`);
 
@@ -29,7 +25,7 @@ jobs:
             const maxAttempts = 60; // 5 minutes with 5 second intervals
 
             while (attempt < maxAttempts) {
-              const runs = await octokit.rest.actions.listWorkflowRuns({
+              const runs = await github.rest.actions.listWorkflowRuns({
                 owner,
                 repo,
                 workflow_id: 'build-and-push.yml',
