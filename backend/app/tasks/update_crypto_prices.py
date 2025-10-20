@@ -104,17 +104,21 @@ def update_crypto_prices(self):
         for symbol in crypto_symbols:
             for base_currency in base_currencies:
                 try:
+                    # base_currency is already a string from the database (e.g., "USD", "EUR")
+                    currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
+                    ticker_key = f"{symbol}-{currency_upper}"
+
                     # Check if price already exists for this date and currency (idempotency)
                     existing = db.execute(
                         select(PriceHistory)
                         .where(
-                            PriceHistory.ticker == f"{symbol}-{base_currency.value.upper()}",
+                            PriceHistory.ticker == ticker_key,
                             PriceHistory.date == price_date
                         )
                     ).scalar_one_or_none()
 
                     if existing:
-                        logger.debug(f"Price already exists for {symbol}-{base_currency.value.upper()} on {price_date}. Skipping.")
+                        logger.debug(f"Price already exists for {ticker_key} on {price_date}. Skipping.")
                         skipped += 1
                         continue
 
@@ -123,13 +127,13 @@ def update_crypto_prices(self):
 
                     # Fetch current price from Yahoo Finance in the correct currency
                     price_fetcher = PriceFetcher()
-                    yahoo_symbol = f"{symbol}-{base_currency.value.upper()}"
+                    yahoo_symbol = ticker_key
                     price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
 
                     if not price_data or not price_data.get("current_price"):
-                        logger.warning(f"No price data returned for {symbol}-{base_currency.value.upper()}")
+                        logger.warning(f"No price data returned for {ticker_key}")
                         failed += 1
-                        failed_symbols.append(f"{symbol}-{base_currency.value.upper()}")
+                        failed_symbols.append(ticker_key)
                         continue
 
                     # Use price directly in the correct currency (no conversion needed)
@@ -137,7 +141,7 @@ def update_crypto_prices(self):
 
                     # Create price record with currency-specific ticker
                     price_record = PriceHistory(
-                        ticker=f"{symbol}-{base_currency.value.upper()}",  # Store currency-specific ticker
+                        ticker=ticker_key,  # Store currency-specific ticker
                         date=price_date,
                         open=price,  # Use same price for open/high/low for intraday
                         high=price,
@@ -151,21 +155,24 @@ def update_crypto_prices(self):
                     db.commit()
 
                     logger.info(
-                        f"Updated crypto price for {symbol}-{base_currency.value.upper()}: {price} {base_currency.value.upper()} on {price_date}"
+                        f"Updated crypto price for {ticker_key}: {price} {currency_upper} on {price_date}"
                     )
                     updated += 1
 
                 except IntegrityError as e:
                     # Race condition: another process already inserted this price
                     db.rollback()
-                    logger.debug(f"Price already exists for {symbol}-{base_currency.value.upper()} (race condition)")
+                    currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
+                    logger.debug(f"Price already exists for {symbol}-{currency_upper} (race condition)")
                     skipped += 1
 
                 except Exception as e:
                     db.rollback()
-                    logger.error(f"Error fetching crypto price for {symbol}-{base_currency.value.upper()}: {str(e)}")
+                    currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
+                    logger.error(f"Error fetching crypto price for {symbol}-{currency_upper}: {str(e)}")
                     failed += 1
-                    failed_symbols.append(f"{symbol}-{base_currency.value.upper()}")
+                    currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
+                    failed_symbols.append(f"{symbol}-{currency_upper}")
 
         # Summary
         summary = {
