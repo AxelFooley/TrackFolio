@@ -21,30 +21,49 @@ class PositionManager:
     """Manage position calculations and updates."""
 
     @staticmethod
-    async def recalculate_position(db: AsyncSession, isin: str) -> Optional[Position]:
+    async def recalculate_position(db: AsyncSession, isin: str | None, ticker: str | None = None) -> Optional[Position]:
         """
-        Recalculate position for a specific ISIN based on all transactions.
+        Recalculate position for a specific ISIN or ticker based on all transactions.
 
         Args:
             db: Database session
-            isin: Asset ISIN (unique identifier)
+            isin: Asset ISIN (unique identifier) - can be None
+            ticker: Asset ticker symbol - used when ISIN is None
 
         Returns:
             Updated Position object or None if no position exists
         """
-        # Get all transactions for this ISIN (not ticker!)
-        result = await db.execute(
-            select(Transaction)
-            .where(Transaction.isin == isin)
-            .order_by(Transaction.operation_date)
-        )
+        # Get all transactions for this ISIN/ticker
+        if isin:
+            # Query by ISIN if provided
+            result = await db.execute(
+                select(Transaction)
+                .where(Transaction.isin == isin)
+                .order_by(Transaction.operation_date)
+            )
+        elif ticker:
+            # Query by ticker if ISIN is None
+            result = await db.execute(
+                select(Transaction)
+                .where(Transaction.ticker == ticker)
+                .order_by(Transaction.operation_date)
+            )
+        else:
+            # No identifier provided
+            return None
+
         transactions = result.scalars().all()
 
         if not transactions:
             # No transactions, delete position if it exists
-            result = await db.execute(
-                select(Position).where(Position.isin == isin)
-            )
+            if isin:
+                result = await db.execute(
+                    select(Position).where(Position.isin == isin)
+                )
+            else:
+                result = await db.execute(
+                    select(Position).where(Position.current_ticker == ticker)
+                )
             position = result.scalar_one_or_none()
             if position:
                 await db.delete(position)
@@ -69,9 +88,14 @@ class PositionManager:
 
         # If quantity is zero or negative, position is closed
         if quantity <= 0:
-            result = await db.execute(
-                select(Position).where(Position.isin == isin)
-            )
+            if isin:
+                result = await db.execute(
+                    select(Position).where(Position.isin == isin)
+                )
+            else:
+                result = await db.execute(
+                    select(Position).where(Position.current_ticker == ticker)
+                )
             position = result.scalar_one_or_none()
             if position:
                 await db.delete(position)
@@ -84,11 +108,20 @@ class PositionManager:
         # Get current ticker (most recent transaction's ticker)
         current_ticker = transactions[-1].ticker
 
-        # Get or create position BY ISIN
-        result = await db.execute(
-            select(Position).where(Position.isin == isin)
-        )
-        position = result.scalar_one_or_none()
+        # Get or create position - try by ISIN first, then by ticker
+        position = None
+        if isin:
+            result = await db.execute(
+                select(Position).where(Position.isin == isin)
+            )
+            position = result.scalar_one_or_none()
+
+        # If ISIN is None or not found, try to find by ticker
+        if position is None and ticker:
+            result = await db.execute(
+                select(Position).where(Position.current_ticker == ticker)
+            )
+            position = result.scalar_one_or_none()
 
         # Get asset metadata from first transaction
         first_txn = transactions[0]
@@ -97,8 +130,8 @@ class PositionManager:
         if position is None:
             # Create new position
             position = Position(
-                isin=isin,  # ISIN is primary unique key now
-                current_ticker=current_ticker,  # Changed from ticker
+                isin=isin,  # ISIN can be None
+                current_ticker=current_ticker,
                 description=first_txn.description,
                 asset_type=asset_type,
                 quantity=quantity,
@@ -110,6 +143,7 @@ class PositionManager:
         else:
             # Update existing position
             position.current_ticker = current_ticker  # Update to latest ticker
+            position.isin = isin  # Update ISIN if we now have one
             position.quantity = quantity
             position.average_cost = average_cost
             position.cost_basis = cost_basis
@@ -131,21 +165,36 @@ class PositionManager:
         """
         Recalculate all positions based on current transactions.
 
+        Handles both ISIN-based and ticker-based transactions (when ISIN is NULL).
+
         Args:
             db: Database session
 
         Returns:
             Number of positions recalculated
         """
-        # Get all unique ISINs from transactions (not tickers!)
+        # Get all unique ISINs from transactions
         result = await db.execute(
             select(Transaction.isin).distinct()
         )
-        isins = [row[0] for row in result.all()]
+        isins = [row[0] for row in result.all() if row[0] is not None]
+
+        # Get all unique tickers with NULL ISINs (ticker-only transactions)
+        result_tickers = await db.execute(
+            select(Transaction.ticker).where(Transaction.isin.is_(None)).distinct()
+        )
+        tickers_without_isin = [row[0] for row in result_tickers.all()]
 
         count = 0
+        # Recalculate ISIN-based positions
         for isin in isins:
-            position = await PositionManager.recalculate_position(db, isin)
+            position = await PositionManager.recalculate_position(db, isin=isin)
+            if position:
+                count += 1
+
+        # Recalculate ticker-based positions (where ISIN is NULL)
+        for ticker in tickers_without_isin:
+            position = await PositionManager.recalculate_position(db, ticker=ticker)
             if position:
                 count += 1
 
