@@ -7,11 +7,14 @@ Uses Yahoo Finance as the primary data source via the PriceFetcher service.
 from decimal import Decimal
 from typing import Optional
 import logging
-import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from app.services.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
+
+# Thread pool executor for running sync functions in async contexts
+_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="currency_converter")
 
 
 def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
@@ -48,8 +51,8 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
         # Note: Yahoo Finance uses base/quote format, so we need to call it with from_currency as base
         logger.info(f"Fetching exchange rate: {from_currency} -> {to_currency}")
 
-        # Run the async function in a sync context
-        rate = asyncio.run(_fetch_rate_async(from_currency, to_currency))
+        # Call the sync version directly - it handles creating its own event loop in a thread
+        rate = _fetch_rate_sync(from_currency, to_currency)
 
         if rate is None:
             raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}")
@@ -60,6 +63,33 @@ def get_exchange_rate(from_currency: str, to_currency: str) -> Decimal:
     except Exception as e:
         logger.error(f"Error fetching exchange rate {from_currency}/{to_currency}: {e}")
         raise ValueError(f"Failed to fetch exchange rate for {from_currency}/{to_currency}: {e}")
+
+
+def _fetch_rate_sync(from_currency: str, to_currency: str) -> Optional[Decimal]:
+    """
+    Synchronous version of the rate fetch function for use in ThreadPoolExecutor.
+
+    Parameters:
+        from_currency (str): Source currency code.
+        to_currency (str): Target currency code.
+
+    Returns:
+        Optional[Decimal]: Exchange rate or None if unavailable.
+    """
+    try:
+        # Create a new event loop in this thread
+        import asyncio
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        try:
+            result = new_loop.run_until_complete(_fetch_rate_async(from_currency, to_currency))
+            return result
+        finally:
+            new_loop.close()
+            asyncio.set_event_loop(None)
+    except Exception as e:
+        logger.error(f"Error in sync rate fetch: {e}")
+        return None
 
 
 async def _fetch_rate_async(from_currency: str, to_currency: str) -> Optional[Decimal]:
