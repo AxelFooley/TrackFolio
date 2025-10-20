@@ -76,17 +76,30 @@ async def _update_current_prices(symbols: Optional[List[str]] = None):
 
     logger.info(f"Updating current prices for {len(symbols)} symbols")
 
-    for symbol in symbols:
+    try:
+        for symbol in symbols:
+            try:
+                # Only update today's price
+                today = date.today()
+                price_history_manager.fetch_and_store_complete_history(
+                    symbol=symbol,
+                    start_date=today,
+                    force_update=True
+                )
+            except Exception as e:
+                logger.error(f"Error updating current price for {symbol}: {e}")
+
+        # Update the last price update timestamp after successful fetch
+        from app.database import SyncSessionLocal
+        db = SyncSessionLocal()
         try:
-            # Only update today's price
-            today = date.today()
-            price_history_manager.fetch_and_store_complete_history(
-                symbol=symbol,
-                start_date=today,
-                force_update=True
-            )
-        except Exception as e:
-            logger.error(f"Error updating current price for {symbol}: {e}")
+            SystemStateManager.update_price_last_update(db)
+            logger.info("Updated price last update timestamp")
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error in current prices update task: {e}")
 
 
 async def _update_complete_history(symbols: Optional[List[str]] = None):
