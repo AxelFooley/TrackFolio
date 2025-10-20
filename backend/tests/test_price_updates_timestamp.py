@@ -23,11 +23,8 @@ from app.database import SyncSessionLocal, AsyncSessionLocal
 from app.tasks.price_updates import update_daily_prices
 
 
-# Skip sync database tests if running outside Docker (no localhost PostgreSQL)
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("DATABASE_URL", "").startswith("postgresql://"),
-    reason="Database tests require PostgreSQL connection"
-)
+# Mark all tests in this module as integration tests (require database)
+pytestmark = pytest.mark.integration
 
 
 class TestSystemStateModel:
