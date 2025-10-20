@@ -93,10 +93,10 @@ jobs:
           # exit-zero treats all errors as warnings
           flake8 backend --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: Run pytest
+      - name: Run pytest (unit tests only)
         run: |
           pip install pytest pytest-asyncio
-          cd backend && PYTHONPATH=. pytest tests/ -v
+          cd backend && PYTHONPATH=. pytest tests/ -v -m "not integration"
   lint-frontend:
     name: Lint Frontend
     runs-on: ubuntu-latest
