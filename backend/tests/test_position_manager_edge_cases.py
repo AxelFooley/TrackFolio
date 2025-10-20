@@ -7,6 +7,7 @@ Tests critical edge cases:
 - Position recalculation with mixed ISIN scenarios
 """
 import pytest
+import pytest_asyncio
 from decimal import Decimal
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,16 +20,14 @@ from app.database import AsyncSessionLocal
 class TestPositionManagerEdgeCases:
     """Test edge cases in position recalculation."""
 
-    @pytest.fixture
-    async def async_db(self):
-        """Create an async test database session."""
-        db = AsyncSessionLocal()
-        yield db
-        await db.close()
+    def get_db(self) -> AsyncSession:
+        """Helper to create an async test database session."""
+        return AsyncSessionLocal()
 
     @pytest.mark.asyncio
-    async def test_recalculate_position_with_null_isin_and_ticker(self, async_db: AsyncSession):
+    async def test_recalculate_position_with_null_isin_and_ticker(self):
         """Test position recalculation with only ticker (NULL ISIN)."""
+        async_db = self.get_db()
         ticker = f"TEST_TICKER_{datetime.utcnow().timestamp()}"
 
         # Create transaction with NULL ISIN but valid ticker
@@ -69,8 +68,9 @@ class TestPositionManagerEdgeCases:
         await async_db.commit()
 
     @pytest.mark.asyncio
-    async def test_recalculate_position_requires_at_least_one_identifier(self, async_db: AsyncSession):
+    async def test_recalculate_position_requires_at_least_one_identifier(self):
         """Test that recalculate_position raises ValueError when both ISIN and ticker are None."""
+        async_db = self.get_db()
         with pytest.raises(ValueError, match="At least one identifier"):
             await PositionManager.recalculate_position(
                 async_db,
@@ -79,8 +79,9 @@ class TestPositionManagerEdgeCases:
             )
 
     @pytest.mark.asyncio
-    async def test_duplicate_tickers_with_different_isins(self, async_db: AsyncSession):
+    async def test_duplicate_tickers_with_different_isins(self):
         """Test that same ticker with different ISINs creates separate positions."""
+        async_db = self.get_db()
         shared_ticker = "MULTI_ISIN"
         isin1 = "US0000000001"
         isin2 = "US0000000002"
@@ -146,8 +147,9 @@ class TestPositionManagerEdgeCases:
         await async_db.commit()
 
     @pytest.mark.asyncio
-    async def test_recalculate_all_positions_with_mixed_isin_and_ticker_only(self, async_db: AsyncSession):
+    async def test_recalculate_all_positions_with_mixed_isin_and_ticker_only(self):
         """Test recalculate_all_positions with both ISIN-based and ticker-only transactions."""
+        async_db = self.get_db()
         isin = "US1234567890"
         ticker_only = f"TICKET_ONLY_{datetime.utcnow().timestamp()}"
 
@@ -214,8 +216,9 @@ class TestPositionManagerEdgeCases:
         await async_db.commit()
 
     @pytest.mark.asyncio
-    async def test_duplicate_ticker_only_position_raises_error(self, async_db: AsyncSession):
+    async def test_duplicate_ticker_only_position_raises_error(self):
         """Test that creating duplicate ticker-only positions raises ValueError."""
+        async_db = self.get_db()
         ticker_only = f"DUP_TICKER_{datetime.utcnow().timestamp()}"
 
         # Create first ticker-only position
@@ -280,8 +283,9 @@ class TestPositionManagerEdgeCases:
         await async_db.commit()
 
     @pytest.mark.asyncio
-    async def test_position_closed_when_quantity_becomes_zero(self, async_db: AsyncSession):
+    async def test_position_closed_when_quantity_becomes_zero(self):
         """Test that position is deleted when quantity becomes zero after sell."""
+        async_db = self.get_db()
         ticker = f"CLOSE_POS_{datetime.utcnow().timestamp()}"
         isin = "US0000CLOSE01"
 

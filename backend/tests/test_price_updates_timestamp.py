@@ -9,6 +9,8 @@ This module tests:
 - Timestamp persistence and retrieval
 """
 import pytest
+import pytest_asyncio
+import os
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, AsyncMock
 from sqlalchemy import select
@@ -19,6 +21,13 @@ from app.models.system_state import SystemState
 from app.services.system_state_manager import SystemStateManager
 from app.database import SyncSessionLocal, AsyncSessionLocal
 from app.tasks.price_updates import update_daily_prices
+
+
+# Skip sync database tests if running outside Docker (no localhost PostgreSQL)
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("DATABASE_URL", "").startswith("postgresql://"),
+    reason="Database tests require PostgreSQL connection"
+)
 
 
 class TestSystemStateModel:
@@ -214,11 +223,12 @@ class TestSystemStateManager:
 class TestSystemStateManagerAsync:
     """Test cases for async SystemStateManager methods."""
 
-    @pytest.fixture
-    def async_db(self):
+    @pytest_asyncio.fixture(scope="function")
+    async def async_db(self):
         """Create an async test database session."""
         db = AsyncSessionLocal()
         yield db
+        await db.close()
 
     def test_async_methods_exist(self):
         """Test that async methods are properly defined."""
