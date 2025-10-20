@@ -17,7 +17,10 @@ from app.services.position_manager import PositionManager
 from app.database import AsyncSessionLocal
 
 
-@pytest.mark.integration
+# Mark entire module as integration test (requires database)
+pytestmark = pytest.mark.integration
+
+
 class TestPositionManagerEdgeCases:
     """Test edge cases in position recalculation."""
 
