@@ -1,5 +1,5 @@
-"""Price update API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+"""Price API endpoints."""
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, date, timedelta
@@ -19,99 +19,6 @@ router = APIRouter(prefix="/api/prices", tags=["prices"])
 
 # Create a singleton instance of PriceFetcher to maintain cache across requests
 _price_fetcher = PriceFetcher()
-
-
-@router.post("/refresh")
-async def refresh_prices(
-    background_tasks: BackgroundTasks,
-    current_only: bool = True,
-    symbols: Optional[List[str]] = None,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Manual price refresh endpoint.
-
-    Args:
-        current_only: If True, only refresh current day's prices. If False, fetch complete history.
-        symbols: Optional list of symbols to refresh (defaults to all active symbols)
-
-    Rate limited to prevent abuse (1 refresh per 5 minutes).
-    """
-    try:
-        if current_only:
-            # Trigger current price update in background
-            background_tasks.add_task(
-                _update_current_prices,
-                symbols=symbols
-            )
-            return {
-                "message": "Current price refresh triggered",
-                "timestamp": datetime.utcnow(),
-                "type": "current_only"
-            }
-        else:
-            # Trigger complete history update in background
-            background_tasks.add_task(
-                _update_complete_history,
-                symbols=symbols
-            )
-            return {
-                "message": "Complete price history refresh triggered",
-                "timestamp": datetime.utcnow(),
-                "type": "complete_history"
-            }
-
-    except Exception as e:
-        logger.error(f"Error triggering price refresh: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to trigger price refresh: {str(e)}"
-        )
-
-
-async def _update_current_prices(symbols: Optional[List[str]] = None):
-    """Background task to update current day's prices only."""
-    if symbols is None:
-        symbols = list(price_history_manager.get_all_active_symbols())
-
-    logger.info(f"Updating current prices for {len(symbols)} symbols")
-
-    try:
-        for symbol in symbols:
-            try:
-                # Only update today's price
-                today = date.today()
-                price_history_manager.fetch_and_store_complete_history(
-                    symbol=symbol,
-                    start_date=today,
-                    force_update=True
-                )
-            except Exception as e:
-                logger.error(f"Error updating current price for {symbol}: {e}")
-
-        # Update the last price update timestamp after successful fetch
-        from app.database import SyncSessionLocal
-        db = SyncSessionLocal()
-        try:
-            SystemStateManager.update_price_last_update(db)
-            logger.info("Updated price last update timestamp")
-        finally:
-            db.close()
-
-    except Exception as e:
-        logger.error(f"Error in current prices update task: {e}")
-
-
-async def _update_complete_history(symbols: Optional[List[str]] = None):
-    """Background task to update complete price history."""
-    logger.info(f"Starting complete history update for symbols: {symbols or 'all'}")
-
-    results = price_history_manager.update_all_symbols_history(symbols, force_update=True)
-
-    total_updated = sum(r.get('updated', 0) for r in results.values())
-    total_added = sum(r.get('added', 0) for r in results.values())
-
-    logger.info(f"Complete history update finished: {total_added} added, {total_updated} updated")
 
 
 @router.get("/history/{symbol}")
@@ -230,42 +137,6 @@ async def get_last_update(db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve last price update timestamp: {str(e)}"
-        )
-
-
-@router.post("/ensure-coverage")
-async def ensure_price_coverage(
-    background_tasks: BackgroundTasks,
-    symbols: Optional[List[str]] = None,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Ensure complete price history coverage for all symbols.
-
-    This endpoint checks for gaps in historical data and fills them if needed.
-    It runs in the background as it can take a while for many symbols.
-
-    Args:
-        symbols: Optional list of symbols to check (defaults to all active symbols)
-    """
-    try:
-        # Run coverage check in background
-        background_tasks.add_task(
-            price_history_manager.ensure_complete_coverage,
-            symbols=symbols
-        )
-
-        return {
-            "message": "Price coverage check started in background",
-            "symbols": symbols or "all active symbols",
-            "timestamp": datetime.utcnow()
-        }
-
-    except Exception as e:
-        logger.error(f"Error starting coverage check: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to start coverage check: {str(e)}"
         )
 
 
