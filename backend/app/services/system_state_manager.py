@@ -88,12 +88,14 @@ class SystemStateManager:
                 existing.value = value
                 existing.updated_at = datetime.utcnow()
                 db.commit()
+                db.refresh(existing)
                 logger.debug(f"Updated system state '{key}' to '{value}'")
             else:
                 # Create new
                 new_state = SystemState(key=key, value=value)
                 db.add(new_state)
                 db.commit()
+                db.refresh(new_state)
                 logger.debug(f"Created new system state '{key}' = '{value}'")
 
             return True
@@ -109,6 +111,7 @@ class SystemStateManager:
                     existing.value = value
                     existing.updated_at = datetime.utcnow()
                     db.commit()
+                    db.refresh(existing)
                     logger.debug(f"Updated system state '{key}' (after race condition)")
                     return True
             except Exception as e:
@@ -145,12 +148,14 @@ class SystemStateManager:
                 existing.value = value
                 existing.updated_at = datetime.utcnow()
                 await db.commit()
+                await db.refresh(existing)
                 logger.debug(f"Updated system state '{key}' to '{value}'")
             else:
                 # Create new
                 new_state = SystemState(key=key, value=value)
                 db.add(new_state)
                 await db.commit()
+                await db.refresh(new_state)
                 logger.debug(f"Created new system state '{key}' = '{value}'")
 
             return True
@@ -167,6 +172,7 @@ class SystemStateManager:
                     existing.value = value
                     existing.updated_at = datetime.utcnow()
                     await db.commit()
+                    await db.refresh(existing)
                     logger.debug(f"Updated system state '{key}' (after race condition)")
                     return True
             except Exception as e:

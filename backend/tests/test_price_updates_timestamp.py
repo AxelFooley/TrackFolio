@@ -212,7 +212,13 @@ class TestSystemStateManager:
 
 
 class TestSystemStateManagerAsync:
-    """Test cases for async SystemStateManager methods - tested via mocking."""
+    """Test cases for async SystemStateManager methods."""
+
+    @pytest.fixture
+    def async_db(self):
+        """Create an async test database session."""
+        db = AsyncSessionLocal()
+        yield db
 
     def test_async_methods_exist(self):
         """Test that async methods are properly defined."""
@@ -231,6 +237,139 @@ class TestSystemStateManagerAsync:
     def test_set_state_async_mock(self):
         """Test async set_state is callable."""
         assert callable(SystemStateManager.set_state_async)
+
+    @pytest.mark.asyncio
+    async def test_set_state_async_new(self, async_db: AsyncSession):
+        """Test creating a new state entry asynchronously."""
+        key = f"async_test_key_{datetime.utcnow().timestamp()}"
+        value = "async_test_value"
+
+        # Clean up if exists
+        result = await async_db.execute(
+            select(SystemState).where(SystemState.key == key)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            await async_db.delete(existing)
+            await async_db.commit()
+
+        # Create new state asynchronously
+        success = await SystemStateManager.set_state_async(async_db, key, value)
+        assert success
+
+        # Verify it was created
+        result = await async_db.execute(
+            select(SystemState).where(SystemState.key == key)
+        )
+        created_state = result.scalar_one_or_none()
+        assert created_state is not None
+        assert created_state.key == key
+        assert created_state.value == value
+
+        # Clean up
+        await async_db.delete(created_state)
+        await async_db.commit()
+
+    @pytest.mark.asyncio
+    async def test_set_state_async_update_existing(self, async_db: AsyncSession):
+        """Test updating an existing state entry asynchronously."""
+        key = f"async_test_update_{datetime.utcnow().timestamp()}"
+        value1 = "initial_value"
+        value2 = "updated_value"
+
+        # Clean up if exists
+        result = await async_db.execute(
+            select(SystemState).where(SystemState.key == key)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            await async_db.delete(existing)
+            await async_db.commit()
+
+        # Create state
+        await SystemStateManager.set_state_async(async_db, key, value1)
+        result = await async_db.execute(
+            select(SystemState).where(SystemState.key == key)
+        )
+        state1 = result.scalar_one_or_none()
+        assert state1.value == value1
+
+        # Update state
+        await SystemStateManager.set_state_async(async_db, key, value2)
+        result = await async_db.execute(
+            select(SystemState).where(SystemState.key == key)
+        )
+        state2 = result.scalar_one_or_none()
+        assert state2.value == value2
+
+        # Clean up
+        await async_db.delete(state2)
+        await async_db.commit()
+
+    @pytest.mark.asyncio
+    async def test_get_state_async_not_found(self, async_db: AsyncSession):
+        """Test getting non-existent state asynchronously."""
+        result = await SystemStateManager.get_state_async(
+            async_db,
+            "non_existent_async_key"
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_update_price_last_update_async(self, async_db: AsyncSession):
+        """Test updating price last update timestamp asynchronously."""
+        before = datetime.utcnow()
+
+        success = await SystemStateManager.update_price_last_update_async(async_db)
+        assert success
+
+        after = datetime.utcnow()
+
+        result = await async_db.execute(
+            select(SystemState).where(
+                SystemState.key == SystemStateManager.PRICE_LAST_UPDATE
+            )
+        )
+        state = result.scalar_one_or_none()
+        assert state is not None
+
+        # Parse the stored timestamp
+        stored_time = datetime.fromisoformat(state.value)
+
+        # Verify it's within the expected range
+        assert before <= stored_time <= after
+
+        # Clean up
+        await async_db.delete(state)
+        await async_db.commit()
+
+    @pytest.mark.asyncio
+    async def test_get_price_last_update_async(self, async_db: AsyncSession):
+        """Test getting price last update timestamp asynchronously."""
+        # Set a timestamp
+        timestamp = datetime.utcnow() - timedelta(hours=1)
+        timestamp_str = timestamp.isoformat()
+
+        # Create state entry
+        state = SystemState(
+            key=SystemStateManager.PRICE_LAST_UPDATE,
+            value=timestamp_str
+        )
+        async_db.add(state)
+        await async_db.commit()
+
+        # Get the timestamp
+        result = await SystemStateManager.get_price_last_update_async(async_db)
+        assert result is not None
+        assert isinstance(result, datetime)
+
+        # Verify it matches (allowing small time difference)
+        time_diff = abs((result - timestamp).total_seconds())
+        assert time_diff < 1  # Within 1 second
+
+        # Clean up
+        await async_db.delete(state)
+        await async_db.commit()
 
 
 class TestPriceUpdateTaskTimestamp:
