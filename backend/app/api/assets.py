@@ -7,6 +7,7 @@ import yfinance as yf
 import logging
 import asyncio
 from functools import lru_cache
+import re
 
 from app.database import get_db
 from app.models import Position, Transaction, PriceHistory
@@ -79,7 +80,13 @@ def _fetch_ticker_info_sync(ticker: str) -> dict | None:
 
 @router.get("/search", response_model=List[dict])
 async def search_assets(
-    q: str = Query(..., min_length=1, max_length=20, description="Search query for ticker symbol or company name")
+    q: str = Query(
+        ...,
+        min_length=1,
+        max_length=20,
+        pattern="^[A-Z0-9.\\-]{1,20}$",
+        description="Ticker symbol or company name. Must contain only uppercase letters, numbers, dots, and hyphens."
+    )
 ):
     """
     Search for ticker symbols with caching and async execution.
@@ -88,6 +95,11 @@ async def search_assets(
     Results are cached for 1 hour to minimize API calls to Yahoo Finance.
 
     Query string is case-insensitive and matches against ticker symbols and company names.
+
+    **Validation:**
+    - Pattern: ^[A-Z0-9.\\-]{1,20}$ (uppercase letters, numbers, dots, hyphens only)
+    - Length: 1-20 characters
+    - Purpose: Prevent injection attacks and ensure valid ticker symbol format
 
     Performance:
     - First search: May take up to 5 seconds (Yahoo Finance lookup)

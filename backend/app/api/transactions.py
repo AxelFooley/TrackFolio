@@ -12,6 +12,7 @@ from datetime import datetime
 import logging
 import asyncio
 import requests.exceptions
+from sqlalchemy import and_
 
 from app.database import get_db
 from app.models import Transaction, TransactionType
@@ -149,8 +150,8 @@ async def import_transactions(
                 )
             raise
 
-        # Recalculate positions for affected ISINs
-        # Use targeted queries instead of loading all transactions into memory
+        # Recalculate positions for affected ISINs with database-level locking
+        # This prevents race conditions when multiple concurrent requests modify the same positions
         for isin in affected_isins:
             # Query for a single transaction with this ISIN to get its ticker
             result = await db.execute(
@@ -160,6 +161,8 @@ async def import_transactions(
             )
             ticker = result.scalar_one_or_none()
 
+            # Recalculate position with row-level locking to ensure atomicity
+            # The PositionManager will use with_for_update() to acquire exclusive locks
             await PositionManager.recalculate_position(db, isin=isin, ticker=ticker)
 
         # Detect and record any new splits

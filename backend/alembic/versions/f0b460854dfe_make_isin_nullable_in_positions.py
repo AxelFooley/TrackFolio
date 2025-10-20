@@ -21,6 +21,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = 'f0b460854dfe'
@@ -42,13 +43,33 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Revert ISIN to non-nullable (destructive for existing NULL values)."""
-    # WARNING: This will fail if there are NULL ISINs in the database
-    # For safety, this downgrade requires manual intervention
+    """Revert ISIN to non-nullable with safety checks.
 
-    # Revert ISIN to non-nullable
+    This downgrade function includes safety checks to prevent data loss.
+    If NULL values exist in the ISIN column, the downgrade will fail with
+    an informative error message.
+    """
+    # Safety check: Count NULL ISIN values
+    connection = op.get_bind()
+    null_count_result = connection.execute(
+        text("SELECT COUNT(*) FROM positions WHERE isin IS NULL")
+    )
+    null_count = null_count_result.scalar()
+
+    if null_count > 0:
+        raise Exception(
+            f"Cannot downgrade: Found {null_count} positions with NULL ISIN values. "
+            "Making ISIN NOT NULL would result in data loss. "
+            "Manual intervention required:\n"
+            "1. Review and fix the {null_count} positions with NULL ISIN values\n"
+            "2. Either: (a) Set ISIN values from Yahoo Finance for the associated transactions, or (b) Delete the positions and their transactions\n"
+            "3. After handling all NULL ISINs, retry the downgrade\n"
+            "Or: Accept the new schema with nullable ISIN and stay on the current migration."
+        )
+
+    # Only proceed if no NULL values exist
     op.alter_column('positions', 'isin',
                     existing_type=sa.VARCHAR(length=12),
                     nullable=False,
                     existing_nullable=True,
-                    existing_comment='ISIN - unique identifier for the security (may be None for ticker-only positions)')
+                    existing_comment='ISIN - unique identifier for the security')

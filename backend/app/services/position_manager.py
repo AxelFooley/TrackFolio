@@ -2,6 +2,7 @@
 Position manager service - Calculates and updates position data.
 
 Recalculates positions based on transactions as per PRD Section 5.2.
+Implements database-level locking to prevent race conditions during position updates.
 """
 from datetime import datetime
 from decimal import Decimal
@@ -24,6 +25,10 @@ class PositionManager:
     async def recalculate_position(db: AsyncSession, isin: str | None, ticker: str | None = None) -> Optional[Position]:
         """
         Recalculate position for a specific ISIN or ticker based on all transactions.
+
+        This method uses database-level row locking (with_for_update) to prevent
+        race conditions when multiple concurrent requests attempt to update the same position.
+        All position updates happen atomically within a single transaction.
 
         Args:
             db: Database session
@@ -60,13 +65,18 @@ class PositionManager:
 
         if not transactions:
             # No transactions, delete position if it exists
+            # Use row-level locking to prevent concurrent deletes
             if isin:
                 result = await db.execute(
-                    select(Position).where(Position.isin == isin)
+                    select(Position)
+                    .where(Position.isin == isin)
+                    .with_for_update()  # Acquire exclusive lock before deleting
                 )
             else:
                 result = await db.execute(
-                    select(Position).where(Position.current_ticker == ticker)
+                    select(Position)
+                    .where(Position.current_ticker == ticker)
+                    .with_for_update()  # Acquire exclusive lock before deleting
                 )
             position = result.scalar_one_or_none()
             if position:
@@ -113,17 +123,22 @@ class PositionManager:
         current_ticker = transactions[-1].ticker
 
         # Get or create position - try by ISIN first, then by ticker
+        # Use row-level locking to prevent concurrent updates to the same position
         position = None
         if isin:
             result = await db.execute(
-                select(Position).where(Position.isin == isin)
+                select(Position)
+                .where(Position.isin == isin)
+                .with_for_update()  # Acquire exclusive lock if position exists
             )
             position = result.scalar_one_or_none()
 
         # If ISIN is None or not found, try to find by ticker
         if position is None and ticker:
             result = await db.execute(
-                select(Position).where(Position.current_ticker == ticker)
+                select(Position)
+                .where(Position.current_ticker == ticker)
+                .with_for_update()  # Acquire exclusive lock if position exists
             )
             position = result.scalar_one_or_none()
 
@@ -135,13 +150,16 @@ class PositionManager:
             # Validate ticker uniqueness for ticker-only positions
             if not isin and ticker:
                 # For ticker-only positions, check if another position already exists with this ticker
+                # Use row-level locking to prevent race conditions during uniqueness check
                 result = await db.execute(
-                    select(Position).where(
+                    select(Position)
+                    .where(
                         and_(
                             Position.current_ticker == ticker,
                             Position.isin.is_(None)
                         )
                     )
+                    .with_for_update()  # Lock all matching rows during uniqueness check
                 )
                 existing_ticker_only = result.scalar_one_or_none()
                 if existing_ticker_only:
