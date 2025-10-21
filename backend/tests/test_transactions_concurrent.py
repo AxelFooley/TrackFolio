@@ -30,7 +30,7 @@ from app.services.position_manager import PositionManager
 from app.database import Base
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
 # Sample valid CSV content for testing (Directa format)
