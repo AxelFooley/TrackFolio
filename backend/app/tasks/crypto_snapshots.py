@@ -83,7 +83,7 @@ def create_daily_crypto_snapshots(self):
         for portfolio in active_portfolios:
             try:
                 # Calculate portfolio metrics for the snapshot
-                snapshot_data = await_calculate_crypto_snapshot_data(db, portfolio.id, snapshot_date)
+                snapshot_data = calculate_crypto_snapshot_data(db, portfolio.id, snapshot_date)
 
                 if not snapshot_data:
                     logger.warning(f"Could not calculate snapshot data for crypto portfolio {portfolio.name}")
@@ -237,7 +237,7 @@ def create_crypto_snapshot_for_portfolio(self, portfolio_id: int, snapshot_date:
             }
 
         # Calculate snapshot data
-        snapshot_data = await_calculate_crypto_snapshot_data(db, portfolio_id, target_date)
+        snapshot_data = calculate_crypto_snapshot_data(db, portfolio_id, target_date)
 
         if not snapshot_data:
             logger.warning(f"Could not calculate snapshot data for crypto portfolio {portfolio_id}")
@@ -313,7 +313,7 @@ def create_crypto_snapshot_for_portfolio(self, portfolio_id: int, snapshot_date:
         db.close()
 
 
-def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: date) -> dict:
+def calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: date) -> dict:
     """
     Compute portfolio snapshot values and holdings breakdown for a given date.
     
@@ -493,19 +493,248 @@ def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: d
 @shared_task(
     bind=True,
     autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 3, 'countdown': 5},
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True
+)
+def backfill_crypto_portfolio_snapshots(self, portfolio_id: int):
+    """
+    Backfill daily crypto portfolio snapshots from first transaction date to today.
+
+    Automatically finds the earliest transaction date for the portfolio and creates
+    missing CryptoPortfolioSnapshot records for each date from then to today.
+    Handles the case where portfolio has no transactions by creating only today's snapshot.
+
+    Parameters:
+        portfolio_id (int): ID of the crypto portfolio to backfill.
+
+    Returns:
+        dict: Summary with keys:
+            - status: "success" or "failed"
+            - portfolio_id: the given portfolio ID
+            - portfolio_name: portfolio name when successful
+            - first_transaction_date: ISO string of earliest transaction (or None)
+            - backfill_start_date: ISO string of backfill start date
+            - backfill_end_date: ISO string of backfill end date
+            - created: number of snapshots created
+            - skipped: number of dates that already had snapshots
+            - failed: number of dates that could not be processed
+            - total_days_processed: total number of days processed (inclusive)
+    """
+    logger.info(f"Starting automatic crypto portfolio snapshot backfill for portfolio {portfolio_id}")
+
+    db = SyncSessionLocal()
+
+    try:
+        # Get portfolio
+        portfolio = db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.id == portfolio_id)
+        ).scalar_one_or_none()
+
+        if not portfolio:
+            logger.error(f"Crypto portfolio {portfolio_id} not found")
+            return {
+                "status": "failed",
+                "portfolio_id": portfolio_id,
+                "reason": "Portfolio not found"
+            }
+
+        # Find the earliest transaction date for this portfolio
+        min_date_result = db.execute(
+            select(func.min(CryptoTransaction.timestamp))
+            .where(CryptoTransaction.portfolio_id == portfolio_id)
+        ).scalar()
+
+        # If no transactions, just create today's snapshot
+        if min_date_result is None:
+            logger.info(f"No transactions found for portfolio {portfolio_id}. Creating snapshot for today only.")
+
+            today = date.today()
+            snapshot_data = calculate_crypto_snapshot_data(db, portfolio_id, today)
+
+            if snapshot_data:
+                # Check if snapshot already exists
+                existing = db.execute(
+                    select(CryptoPortfolioSnapshot)
+                    .where(
+                        CryptoPortfolioSnapshot.portfolio_id == portfolio_id,
+                        CryptoPortfolioSnapshot.snapshot_date == today
+                    )
+                ).scalar_one_or_none()
+
+                if not existing:
+                    snapshot = CryptoPortfolioSnapshot(
+                        portfolio_id=portfolio_id,
+                        snapshot_date=today,
+                        total_value_eur=snapshot_data["total_value_eur"],
+                        total_value_usd=snapshot_data["total_value_usd"],
+                        total_cost_basis=snapshot_data["total_cost_basis"],
+                        base_currency=snapshot_data["base_currency"],
+                        holdings_breakdown=snapshot_data["holdings_breakdown"],
+                        total_return_pct=snapshot_data["total_return_pct"]
+                    )
+                    db.add(snapshot)
+                    db.commit()
+                    logger.info(f"Created snapshot for portfolio {portfolio.name} on {today}")
+
+                    return {
+                        "status": "success",
+                        "portfolio_id": portfolio_id,
+                        "portfolio_name": portfolio.name,
+                        "first_transaction_date": None,
+                        "backfill_start_date": str(today),
+                        "backfill_end_date": str(today),
+                        "created": 1,
+                        "skipped": 0,
+                        "failed": 0,
+                        "total_days_processed": 1
+                    }
+                else:
+                    logger.info(f"Snapshot already exists for portfolio {portfolio_id} on {today}")
+                    return {
+                        "status": "success",
+                        "portfolio_id": portfolio_id,
+                        "portfolio_name": portfolio.name,
+                        "first_transaction_date": None,
+                        "backfill_start_date": str(today),
+                        "backfill_end_date": str(today),
+                        "created": 0,
+                        "skipped": 1,
+                        "failed": 0,
+                        "total_days_processed": 1
+                    }
+            else:
+                logger.warning(f"Could not calculate snapshot data for portfolio {portfolio_id}")
+                return {
+                    "status": "failed",
+                    "portfolio_id": portfolio_id,
+                    "portfolio_name": portfolio.name,
+                    "reason": "Could not calculate snapshot data"
+                }
+
+        # Convert datetime to date
+        first_transaction_date = min_date_result.date() if isinstance(min_date_result, datetime) else min_date_result
+        backfill_end_date = date.today()
+
+        logger.info(
+            f"Backfilling crypto snapshots for {portfolio.name} from {first_transaction_date} to {backfill_end_date}"
+        )
+
+        # Create snapshots for each day from first transaction to today
+        current_date = first_transaction_date
+        created = 0
+        skipped = 0
+        failed = 0
+
+        while current_date <= backfill_end_date:
+            try:
+                # Check if snapshot already exists
+                existing = db.execute(
+                    select(CryptoPortfolioSnapshot)
+                    .where(
+                        CryptoPortfolioSnapshot.portfolio_id == portfolio_id,
+                        CryptoPortfolioSnapshot.snapshot_date == current_date
+                    )
+                ).scalar_one_or_none()
+
+                if existing:
+                    skipped += 1
+                else:
+                    # Calculate snapshot data for this date
+                    snapshot_data = calculate_crypto_snapshot_data(db, portfolio_id, current_date)
+
+                    if snapshot_data:
+                        try:
+                            snapshot = CryptoPortfolioSnapshot(
+                                portfolio_id=portfolio_id,
+                                snapshot_date=current_date,
+                                total_value_eur=snapshot_data["total_value_eur"],
+                                total_value_usd=snapshot_data["total_value_usd"],
+                                total_cost_basis=snapshot_data["total_cost_basis"],
+                                base_currency=snapshot_data["base_currency"],
+                                holdings_breakdown=snapshot_data["holdings_breakdown"],
+                                total_return_pct=snapshot_data["total_return_pct"]
+                            )
+
+                            db.add(snapshot)
+                            created += 1
+                        except IntegrityError:
+                            # Race condition - another process created this snapshot
+                            db.rollback()
+                            logger.debug(f"Snapshot already exists for {portfolio.name} on {current_date} (race condition)")
+                            skipped += 1
+                    else:
+                        failed += 1
+
+                # Commit every 10 snapshots to avoid large transactions
+                if (created + skipped + failed) % 10 == 0:
+                    try:
+                        db.commit()
+                    except IntegrityError:
+                        db.rollback()
+
+                current_date += timedelta(days=1)
+
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error creating crypto snapshot for {current_date}: {str(e)}")
+                failed += 1
+                current_date += timedelta(days=1)
+                continue
+
+        # Final commit
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+
+        total_days = (backfill_end_date - first_transaction_date).days + 1
+        summary = {
+            "status": "success",
+            "portfolio_id": portfolio_id,
+            "portfolio_name": portfolio.name,
+            "first_transaction_date": str(first_transaction_date),
+            "backfill_start_date": str(first_transaction_date),
+            "backfill_end_date": str(backfill_end_date),
+            "created": created,
+            "skipped": skipped,
+            "failed": failed,
+            "total_days_processed": total_days
+        }
+
+        logger.info(
+            f"Crypto portfolio snapshot backfill complete for {portfolio.name}: "
+            f"{created} created, {skipped} skipped, {failed} failed out of {total_days} days"
+        )
+
+        return summary
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error backfilling crypto portfolio snapshots for portfolio {portfolio_id}: {str(e)}")
+        raise
+
+    finally:
+        db.close()
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
     retry_kwargs={'max_retries': 2, 'countdown': 60}
 )
 def backfill_crypto_snapshots(self, portfolio_id: int, start_date: str, end_date: str = None):
     """
     Backfill daily crypto portfolio snapshots for each date in a given range.
-    
+
     Creates missing CryptoPortfolioSnapshot records (or counts existing ones) for the portfolio between start_date and end_date inclusive, committing in batches to limit transaction size.
-    
+
     Parameters:
         portfolio_id (int): ID of the crypto portfolio to backfill.
         start_date (str): Start date in ISO format 'YYYY-MM-DD'.
         end_date (str, optional): End date in ISO format 'YYYY-MM-DD'. If omitted, uses today's date.
-    
+
     Returns:
         dict: Summary with keys:
             - status: "success" or "failed"
@@ -559,7 +788,7 @@ def backfill_crypto_snapshots(self, portfolio_id: int, start_date: str, end_date
                     updated += 1
                 else:
                     # Calculate snapshot data
-                    snapshot_data = await_calculate_crypto_snapshot_data(db, portfolio_id, current_date)
+                    snapshot_data = calculate_crypto_snapshot_data(db, portfolio_id, current_date)
 
                     if snapshot_data:
                         snapshot = CryptoPortfolioSnapshot(

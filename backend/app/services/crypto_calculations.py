@@ -458,7 +458,8 @@ class CryptoCalculationService:
                         portfolio_value=portfolio_value,
                         cost_basis=cost_basis,
                         profit_loss=profit_loss,
-                        profit_loss_pct=profit_loss_pct
+                        profit_loss_pct=profit_loss_pct,
+                        currency=base_currency
                     ))
 
                 current_date += timedelta(days=1)

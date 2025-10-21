@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { usePerformanceData } from '@/hooks/usePortfolio';
+import { useUnifiedPerformance } from '@/hooks/usePortfolio';
 import { useBenchmark } from '@/hooks/useBenchmark';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { formatCurrency, formatChartDate, formatDate } from '@/lib/utils';
@@ -13,16 +13,15 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 const timeRanges: TimeRange[] = ['1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'];
 
 /**
- * Render the portfolio performance chart with range selection controls, handling loading, error, and no-data states, and optionally overlaying benchmark data.
+ * Render the unified portfolio performance chart showing combined traditional and crypto performance.
+ * Displays range selection controls, handles loading, error, and no-data states,
+ * and optionally overlays benchmark data.
  *
- * The component fetches performance and benchmark data for the selected time range, formats and maps data for the chart,
- * displays a single-point summary when only one data point exists, and renders a responsive line chart for multiple points.
- *
- * @returns A JSX element that displays the Performance card with range buttons, status UIs, and a responsive line chart (portfolio and optional benchmark).
+ * @returns A JSX element that displays the Performance card with range buttons, status UIs, and a responsive chart
  */
 export function PerformanceChart() {
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y');
-  const { data: performanceData, isLoading, error, refetch } = usePerformanceData(selectedRange);
+  const { data: performanceData, isLoading, error, refetch } = useUnifiedPerformance(selectedRange);
   const { data: benchmark } = useBenchmark();
 
   // Error state
@@ -90,10 +89,8 @@ export function PerformanceChart() {
     );
   }
 
-  // Check if we have portfolio data
-  const hasPortfolioData = performanceData && performanceData.length > 0;
-
-  if (!hasPortfolioData) {
+  // No data state
+  if (!performanceData || performanceData.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -133,26 +130,25 @@ export function PerformanceChart() {
     );
   }
 
-  // Transform data for Recharts - performanceData is already an array of PerformanceData objects
+  // Transform data for Recharts - only show total
   const chartData = performanceData.map((point) => ({
     date: point.date,
-    portfolio: point.portfolio,
+    total: parseFloat(String(point.total)),
     ...(point.benchmark != null && { benchmark: point.benchmark }),
   }));
 
   const hasBenchmarkData = chartData.some(point => point.benchmark != null);
-
-  // Determine if we have a single data point (special case for rendering)
   const isSinglePoint = chartData.length === 1;
-
-  // Portfolio currency (currently hardcoded to EUR as API doesn't return currency with performance data)
-  const portfolioCurrency = 'EUR';
+  // Extract currency from first data point, fallback to EUR
+  const portfolioCurrency = performanceData.length > 0 && performanceData[0].currency
+    ? performanceData[0].currency
+    : 'EUR';
 
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>Performance</CardTitle>
+          <CardTitle>Performance (Combined)</CardTitle>
           <div className="flex gap-1">
             {timeRanges.map((range) => (
               <Button
@@ -168,15 +164,17 @@ export function PerformanceChart() {
         </div>
       </CardHeader>
       <CardContent>
-  
         {isSinglePoint ? (
           <div className="h-96 flex items-center justify-center">
             <div className="text-center">
-              <p className="text-gray-600 font-medium mb-2">Single Data Point</p>
-              <p className="text-sm text-gray-500">
-                Portfolio Value: {formatCurrency(chartData[0].portfolio, portfolioCurrency)}
-              </p>
-              <p className="text-xs text-gray-400 mt-2">
+              <p className="text-gray-600 font-medium mb-4">Single Data Point</p>
+              <div>
+                <p className="text-sm text-gray-500 mb-2">Total Portfolio Value</p>
+                <p className="text-3xl font-semibold text-blue-600">
+                  {formatCurrency(chartData[0].total, portfolioCurrency)}
+                </p>
+              </div>
+              <p className="text-xs text-gray-400 mt-4">
                 More data points will appear as your portfolio is tracked over time.
               </p>
             </div>
@@ -217,11 +215,11 @@ export function PerformanceChart() {
               <Legend />
               <Line
                 type="monotone"
-                dataKey="portfolio"
-                stroke="#3B82F6"
-                strokeWidth={2}
+                dataKey="total"
+                stroke="#2563EB"
+                strokeWidth={3}
                 dot={chartData.length <= 30}
-                name="Portfolio"
+                name="Total Portfolio"
                 yAxisId="left"
                 animationDuration={500}
               />
@@ -229,8 +227,9 @@ export function PerformanceChart() {
                 <Line
                   type="monotone"
                   dataKey="benchmark"
-                  stroke="#8B5CF6"
+                  stroke="#9CA3AF"
                   strokeWidth={2}
+                  strokeDasharray="5 5"
                   dot={chartData.length <= 30}
                   connectNulls={true}
                   name="Benchmark"
