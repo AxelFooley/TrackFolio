@@ -1,0 +1,511 @@
+"""
+Portfolio aggregation service - Unified view of traditional and crypto holdings.
+
+Provides methods to aggregate and reconcile data from both traditional portfolio
+(Position/PortfolioSnapshot) and crypto portfolio (CryptoPortfolio/CryptoTransaction)
+systems into unified endpoints for dashboard display.
+
+Key responsibilities:
+- Aggregate holdings from both systems
+- Combine overview metrics (value, P&L, etc.)
+- Merge performance data into unified time-series
+- Calculate top gainers/losers across all holdings
+- Handle currency conversions (crypto USD to EUR)
+"""
+from datetime import datetime, date, timedelta
+from decimal import Decimal
+from typing import List, Dict, Optional, Tuple, Any
+import logging
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+
+from app.models import (
+    Position, PortfolioSnapshot, PriceHistory, CachedMetrics, CryptoPortfolio,
+    CryptoTransaction, CryptoTransactionType, CryptoPortfolioSnapshot
+)
+from app.services.crypto_calculations import CryptoCalculationService
+from app.services.price_fetcher import PriceFetcher
+
+logger = logging.getLogger(__name__)
+
+
+class PortfolioAggregator:
+    """Service for aggregating traditional and crypto portfolio data."""
+
+    def __init__(self, db: AsyncSession):
+        """
+        Initialize the portfolio aggregator.
+
+        Args:
+            db: AsyncSession for database access
+        """
+        self.db = db
+        self.price_fetcher = PriceFetcher()
+        self.crypto_calc = CryptoCalculationService(db)
+
+    async def get_unified_holdings(self) -> List[Dict[str, Any]]:
+        """
+        Get unified list of all holdings (traditional and crypto).
+
+        Returns traditional positions augmented with current price data,
+        plus all crypto holdings from all active crypto portfolios,
+        each formatted with consistent schema.
+
+        Returns:
+            List of holdings with standardized fields:
+            - id: unique identifier
+            - type: "STOCK", "ETF", or "CRYPTO"
+            - ticker: symbol
+            - isin: (only for traditional)
+            - quantity, current_price, current_value, etc.
+            - portfolio_id: null for traditional, uuid for crypto
+            - portfolio_name: "Main Portfolio" or crypto portfolio name
+        """
+        holdings = []
+
+        # Get traditional holdings
+        traditional_holdings = await self._get_traditional_holdings()
+        holdings.extend(traditional_holdings)
+
+        # Get crypto holdings from all portfolios
+        crypto_holdings = await self._get_crypto_holdings()
+        holdings.extend(crypto_holdings)
+
+        return holdings
+
+    async def get_unified_overview(self) -> Dict[str, Any]:
+        """
+        Get aggregated portfolio overview combining traditional and crypto.
+
+        Returns top-level metrics:
+        - total_value: combined current value
+        - traditional_value, crypto_value: breakdown
+        - total_profit, total_profit_pct: combined P&L
+        - traditional_profit, crypto_profit: breakdown
+        - today_change, today_change_pct
+        - currency: always "EUR"
+
+        Returns:
+            Dictionary with aggregated metrics
+        """
+        # Get traditional overview
+        trad_overview = await self._get_traditional_overview()
+
+        # Get crypto overview (all portfolios combined)
+        crypto_overview = await self._get_crypto_overview()
+
+        # Combine them
+        return {
+            "total_value": trad_overview["current_value"] + crypto_overview["total_value"],
+            "traditional_value": trad_overview["current_value"],
+            "crypto_value": crypto_overview["total_value"],
+            "total_cost": trad_overview["total_cost_basis"] + crypto_overview["total_cost_basis"],
+            "total_profit": trad_overview["total_profit"] + crypto_overview["total_profit"],
+            "total_profit_pct": self._safe_percentage(
+                trad_overview["total_profit"] + crypto_overview["total_profit"],
+                trad_overview["total_cost_basis"] + crypto_overview["total_cost_basis"]
+            ),
+            "traditional_profit": trad_overview["total_profit"],
+            "traditional_profit_pct": self._safe_percentage(
+                trad_overview["total_profit"],
+                trad_overview["total_cost_basis"]
+            ),
+            "crypto_profit": crypto_overview["total_profit"],
+            "crypto_profit_pct": self._safe_percentage(
+                crypto_overview["total_profit"],
+                crypto_overview["total_cost_basis"]
+            ),
+            "today_change": trad_overview["today_gain_loss"] + crypto_overview["today_change"],
+            "today_change_pct": self._safe_percentage(
+                trad_overview["today_gain_loss"] + crypto_overview["today_change"],
+                (trad_overview["current_value"] - trad_overview["today_gain_loss"]) +
+                (crypto_overview["total_value"] - crypto_overview["today_change"])
+            ),
+            "currency": "EUR"
+        }
+
+    async def get_unified_performance(self, days: int = 365) -> List[Dict[str, Any]]:
+        """
+        Get unified performance data combining traditional and crypto portfolios.
+
+        Merges daily snapshots from:
+        - portfolio_snapshots (traditional)
+        - crypto_portfolio_snapshots (per crypto portfolio)
+
+        Returns data for the last N days, aggregating across all portfolios.
+
+        Args:
+            days: Number of days of history to return (default 365)
+
+        Returns:
+            List of daily performance points with:
+            - date
+            - value: combined total
+            - crypto_value: crypto total
+            - traditional_value: traditional total
+        """
+        cutoff_date = date.today() - timedelta(days=days)
+
+        # Get traditional snapshots
+        trad_result = await self.db.execute(
+            select(PortfolioSnapshot)
+            .where(PortfolioSnapshot.snapshot_date >= cutoff_date)
+            .order_by(PortfolioSnapshot.snapshot_date)
+        )
+        trad_snapshots = trad_result.scalars().all()
+
+        # Get all crypto snapshots
+        crypto_result = await self.db.execute(
+            select(CryptoPortfolioSnapshot)
+            .where(CryptoPortfolioSnapshot.snapshot_date >= cutoff_date)
+            .order_by(CryptoPortfolioSnapshot.snapshot_date)
+        )
+        crypto_snapshots = crypto_result.scalars().all()
+
+        # Build date-indexed data
+        performance_by_date: Dict[date, Dict[str, Decimal]] = {}
+
+        # Add traditional data
+        for snapshot in trad_snapshots:
+            if snapshot.snapshot_date not in performance_by_date:
+                performance_by_date[snapshot.snapshot_date] = {
+                    "traditional_value": Decimal("0"),
+                    "crypto_value": Decimal("0")
+                }
+            performance_by_date[snapshot.snapshot_date]["traditional_value"] = snapshot.total_value
+
+        # Add crypto data (sum all portfolios per date)
+        for snapshot in crypto_snapshots:
+            if snapshot.snapshot_date not in performance_by_date:
+                performance_by_date[snapshot.snapshot_date] = {
+                    "traditional_value": Decimal("0"),
+                    "crypto_value": Decimal("0")
+                }
+            # Sum crypto values for this date (multiple portfolios)
+            performance_by_date[snapshot.snapshot_date]["crypto_value"] += snapshot.total_value_eur
+
+        # Sort by date and build response
+        result = []
+        for snapshot_date in sorted(performance_by_date.keys()):
+            data = performance_by_date[snapshot_date]
+            result.append({
+                "date": snapshot_date,
+                "value": data["traditional_value"] + data["crypto_value"],
+                "crypto_value": data["crypto_value"],
+                "traditional_value": data["traditional_value"]
+            })
+
+        return result
+
+    async def get_unified_movers(self, top_n: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Get top gainers and losers from both traditional and crypto portfolios.
+
+        Calculates return percentage for each holding and returns top N gainers
+        and top N losers across all holdings.
+
+        Args:
+            top_n: Number of gainers and losers to return (default 5)
+
+        Returns:
+            Dictionary with keys "gainers" and "losers", each containing list of:
+            - ticker, type, price, change_pct, portfolio_name
+        """
+        gainers = []
+        losers = []
+
+        # Get traditional holdings with prices
+        positions_result = await self.db.execute(select(Position))
+        positions = positions_result.scalars().all()
+
+        for position in positions:
+            # Get latest and previous prices
+            price_result = await self.db.execute(
+                select(PriceHistory)
+                .where(PriceHistory.ticker == position.current_ticker)
+                .order_by(PriceHistory.date.desc())
+                .limit(2)
+            )
+            prices = price_result.scalars().all()
+
+            if prices:
+                latest_price = prices[0].close
+                previous_price = prices[1].close if len(prices) > 1 else latest_price
+
+                change_pct = float(
+                    ((latest_price - previous_price) / previous_price) * 100
+                ) if previous_price > 0 else 0
+
+                mover = {
+                    "ticker": position.current_ticker,
+                    "type": position.asset_type.value,
+                    "price": float(latest_price),
+                    "change_pct": change_pct,
+                    "portfolio_name": "Main Portfolio"
+                }
+
+                if change_pct >= 0:
+                    gainers.append(mover)
+                else:
+                    losers.append(mover)
+
+        # Get crypto movers
+        crypto_movers = await self._get_crypto_movers()
+        gainers.extend(crypto_movers["gainers"])
+        losers.extend(crypto_movers["losers"])
+
+        # Sort and limit
+        gainers.sort(key=lambda x: x["change_pct"], reverse=True)
+        losers.sort(key=lambda x: x["change_pct"])
+
+        return {
+            "gainers": gainers[:top_n],
+            "losers": losers[:top_n]
+        }
+
+    async def get_unified_summary(
+        self,
+        holdings_limit: int = 20,
+        performance_days: int = 365
+    ) -> Dict[str, Any]:
+        """
+        Get complete unified summary combining all aggregated data.
+
+        This is a convenience endpoint that returns overview, holdings (paginated),
+        movers, and performance data in a single response to reduce API round trips.
+
+        Args:
+            holdings_limit: Max holdings to return (paginate)
+            performance_days: Days of performance history
+
+        Returns:
+            Dictionary with keys: overview, holdings, movers, performance_summary
+        """
+        # Get all components in parallel where possible
+        overview = await self.get_unified_overview()
+        all_holdings = await self.get_unified_holdings()
+        movers = await self.get_unified_movers(top_n=5)
+        performance = await self.get_unified_performance(days=performance_days)
+
+        # Paginate holdings
+        paginated_holdings = all_holdings[:holdings_limit]
+
+        # Build performance summary
+        perf_summary = {
+            "period_days": performance_days,
+            "data_points": len(performance),
+            "data": performance[-30:] if len(performance) > 30 else performance  # Last 30 days for frontend
+        }
+
+        return {
+            "overview": overview,
+            "holdings": paginated_holdings,
+            "holdings_total": len(all_holdings),
+            "movers": movers,
+            "performance_summary": perf_summary
+        }
+
+    # Private helper methods
+
+    async def _get_traditional_holdings(self) -> List[Dict[str, Any]]:
+        """Get all traditional holdings formatted for unified response."""
+        result = await self.db.execute(select(Position))
+        positions = result.scalars().all()
+
+        holdings = []
+        for position in positions:
+            # Get latest price
+            price_result = await self.db.execute(
+                select(PriceHistory)
+                .where(PriceHistory.ticker == position.current_ticker)
+                .order_by(PriceHistory.date.desc())
+                .limit(1)
+            )
+            price = price_result.scalar_one_or_none()
+
+            current_price = price.close if price else None
+            current_value = position.quantity * current_price if current_price else None
+            profit_loss = (current_value - position.cost_basis) if current_value else None
+
+            holdings.append({
+                "id": f"trad_{position.id}",
+                "type": position.asset_type.value,
+                "ticker": position.current_ticker,
+                "isin": position.isin,
+                "quantity": float(position.quantity),
+                "current_price": float(current_price) if current_price else None,
+                "current_value": float(current_value) if current_value else None,
+                "average_cost": float(position.average_cost),
+                "total_cost": float(position.cost_basis),
+                "profit_loss": float(profit_loss) if profit_loss else None,
+                "profit_loss_pct": float(
+                    (profit_loss / position.cost_basis * 100)
+                ) if profit_loss and position.cost_basis > 0 else None,
+                "currency": "EUR",
+                "portfolio_id": None,
+                "portfolio_name": "Main Portfolio"
+            })
+
+        return holdings
+
+    async def _get_crypto_holdings(self) -> List[Dict[str, Any]]:
+        """Get all crypto holdings from all portfolios formatted for unified response."""
+        holdings = []
+
+        # Get all active crypto portfolios
+        portfolio_result = await self.db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.is_active == True)
+        )
+        portfolios = portfolio_result.scalars().all()
+
+        for portfolio in portfolios:
+            # Get metrics which include holdings
+            metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
+
+            if metrics and metrics.asset_allocation:
+                # Get detailed holdings for this portfolio
+                holdings_list = await self.crypto_calc.calculate_holdings(portfolio.id)
+
+                for holding in holdings_list:
+                    profit_loss = (
+                        (holding.current_value - holding.cost_basis)
+                        if holding.current_value
+                        else None
+                    )
+
+                    holdings.append({
+                        "id": f"crypto_{portfolio.id}_{holding.symbol}",
+                        "type": "CRYPTO",
+                        "ticker": holding.symbol,
+                        "isin": None,
+                        "quantity": float(holding.quantity),
+                        "current_price": float(holding.current_price) if holding.current_price else None,
+                        "current_value": float(holding.current_value) if holding.current_value else None,
+                        "average_cost": float(holding.average_cost),
+                        "total_cost": float(holding.cost_basis),
+                        "profit_loss": float(profit_loss) if profit_loss else None,
+                        "profit_loss_pct": float(holding.unrealized_gain_loss_pct)
+                        if holding.unrealized_gain_loss_pct is not None
+                        else None,
+                        "currency": portfolio.base_currency.value,
+                        "portfolio_id": str(portfolio.id),
+                        "portfolio_name": portfolio.name
+                    })
+
+        return holdings
+
+    async def _get_traditional_overview(self) -> Dict[str, Any]:
+        """Get traditional portfolio overview."""
+        result = await self.db.execute(select(Position))
+        positions = result.scalars().all()
+
+        if not positions:
+            return {
+                "current_value": Decimal("0"),
+                "total_cost_basis": Decimal("0"),
+                "total_profit": Decimal("0"),
+                "today_gain_loss": Decimal("0")
+            }
+
+        total_cost = Decimal("0")
+        current_value = Decimal("0")
+        today_gain_loss = Decimal("0")
+
+        for position in positions:
+            total_cost += position.cost_basis
+
+            # Get latest and previous prices
+            price_result = await self.db.execute(
+                select(PriceHistory)
+                .where(PriceHistory.ticker == position.current_ticker)
+                .order_by(PriceHistory.date.desc())
+                .limit(2)
+            )
+            prices = price_result.scalars().all()
+
+            if prices:
+                latest_price = prices[0]
+                current_value += position.quantity * latest_price.close
+
+                if len(prices) > 1:
+                    previous_price = prices[1]
+                    price_change = latest_price.close - previous_price.close
+                    today_gain_loss += position.quantity * price_change
+
+        total_profit = current_value - total_cost
+
+        return {
+            "current_value": current_value,
+            "total_cost_basis": total_cost,
+            "total_profit": total_profit,
+            "today_gain_loss": today_gain_loss
+        }
+
+    async def _get_crypto_overview(self) -> Dict[str, Any]:
+        """Get aggregated crypto overview from all portfolios."""
+        portfolio_result = await self.db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.is_active == True)
+        )
+        portfolios = portfolio_result.scalars().all()
+
+        total_value = Decimal("0")
+        total_cost_basis = Decimal("0")
+        today_change = Decimal("0")
+
+        for portfolio in portfolios:
+            metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
+            if metrics:
+                total_value += metrics.total_value or Decimal("0")
+                total_cost_basis += metrics.total_cost_basis
+                # Note: crypto today change would require intraday snapshots
+                # For now, we estimate from EOD snapshots
+
+        total_profit = total_value - total_cost_basis
+
+        return {
+            "total_value": total_value,
+            "total_cost_basis": total_cost_basis,
+            "total_profit": total_profit,
+            "today_change": today_change
+        }
+
+    async def _get_crypto_movers(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Get crypto movers from all portfolios."""
+        gainers = []
+        losers = []
+
+        portfolio_result = await self.db.execute(
+            select(CryptoPortfolio).where(CryptoPortfolio.is_active == True)
+        )
+        portfolios = portfolio_result.scalars().all()
+
+        for portfolio in portfolios:
+            holdings = await self.crypto_calc.calculate_holdings(portfolio.id)
+
+            for holding in holdings:
+                if holding.unrealized_gain_loss_pct is not None:
+                    mover = {
+                        "ticker": holding.symbol,
+                        "type": "CRYPTO",
+                        "price": float(holding.current_price) if holding.current_price else 0,
+                        "change_pct": holding.unrealized_gain_loss_pct,
+                        "portfolio_name": portfolio.name
+                    }
+
+                    if holding.unrealized_gain_loss_pct >= 0:
+                        gainers.append(mover)
+                    else:
+                        losers.append(mover)
+
+        return {"gainers": gainers, "losers": losers}
+
+    @staticmethod
+    def _safe_percentage(numerator: Decimal, denominator: Decimal) -> Optional[float]:
+        """Safely calculate percentage avoiding division by zero."""
+        if denominator == 0 or denominator is None:
+            return None
+        try:
+            return float((numerator / denominator) * 100)
+        except (TypeError, ValueError):
+            return None

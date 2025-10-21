@@ -891,3 +891,4 @@ Before committing code:
 - **Next.js Docs**: https://nextjs.org/docs
 - **SQLAlchemy Docs**: https://docs.sqlalchemy.org/
 - **Celery Docs**: https://docs.celeryproject.io/
+- after making changes, before committing, always validate your solution by running the exact same tests that the github workflow is doing in CI. Only commit when all containers linting job pass with no issues.

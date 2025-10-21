@@ -26,6 +26,10 @@ import type {
   TickerSearchResult,
   WalletSyncStatus,
   WalletTransactionPreview,
+  UnifiedHolding,
+  UnifiedOverview,
+  UnifiedPerformanceData,
+  UnifiedMover,
 } from './types';
 
 // API Configuration
@@ -536,5 +540,74 @@ export async function getWalletSyncStatus(portfolioId: number): Promise<WalletSy
   return apiRequest<WalletSyncStatus>({
     method: 'GET',
     url: `/crypto/portfolios/${portfolioId}/wallet-sync-status`,
+  });
+}
+
+// === Unified Portfolio APIs (Traditional + Crypto) ===
+
+/**
+ * Get combined portfolio overview with traditional and crypto holdings
+ */
+export async function getUnifiedOverview(): Promise<UnifiedOverview> {
+  return apiRequest<UnifiedOverview>({
+    method: 'GET',
+    url: '/portfolio/unified-overview',
+  });
+}
+
+/**
+ * Get combined holdings (traditional + crypto) with pagination
+ */
+export async function getUnifiedHoldings(params?: {
+  skip?: number;
+  limit?: number;
+}): Promise<PaginatedResponse<UnifiedHolding>> {
+  return apiRequest<PaginatedResponse<UnifiedHolding>>({
+    method: 'GET',
+    url: '/portfolio/unified-holdings',
+    params,
+  });
+}
+
+/**
+ * Get combined performance data (traditional + crypto)
+ */
+export async function getUnifiedPerformance(range: string): Promise<UnifiedPerformanceData[]> {
+  const response = await apiRequest<{
+    portfolio_data: Array<{ date: string; total: string | number; traditional: string | number; crypto: string | number }>;
+    benchmark_data: Array<{ date: string; value: string | number }>;
+  }>({
+    method: 'GET',
+    url: '/portfolio/unified-performance',
+    params: { range },
+  });
+
+  // Transform backend response to frontend format
+  const benchmarkMap = new Map(
+    response.benchmark_data.map((b) => [b.date, parseFloat(String(b.value))])
+  );
+
+  return response.portfolio_data.map((point) => ({
+    date: point.date,
+    total: parseFloat(String(point.total)),
+    traditional: parseFloat(String(point.traditional)),
+    crypto: parseFloat(String(point.crypto)),
+    ...(benchmarkMap.has(point.date) && { benchmark: benchmarkMap.get(point.date) }),
+  }));
+}
+
+/**
+ * Get combined top gainers and losers (traditional + crypto)
+ */
+export async function getUnifiedMovers(): Promise<{
+  gainers: UnifiedMover[];
+  losers: UnifiedMover[];
+}> {
+  return apiRequest<{
+    gainers: UnifiedMover[];
+    losers: UnifiedMover[];
+  }>({
+    method: 'GET',
+    url: '/portfolio/unified-movers',
   });
 }

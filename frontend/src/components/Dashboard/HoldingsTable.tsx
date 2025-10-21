@@ -12,70 +12,29 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { useHoldings } from '@/hooks/usePortfolio';
-import { useRealtimePrices } from '@/hooks/useRealtimePrices';
+import { useUnifiedHoldings } from '@/hooks/usePortfolio';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
-import { ArrowUpDown, TrendingUp, TrendingDown, Activity } from 'lucide-react';
-import type { Position } from '@/lib/types';
+import { ArrowUpDown, TrendingUp, TrendingDown } from 'lucide-react';
+import type { UnifiedHolding } from '@/lib/types';
 
-type SortField = keyof Position;
+type SortField = 'ticker' | 'quantity' | 'current_price' | 'current_value' | 'profit_loss' | 'profit_loss_pct' | 'type';
 type SortDirection = 'asc' | 'desc';
 
 /**
- * Render a sortable holdings table that displays portfolio positions augmented with real-time price data.
+ * Render a sortable unified holdings table that displays both traditional and crypto positions.
  *
  * The component shows loading skeletons while holdings load, an empty state when there are no holdings,
- * and a table of positions when data is available. Each row is clickable to navigate to the asset detail page.
- * The table supports sorting by multiple fields and displays live-update metadata when real-time prices are available.
+ * and a table of positions when data is available. Each row shows asset type indicator and is clickable
+ * to navigate to the appropriate detail page based on asset type.
  *
- * @returns The rendered holdings table React element
+ * @returns The rendered unified holdings table React element
  */
 export function HoldingsTable() {
   const router = useRouter();
-  const { data: holdings, isLoading } = useHoldings();
-  const symbols = holdings?.map(h => h.ticker) || [];
-  const { realtimePrices, isLoading: pricesLoading, lastUpdate } = useRealtimePrices(symbols);
+  const { data: response, isLoading } = useUnifiedHoldings(0, 100);
+  const holdings = response?.items || [];
   const [sortField, setSortField] = useState<SortField>('current_value');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-
-  // Merge holdings with real-time prices
-  const holdingsWithRealtimePrices = useMemo(() => {
-    if (!holdings) return [];
-
-    return holdings.map((holding) => {
-      const realtimePrice = realtimePrices.get(holding.ticker);
-
-      if (realtimePrice) {
-        // Calculate updated values with real-time price
-        const currentValue = holding.quantity * realtimePrice.current_price;
-        const costBasis = holding.cost_basis || 0;
-        const unrealizedGain = currentValue - costBasis;
-        const returnPercentage = costBasis > 0
-          ? unrealizedGain / costBasis
-          : 0;
-
-        // Calculate change values if not provided
-        const hasPrevClose = typeof realtimePrice.previous_close === 'number';
-        const changeAmount = realtimePrice.change_amount ??
-          (hasPrevClose ? (realtimePrice.current_price - realtimePrice.previous_close) : 0);
-        const changePercent = realtimePrice.change_percent ??
-          (realtimePrice.previous_close > 0 ?
-            ((realtimePrice.current_price - realtimePrice.previous_close) / realtimePrice.previous_close) * 100 : 0);
-        return {
-          ...holding,
-          current_price: realtimePrice.current_price,
-          current_value: currentValue,
-          unrealized_gain: unrealizedGain,
-          return_percentage: returnPercentage,
-          // Total position change (not per-share)
-          today_change: changeAmount * holding.quantity,
-          today_change_percent: changePercent,
-        };
-      }
-
-      return holding;
-    });
-  }, [holdings, realtimePrices]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -83,6 +42,31 @@ export function HoldingsTable() {
     } else {
       setSortField(field);
       setSortDirection('desc');
+    }
+  };
+
+  const getAssetTypeBadge = (type: string) => {
+    switch (type) {
+      case 'STOCK':
+        return <Badge variant="secondary">Stock</Badge>;
+      case 'ETF':
+        return <Badge variant="secondary">ETF</Badge>;
+      case 'CRYPTO':
+        return <Badge className="bg-orange-100 text-orange-800">Crypto</Badge>;
+      default:
+        return <Badge variant="outline">{type}</Badge>;
+    }
+  };
+
+  const handleRowClick = (holding: UnifiedHolding) => {
+    if (holding.type === 'CRYPTO') {
+      // For crypto, navigate to crypto portfolio holdings
+      if (holding.portfolio_id) {
+        router.push(`/crypto/${holding.portfolio_id}/holdings/${holding.ticker}`);
+      }
+    } else {
+      // For traditional assets, navigate to asset detail page
+      router.push(`/asset/${holding.ticker}`);
     }
   };
 
@@ -116,9 +100,43 @@ export function HoldingsTable() {
     );
   }
 
-  const sortedHoldings = [...holdingsWithRealtimePrices].sort((a, b) => {
-    const aValue = a[sortField];
-    const bValue = b[sortField];
+  const sortedHoldings = [...holdings].sort((a, b) => {
+    let aValue: number | string;
+    let bValue: number | string;
+
+    switch (sortField) {
+      case 'ticker':
+        aValue = a.ticker.toUpperCase();
+        bValue = b.ticker.toUpperCase();
+        break;
+      case 'quantity':
+        aValue = a.quantity;
+        bValue = b.quantity;
+        break;
+      case 'current_price':
+        aValue = a.current_price;
+        bValue = b.current_price;
+        break;
+      case 'current_value':
+        aValue = a.current_value;
+        bValue = b.current_value;
+        break;
+      case 'profit_loss':
+        aValue = a.profit_loss;
+        bValue = b.profit_loss;
+        break;
+      case 'profit_loss_pct':
+        aValue = a.profit_loss_pct;
+        bValue = b.profit_loss_pct;
+        break;
+      case 'type':
+        aValue = a.type;
+        bValue = b.type;
+        break;
+      default:
+        aValue = 0;
+        bValue = 0;
+    }
 
     if (typeof aValue === 'number' && typeof bValue === 'number') {
       return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
@@ -135,16 +153,8 @@ export function HoldingsTable() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Holdings</CardTitle>
-        {!pricesLoading && lastUpdate && (
-          <Badge variant="outline" className="gap-1.5">
-            <Activity className="h-3 w-3 animate-pulse text-green-500" />
-            <span className="text-xs text-gray-500">
-              Live - Updated {lastUpdate.toLocaleTimeString()}
-            </span>
-          </Badge>
-        )}
+      <CardHeader>
+        <CardTitle>Holdings ({holdings.length})</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
@@ -162,10 +172,10 @@ export function HoldingsTable() {
                 </TableHead>
                 <TableHead
                   className="cursor-pointer"
-                  onClick={() => handleSort('description')}
+                  onClick={() => handleSort('type')}
                 >
                   <div className="flex items-center gap-2">
-                    Description
+                    Type
                     <ArrowUpDown className="h-4 w-4" />
                   </div>
                 </TableHead>
@@ -174,16 +184,7 @@ export function HoldingsTable() {
                   onClick={() => handleSort('quantity')}
                 >
                   <div className="flex items-center justify-end gap-2">
-                    Shares
-                    <ArrowUpDown className="h-4 w-4" />
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="cursor-pointer text-right"
-                  onClick={() => handleSort('average_cost')}
-                >
-                  <div className="flex items-center justify-end gap-2">
-                    Avg Cost
+                    Quantity
                     <ArrowUpDown className="h-4 w-4" />
                   </div>
                 </TableHead>
@@ -192,16 +193,7 @@ export function HoldingsTable() {
                   onClick={() => handleSort('current_price')}
                 >
                   <div className="flex items-center justify-end gap-2">
-                    Current Price
-                    <ArrowUpDown className="h-4 w-4" />
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="cursor-pointer text-right"
-                  onClick={() => handleSort('today_change')}
-                >
-                  <div className="flex items-center justify-end gap-2">
-                    Today&apos;s Change
+                    Price
                     <ArrowUpDown className="h-4 w-4" />
                   </div>
                 </TableHead>
@@ -216,28 +208,19 @@ export function HoldingsTable() {
                 </TableHead>
                 <TableHead
                   className="cursor-pointer text-right"
-                  onClick={() => handleSort('unrealized_gain')}
+                  onClick={() => handleSort('profit_loss')}
                 >
                   <div className="flex items-center justify-end gap-2">
-                    Profit
+                    Profit/Loss
                     <ArrowUpDown className="h-4 w-4" />
                   </div>
                 </TableHead>
                 <TableHead
                   className="cursor-pointer text-right"
-                  onClick={() => handleSort('return_percentage')}
+                  onClick={() => handleSort('profit_loss_pct')}
                 >
                   <div className="flex items-center justify-end gap-2">
-                    Return
-                    <ArrowUpDown className="h-4 w-4" />
-                  </div>
-                </TableHead>
-                <TableHead
-                  className="cursor-pointer text-right"
-                  onClick={() => handleSort('irr')}
-                >
-                  <div className="flex items-center justify-end gap-2">
-                    IRR
+                    Return %
                     <ArrowUpDown className="h-4 w-4" />
                   </div>
                 </TableHead>
@@ -245,82 +228,46 @@ export function HoldingsTable() {
             </TableHeader>
             <TableBody>
               {sortedHoldings.map((holding) => {
-                const hasRealtimeData = realtimePrices.has(holding.ticker);
-                const todayChange = holding.today_change ?? 0;
-                const todayChangePercent = holding.today_change_percent ?? 0;
+                const profitLoss = holding.profit_loss ?? 0;
+                const profitLossPct = holding.profit_loss_pct ?? 0;
 
                 return (
                   <TableRow
-                    key={holding.ticker}
+                    key={`${holding.type}-${holding.ticker}-${holding.portfolio_id || 'main'}`}
                     className="cursor-pointer hover:bg-gray-50"
-                    onClick={() => router.push(`/asset/${holding.ticker}`)}
+                    onClick={() => handleRowClick(holding)}
                   >
                     <TableCell className="font-medium">{holding.ticker}</TableCell>
-                    <TableCell className="max-w-xs truncate" title={holding.description || undefined}>
-                      {holding.description || '—'}
+                    <TableCell>{getAssetTypeBadge(holding.type)}</TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatNumber(holding.quantity, 8)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatNumber(holding.quantity, 4)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {formatCurrency(holding.average_cost, holding.currency)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {formatCurrency(holding.current_price, holding.currency)}
-                        {hasRealtimeData && (
-                          <span className="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell
-                      className={`text-right font-mono ${
-                        todayChange >= 0 ? 'text-success' : 'text-danger'
-                      }`}
-                    >
-                      {hasRealtimeData ? (
-                        <div className="flex items-center justify-end gap-1">
-                          {todayChange >= 0 ? (
-                            <TrendingUp className="h-3 w-3" />
-                          ) : (
-                            <TrendingDown className="h-3 w-3" />
-                          )}
-                          <span>
-                            {formatCurrency(Math.abs(todayChange), holding.currency)} (
-                            {formatPercentage(todayChangePercent)})
-                          </span>
-                        </div>
-                      ) : (
-                        '—'
-                      )}
+                      {formatCurrency(holding.current_price, holding.currency)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {formatCurrency(holding.current_value, holding.currency)}
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono ${
-                        (holding.unrealized_gain ?? 0) >= 0 ? 'text-success' : 'text-danger'
+                        profitLoss >= 0 ? 'text-success' : 'text-danger'
                       }`}
                     >
-                      {formatCurrency(holding.unrealized_gain, holding.currency)}
+                      <div className="flex items-center justify-end gap-1">
+                        {profitLoss >= 0 ? (
+                          <TrendingUp className="h-3 w-3" />
+                        ) : (
+                          <TrendingDown className="h-3 w-3" />
+                        )}
+                        {formatCurrency(profitLoss, holding.currency)}
+                      </div>
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono ${
-                        (holding.return_percentage ?? 0) >= 0 ? 'text-success' : 'text-danger'
+                        profitLossPct >= 0 ? 'text-success' : 'text-danger'
                       }`}
                     >
-                      {holding.return_percentage !== null && holding.return_percentage !== undefined
-                        ? formatPercentage(holding.return_percentage * 100)
-                        : '—'}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right font-mono ${
-                        (holding.irr ?? 0) >= 0 ? 'text-success' : 'text-danger'
-                      }`}
-                    >
-                      {holding.irr !== null && holding.irr !== undefined
-                        ? formatPercentage(holding.irr * 100)
-                        : '—'}
+                      {formatPercentage(profitLossPct)}
                     </TableCell>
                   </TableRow>
                 );

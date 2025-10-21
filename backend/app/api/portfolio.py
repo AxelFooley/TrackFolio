@@ -1,17 +1,24 @@
 """Portfolio API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from decimal import Decimal
 from datetime import date, timedelta
 from typing import List, Optional
+import logging
 
 from app.database import get_db
 from app.models import Position, PortfolioSnapshot, PriceHistory, CachedMetrics, Benchmark, StockSplit
 from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance, PerformanceDataPoint
 from app.schemas.position import PositionResponse
+from app.schemas.unified import (
+    UnifiedHolding, UnifiedOverview, UnifiedPerformance, UnifiedMovers,
+    UnifiedSummary, UnifiedPerformanceDataPoint
+)
 from app.services.price_fetcher import PriceFetcher
+from app.services.portfolio_aggregator import PortfolioAggregator
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 
@@ -494,3 +501,166 @@ async def get_position(
             for s in splits
         ] if splits else []
     }
+
+
+# Unified Portfolio Endpoints (combining traditional and crypto)
+
+@router.get("/unified-holdings", response_model=List[UnifiedHolding])
+async def get_unified_holdings(db: AsyncSession = Depends(get_db)):
+    """
+    Get unified list of all holdings (traditional and crypto).
+
+    Returns combined positions from traditional portfolio (Position model)
+    and all crypto portfolios (CryptoPortfolio/CryptoTransaction).
+
+    Each holding includes current price, value, and performance metrics.
+
+    Returns:
+        List of unified holdings with standardized schema
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        holdings = await aggregator.get_unified_holdings()
+        return holdings
+    except Exception as e:
+        logger.error(f"Error getting unified holdings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified holdings")
+
+
+@router.get("/unified-overview", response_model=UnifiedOverview)
+async def get_unified_overview(db: AsyncSession = Depends(get_db)):
+    """
+    Get aggregated portfolio overview combining traditional and crypto.
+
+    Returns top-level metrics:
+    - total_value: combined current value
+    - traditional_value, crypto_value: breakdown
+    - total_profit, total_profit_pct: combined P&L
+    - traditional_profit, crypto_profit: breakdown by portfolio type
+    - today_change, today_change_pct
+
+    Returns:
+        Unified overview metrics
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        overview = await aggregator.get_unified_overview()
+        return overview
+    except Exception as e:
+        logger.error(f"Error getting unified overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified overview")
+
+
+@router.get("/unified-performance", response_model=UnifiedPerformance)
+async def get_unified_performance(
+    days: int = Query(365, ge=1, le=3650, description="Number of days of history"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get unified performance data combining traditional and crypto portfolios.
+
+    Merges daily snapshots from both portfolio systems into a single time-series.
+    Returns data for the last N days, aggregating values across all portfolios.
+
+    Args:
+        days: Number of days of history to return (1-3650, default 365)
+
+    Returns:
+        Unified performance data with daily values
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        performance_data = await aggregator.get_unified_performance(days=days)
+        return {
+            "data": [
+                UnifiedPerformanceDataPoint(
+                    date_point=p["date"],
+                    value=p["value"],
+                    crypto_value=p["crypto_value"],
+                    traditional_value=p["traditional_value"]
+                )
+                for p in performance_data
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error getting unified performance: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified performance")
+
+
+@router.get("/unified-movers", response_model=UnifiedMovers)
+async def get_unified_movers(
+    top_n: int = Query(5, ge=1, le=50, description="Number of top gainers/losers"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get top gainers and losers from both traditional and crypto portfolios.
+
+    Calculates return percentage for each holding and returns the top N gainers
+    and top N losers across all holdings, sorted by change percentage.
+
+    Args:
+        top_n: Number of gainers and losers to return (1-50, default 5)
+
+    Returns:
+        Top gainers and losers
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        movers = await aggregator.get_unified_movers(top_n=top_n)
+        return movers
+    except Exception as e:
+        logger.error(f"Error getting unified movers: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified movers")
+
+
+@router.get("/unified-summary", response_model=UnifiedSummary)
+async def get_unified_summary(
+    holdings_limit: int = Query(20, ge=1, le=100, description="Max holdings to return"),
+    performance_days: int = Query(365, ge=1, le=3650, description="Days of performance history"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get complete unified summary combining all aggregated data.
+
+    This is a convenience endpoint that returns overview, holdings (paginated),
+    movers, and performance data in a single response to reduce API round trips.
+
+    Args:
+        holdings_limit: Maximum number of holdings to return (1-100, default 20)
+        performance_days: Days of performance history (1-3650, default 365)
+
+    Returns:
+        Complete unified portfolio summary
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        summary = await aggregator.get_unified_summary(
+            holdings_limit=holdings_limit,
+            performance_days=performance_days
+        )
+
+        # Transform performance data to proper schema
+        perf_data = [
+            UnifiedPerformanceDataPoint(
+                date_point=p["date"],
+                value=p["value"],
+                crypto_value=p["crypto_value"],
+                traditional_value=p["traditional_value"]
+            )
+            for p in summary["performance_summary"]["data"]
+        ]
+
+        return UnifiedSummary(
+            overview=summary["overview"],
+            holdings=summary["holdings"],
+            holdings_total=summary["holdings_total"],
+            movers=summary["movers"],
+            performance_summary={
+                "period_days": summary["performance_summary"]["period_days"],
+                "data_points": summary["performance_summary"]["data_points"],
+                "data": perf_data
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting unified summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified summary")
