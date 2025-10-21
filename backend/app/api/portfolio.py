@@ -639,7 +639,7 @@ async def get_unified_performance(
                     "traditional": Decimal("0"),
                     "crypto": Decimal("0")
                 }
-            crypto_val = snapshot.total_value or Decimal("0")
+            crypto_val = snapshot.total_value_eur or Decimal("0")
             snapshot_map[snapshot.snapshot_date]["crypto"] += crypto_val
             # Add to total
             snapshot_map[snapshot.snapshot_date]["total"] = (
