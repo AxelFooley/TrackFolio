@@ -83,7 +83,7 @@ def create_daily_crypto_snapshots(self):
         for portfolio in active_portfolios:
             try:
                 # Calculate portfolio metrics for the snapshot
-                snapshot_data = await_calculate_crypto_snapshot_data(db, portfolio.id, snapshot_date)
+                snapshot_data = calculate_crypto_snapshot_data(db, portfolio.id, snapshot_date)
 
                 if not snapshot_data:
                     logger.warning(f"Could not calculate snapshot data for crypto portfolio {portfolio.name}")
@@ -237,7 +237,7 @@ def create_crypto_snapshot_for_portfolio(self, portfolio_id: int, snapshot_date:
             }
 
         # Calculate snapshot data
-        snapshot_data = await_calculate_crypto_snapshot_data(db, portfolio_id, target_date)
+        snapshot_data = calculate_crypto_snapshot_data(db, portfolio_id, target_date)
 
         if not snapshot_data:
             logger.warning(f"Could not calculate snapshot data for crypto portfolio {portfolio_id}")
@@ -313,7 +313,7 @@ def create_crypto_snapshot_for_portfolio(self, portfolio_id: int, snapshot_date:
         db.close()
 
 
-def await_calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: date) -> dict:
+def calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: date) -> dict:
     """
     Compute portfolio snapshot values and holdings breakdown for a given date.
     
@@ -551,7 +551,7 @@ def backfill_crypto_portfolio_snapshots(self, portfolio_id: int):
             logger.info(f"No transactions found for portfolio {portfolio_id}. Creating snapshot for today only.")
 
             today = date.today()
-            snapshot_data = await_calculate_crypto_snapshot_data(db, portfolio_id, today)
+            snapshot_data = calculate_crypto_snapshot_data(db, portfolio_id, today)
 
             if snapshot_data:
                 # Check if snapshot already exists
@@ -642,7 +642,7 @@ def backfill_crypto_portfolio_snapshots(self, portfolio_id: int):
                     skipped += 1
                 else:
                     # Calculate snapshot data for this date
-                    snapshot_data = await_calculate_crypto_snapshot_data(db, portfolio_id, current_date)
+                    snapshot_data = calculate_crypto_snapshot_data(db, portfolio_id, current_date)
 
                     if snapshot_data:
                         try:
@@ -788,7 +788,7 @@ def backfill_crypto_snapshots(self, portfolio_id: int, start_date: str, end_date
                     updated += 1
                 else:
                     # Calculate snapshot data
-                    snapshot_data = await_calculate_crypto_snapshot_data(db, portfolio_id, current_date)
+                    snapshot_data = calculate_crypto_snapshot_data(db, portfolio_id, current_date)
 
                     if snapshot_data:
                         snapshot = CryptoPortfolioSnapshot(
