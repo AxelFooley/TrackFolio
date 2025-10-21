@@ -101,6 +101,7 @@ def test_safe_percentage_helper():
 def test_unified_performance_schema():
     """Test UnifiedPerformance schema creation."""
     from decimal import Decimal
+    from datetime import date
 
     perf_data = UnifiedPerformanceDataPoint(
         date_point="2025-01-01",
@@ -108,7 +109,7 @@ def test_unified_performance_schema():
         traditional_value=Decimal("30000.00"),
         crypto_value=Decimal("20000.00")
     )
-    assert perf_data.date_point == "2025-01-01"
+    assert perf_data.date_point == date(2025, 1, 1)
     assert perf_data.value == Decimal("50000.00")
     assert perf_data.traditional_value == Decimal("30000.00")
 
