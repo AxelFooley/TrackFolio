@@ -30,6 +30,26 @@ from app.services.price_fetcher import PriceFetcher
 logger = logging.getLogger(__name__)
 
 
+def get_snapshot_value_by_currency(snapshot, base_currency: str):
+    """
+    Extract the appropriate snapshot value based on the base currency.
+
+    Eliminates duplication of currency selection logic across the codebase.
+
+    Args:
+        snapshot: CryptoPortfolioSnapshot with total_value_eur and total_value_usd fields
+        base_currency: The portfolio's base currency ("EUR" or "USD")
+
+    Returns:
+        The total_value_eur if base_currency is "EUR", otherwise total_value_usd
+    """
+    return (
+        snapshot.total_value_eur
+        if base_currency == "EUR"
+        else snapshot.total_value_usd
+    )
+
+
 class PortfolioAggregator:
     """Service for aggregating traditional and crypto portfolio data."""
 
@@ -182,13 +202,8 @@ class PortfolioAggregator:
                     "traditional_value": Decimal("0"),
                     "crypto_value": Decimal("0")
                 }
-            # Select the correct value field based on portfolio base_currency
-            # If base_currency is EUR, use total_value_eur; if USD, use total_value_usd
-            crypto_value = (
-                snapshot.total_value_eur
-                if snapshot.base_currency == "EUR"
-                else snapshot.total_value_usd
-            )
+            # Use helper function to get the correct value field
+            crypto_value = get_snapshot_value_by_currency(snapshot, snapshot.base_currency)
             # Sum crypto values for this date (multiple portfolios)
             performance_by_date[snapshot.snapshot_date]["crypto_value"] += crypto_value
 

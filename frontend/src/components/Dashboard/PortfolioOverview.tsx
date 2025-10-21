@@ -52,7 +52,7 @@ export function PortfolioOverview() {
   if (error || !overview) {
     return (
       <div className="text-center py-8 text-red-600">
-        Failed to load portfolio overview
+        {error?.message ? `Error: ${error.message}` : 'Failed to load portfolio overview'}
       </div>
     );
   }
