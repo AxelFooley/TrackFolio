@@ -155,7 +155,7 @@ class PortfolioAggregator:
         )
         trad_snapshots = trad_result.scalars().all()
 
-        # Get all crypto snapshots
+        # Get all crypto snapshots with their portfolios to access base_currency
         crypto_result = await self.db.execute(
             select(CryptoPortfolioSnapshot)
             .where(CryptoPortfolioSnapshot.snapshot_date >= cutoff_date)
@@ -182,8 +182,15 @@ class PortfolioAggregator:
                     "traditional_value": Decimal("0"),
                     "crypto_value": Decimal("0")
                 }
+            # Select the correct value field based on portfolio base_currency
+            # If base_currency is EUR, use total_value_eur; if USD, use total_value_usd
+            crypto_value = (
+                snapshot.total_value_eur
+                if snapshot.base_currency == "EUR"
+                else snapshot.total_value_usd
+            )
             # Sum crypto values for this date (multiple portfolios)
-            performance_by_date[snapshot.snapshot_date]["crypto_value"] += snapshot.total_value_eur
+            performance_by_date[snapshot.snapshot_date]["crypto_value"] += crypto_value
 
         # Sort by date and build response
         result = []

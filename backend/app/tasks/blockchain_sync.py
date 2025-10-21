@@ -695,6 +695,17 @@ def sync_wallet_manually(
         )
 
         logger.info(f"Manual sync completed for wallet {wallet_address}: {result}")
+
+        # After successful sync, trigger snapshot backfill
+        if result.get("status") == "success" and result.get("transactions_added", 0) > 0:
+            try:
+                from app.tasks.crypto_snapshots import backfill_crypto_portfolio_snapshots
+                backfill_task = backfill_crypto_portfolio_snapshots.delay(portfolio_id=portfolio_id)
+                logger.info(f"Triggered snapshot backfill for portfolio {portfolio_id} after wallet sync")
+            except Exception as e:
+                logger.error(f"Failed to trigger snapshot backfill after wallet sync: {e}")
+                # Don't fail the sync result, just log the error
+
         return result
 
     except Exception as e:

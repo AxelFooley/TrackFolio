@@ -322,6 +322,7 @@ export interface UnifiedPerformanceData {
   traditional: number;
   crypto: number;
   benchmark?: number;
+  currency?: string;
 }
 
 export interface UnifiedMover {

@@ -139,7 +139,10 @@ export function PerformanceChart() {
 
   const hasBenchmarkData = chartData.some(point => point.benchmark != null);
   const isSinglePoint = chartData.length === 1;
-  const portfolioCurrency = 'EUR';
+  // Extract currency from first data point, fallback to EUR
+  const portfolioCurrency = performanceData.length > 0 && performanceData[0].currency
+    ? performanceData[0].currency
+    : 'EUR';
 
   return (
     <Card>

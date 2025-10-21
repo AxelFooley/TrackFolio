@@ -582,13 +582,24 @@ export async function getUnifiedHoldings(params?: {
  */
 export async function getUnifiedPerformance(range: string): Promise<UnifiedPerformanceData[]> {
   const response = await apiRequest<{
-    portfolio_data: Array<{ date: string; total: string | number; traditional: string | number; crypto: string | number }>;
+    portfolio_data: Array<{ date: string; total: string | number; traditional: string | number; crypto: string | number; currency?: string }>;
     benchmark_data: Array<{ date: string; value: string | number }>;
+    currency?: string;
   }>({
     method: 'GET',
     url: '/portfolio/unified-performance',
     params: { range },
   });
+
+  // Try to get currency from overview for fallback
+  let defaultCurrency = response.currency || 'EUR';
+  try {
+    const overview = await getUnifiedOverview();
+    defaultCurrency = overview.currency || 'EUR';
+  } catch {
+    // Fallback to EUR if overview fetch fails
+    defaultCurrency = 'EUR';
+  }
 
   // Transform backend response to frontend format
   const benchmarkMap = new Map(
@@ -600,6 +611,7 @@ export async function getUnifiedPerformance(range: string): Promise<UnifiedPerfo
     total: parseFloat(String(point.total)),
     traditional: parseFloat(String(point.traditional)),
     crypto: parseFloat(String(point.crypto)),
+    currency: point.currency || defaultCurrency,
     ...(benchmarkMap.has(point.date) && { benchmark: benchmarkMap.get(point.date) }),
   }));
 }
