@@ -328,6 +328,58 @@ Get details for a specific position. Identifier can be ticker or 12-char ISIN.
 
 ## Assets
 
+### Search Assets
+
+```http
+GET /api/assets/search?q={query}
+```
+
+Search for assets by ticker symbol or company name with intelligent caching.
+
+**Query Parameters:**
+- `q` (required): Search query
+  - Pattern: `^[A-Z0-9.\-]{1,20}$`
+  - Accepts: Uppercase letters, numbers, dots (.), hyphens (-)
+  - Length: 1-20 characters
+  - Examples: `AAPL`, `VWCE.DE`, `MSFT`, `SPY`
+
+**Response:**
+```json
+[
+  {
+    "ticker": "AAPL",
+    "name": "Apple Inc.",
+    "type": "EQUITY"
+  },
+  {
+    "ticker": "VWCE.DE",
+    "name": "Vanguard FTSE All-World UCITS ETF",
+    "type": "ETF"
+  }
+]
+```
+
+**Features:**
+- Searches 40+ common ETFs and stocks (fast, in-memory)
+- Falls back to Yahoo Finance for additional results (5-second timeout)
+- Results cached for 1 hour to minimize API calls
+- Returns maximum 10 results
+- Case-insensitive matching on ticker and company name
+
+**Error Responses:**
+```json
+{
+  "detail": "string must match regex '^[A-Z0-9.\\-]{1,20}$'"
+}
+```
+
+**Security:**
+- Input validated with strict regex pattern
+- Prevents SQL injection and special character attacks
+- Only valid ticker symbols accepted
+
+---
+
 ### Asset Details
 
 ```http

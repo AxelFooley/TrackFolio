@@ -15,6 +15,7 @@ from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import Position, PriceHistory
 from app.services.price_fetcher import PriceFetcher
+from app.services.system_state_manager import SystemStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,14 @@ def update_daily_prices(self):
                 logger.exception(f"Error fetching price for {ticker}")
                 failed += 1
                 failed_tickers.append(ticker)
+
+        # Update last price update timestamp
+        try:
+            SystemStateManager.update_price_last_update(db)
+            logger.info("Updated price last update timestamp")
+        except Exception as e:
+            logger.error(f"Failed to update price last update timestamp: {e}")
+            # Don't fail the entire task if timestamp update fails
 
         # Summary
         summary = {

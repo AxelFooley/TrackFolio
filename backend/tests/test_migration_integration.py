@@ -23,6 +23,10 @@ from app.config import settings
 from app.database import get_db, Base
 
 
+# Mark entire module as integration test (requires database)
+pytestmark = pytest.mark.integration
+
+
 class TestMigrationScript:
     """Test the migration script functionality."""
 

@@ -3,15 +3,57 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    branches:
+      - main
+      - dev
 
 jobs:
+  wait-for-linting:
+    name: Wait for Linting to Complete
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for build-and-push workflow to complete
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            console.log(`Waiting for lint jobs on PR #${pr.number}...`);
+
+            // Wait for the build-and-push workflow
+            let attempt = 0;
+            const maxAttempts = 60; // 5 minutes with 5 second intervals
+
+            while (attempt < maxAttempts) {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: 'build-and-push.yml',
+                branch: pr.head.ref,
+                status: 'completed',
+              });
+
+              const latestRun = runs.data.workflow_runs[0];
+
+              if (latestRun) {
+                console.log(`Build workflow status: ${latestRun.conclusion}`);
+                if (latestRun.conclusion === 'success') {
+                  console.log('✅ Linting passed! Proceeding with code review...');
+                  return;
+                } else {
+                  throw new Error(`❌ Linting failed with status: ${latestRun.conclusion}`);
+                }
+              }
+
+              attempt++;
+              await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+            }
+
+            throw new Error('Timeout waiting for linting workflow to complete');
+
   claude-review:
+    name: Claude Code Review
+    needs: wait-for-linting
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
@@ -21,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -34,22 +76,27 @@ jobs:
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Please review this pull request and provide feedback on:
+            Please review this pull request and provide comprehensive feedback on:
             - Code quality and best practices
             - Potential bugs or issues
             - Performance considerations
             - Security concerns
             - Test coverage
+            - Adherence to project guidelines (check CLAUDE.md)
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            After your analysis, MUST post your review as a comment on the PR using:
+            bash -c "gh pr comment ${{ github.event.pull_request.number }} --body 'YOUR_REVIEW_HERE'"
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            Be constructive, specific, and highlight both strengths and areas for improvement.
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options

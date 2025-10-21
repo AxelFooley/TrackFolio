@@ -56,7 +56,7 @@ export class ApiError extends Error {
  * Normalize transaction type to lowercase for backend compatibility.
  * Frontend uses uppercase for better UX, backend expects lowercase.
  */
-function normalizeTransactionType<T extends { transaction_type?: string }>(data: T): T {
+export function normalizeTransactionType<T extends { transaction_type?: string }>(data: T): T {
   if (data.transaction_type) {
     return {
       ...data,
@@ -64,6 +64,24 @@ function normalizeTransactionType<T extends { transaction_type?: string }>(data:
     };
   }
   return data;
+}
+
+/**
+ * Transform transaction data from frontend format to backend format.
+ * Converts field names and casing to match backend expectations:
+ * - transaction_type -> type (and lowercase it)
+ * - date -> operation_date
+ * - Removes isin, broker, description fields (backend fetches these)
+ */
+export function transformTransactionForBackend(data: TransactionCreate): any {
+  const { transaction_type, date, isin, broker, description, ...rest } = data;
+
+  return {
+    type: transaction_type?.toLowerCase() || 'buy',
+    operation_date: date,
+    // Don't include isin, broker, description - backend fetches these from Yahoo Finance
+    ...rest,
+  };
 }
 
 // Request helper
@@ -192,8 +210,8 @@ export async function importTransactions(file: File): Promise<{ message: string 
 export async function createTransaction(data: TransactionCreate): Promise<Transaction> {
   return apiRequest<Transaction>({
     method: 'POST',
-    url: '/transactions',
-    data: normalizeTransactionType(data),
+    url: '/transactions/',
+    data: transformTransactionForBackend(data),
   });
 }
 
@@ -231,29 +249,6 @@ export async function setBenchmark(data: {
   });
 }
 
-// Price Updates
-export async function refreshPrices(currentOnly?: boolean, symbols?: string[]): Promise<{ message: string }> {
-  const params: any = {};
-  if (currentOnly !== undefined) params.current_only = currentOnly;
-  if (symbols && symbols.length > 0) params.symbols = symbols.join(',');
-
-  return apiRequest<{ message: string }>({
-    method: 'POST',
-    url: '/prices/refresh',
-    params,
-  });
-}
-
-export async function ensurePriceCoverage(symbols?: string[]): Promise<{ message: string }> {
-  const params: any = {};
-  if (symbols && symbols.length > 0) params.symbols = symbols.join(',');
-
-  return apiRequest<{ message: string }>({
-    method: 'POST',
-    url: '/prices/ensure-coverage',
-    params,
-  });
-}
 
 export async function getPriceHistory(ticker: string, days: number): Promise<{ data: PerformanceData[] }> {
   return apiRequest<{ data: PerformanceData[] }>({
