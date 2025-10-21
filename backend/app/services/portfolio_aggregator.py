@@ -16,9 +16,16 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import List, Dict, Optional, Tuple, Any
 import logging
+import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
+
+try:
+    import redis
+    redis_available = True
+except ImportError:
+    redis_available = False
 
 from app.models import (
     Position, PortfolioSnapshot, PriceHistory, CachedMetrics, CryptoPortfolio,
@@ -26,6 +33,7 @@ from app.models import (
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +71,78 @@ class PortfolioAggregator:
         self.db = db
         self.price_fetcher = PriceFetcher()
         self.crypto_calc = CryptoCalculationService(db)
+        self._redis_client = None
+
+    @property
+    def redis_client(self):
+        """Lazy initialize Redis client for caching."""
+        if redis_available and self._redis_client is None:
+            try:
+                self._redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+            except Exception as e:
+                logger.warning(f"Failed to initialize Redis client: {e}")
+                self._redis_client = False  # Mark as unavailable
+        return self._redis_client if self._redis_client else None
+
+    async def _get_cache(self, key: str) -> Optional[Dict[str, Any]]:
+        """Get cached value from Redis with graceful fallback."""
+        if not self.redis_client:
+            return None
+        try:
+            cached = self.redis_client.get(key)
+            if cached:
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"Cache get failed for {key}: {e}")
+        return None
+
+    async def _set_cache(self, key: str, value: Dict[str, Any], ttl_seconds: int = 60) -> None:
+        """Set cached value in Redis with graceful fallback."""
+        if not self.redis_client:
+            return
+        try:
+            self.redis_client.setex(key, ttl_seconds, json.dumps(value, default=str))
+        except Exception as e:
+            logger.warning(f"Cache set failed for {key}: {e}")
+
+    async def _get_latest_prices_batch(self, tickers: List[str]) -> Dict[str, List[PriceHistory]]:
+        """
+        Batch load the latest 2 prices for multiple tickers (eliminates N+1 queries).
+
+        Fetches all prices for the given tickers in a single query, then groups them
+        by ticker. This is much more efficient than querying per ticker in a loop.
+
+        Args:
+            tickers: List of ticker symbols to fetch prices for
+
+        Returns:
+            Dictionary mapping ticker -> list of PriceHistory records (latest first, max 2 per ticker)
+        """
+        if not tickers:
+            return {}
+
+        # Single optimized query for all tickers at once
+        result = await self.db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker.in_(tickers))
+            .order_by(PriceHistory.ticker, PriceHistory.date.desc())
+        )
+        prices = result.scalars().all()
+
+        # Group by ticker, keeping only latest 2 for each
+        prices_by_ticker: Dict[str, List[PriceHistory]] = {}
+        ticker_count: Dict[str, int] = {}
+
+        for price in prices:
+            if price.ticker not in ticker_count:
+                ticker_count[price.ticker] = 0
+                prices_by_ticker[price.ticker] = []
+
+            if ticker_count[price.ticker] < 2:
+                prices_by_ticker[price.ticker].append(price)
+                ticker_count[price.ticker] += 1
+
+        return prices_by_ticker
 
     async def get_unified_holdings(self) -> List[Dict[str, Any]]:
         """
@@ -106,9 +186,18 @@ class PortfolioAggregator:
         - today_change, today_change_pct
         - currency: always "EUR"
 
+        Results are cached for 60 seconds to improve dashboard performance.
+
         Returns:
             Dictionary with aggregated metrics
         """
+        # Check cache first
+        cache_key = "unified:overview"
+        cached = await self._get_cache(cache_key)
+        if cached:
+            logger.debug("Returning cached unified overview")
+            return cached
+
         # Get traditional overview
         trad_overview = await self._get_traditional_overview()
 
@@ -116,7 +205,7 @@ class PortfolioAggregator:
         crypto_overview = await self._get_crypto_overview()
 
         # Combine them
-        return {
+        result = {
             "total_value": trad_overview["current_value"] + crypto_overview["total_value"],
             "traditional_value": trad_overview["current_value"],
             "crypto_value": crypto_overview["total_value"],
@@ -144,6 +233,11 @@ class PortfolioAggregator:
             ),
             "currency": "EUR"
         }
+
+        # Cache the result for 60 seconds
+        await self._set_cache(cache_key, result, ttl_seconds=60)
+
+        return result
 
     async def get_unified_performance(self, days: int = 365) -> List[Dict[str, Any]]:
         """
@@ -225,7 +319,7 @@ class PortfolioAggregator:
         Get top gainers and losers from both traditional and crypto portfolios.
 
         Calculates return percentage for each holding and returns top N gainers
-        and top N losers across all holdings.
+        and top N losers across all holdings. Results are cached for 60 seconds.
 
         Args:
             top_n: Number of gainers and losers to return (default 5)
@@ -234,22 +328,27 @@ class PortfolioAggregator:
             Dictionary with keys "gainers" and "losers", each containing list of:
             - ticker, type, price, change_pct, portfolio_name
         """
+        # Check cache first
+        cache_key = f"unified:movers:{top_n}"
+        cached = await self._get_cache(cache_key)
+        if cached:
+            logger.debug(f"Returning cached unified movers (top {top_n})")
+            return cached
+
         gainers = []
         losers = []
 
-        # Get traditional holdings with prices
+        # Get traditional holdings
         positions_result = await self.db.execute(select(Position))
         positions = positions_result.scalars().all()
 
+        # Batch load prices for all tickers (eliminates N+1 queries)
+        tickers = [p.current_ticker for p in positions]
+        prices_by_ticker = await self._get_latest_prices_batch(tickers)
+
+        # Process positions with pre-loaded prices
         for position in positions:
-            # Get latest and previous prices
-            price_result = await self.db.execute(
-                select(PriceHistory)
-                .where(PriceHistory.ticker == position.current_ticker)
-                .order_by(PriceHistory.date.desc())
-                .limit(2)
-            )
-            prices = price_result.scalars().all()
+            prices = prices_by_ticker.get(position.current_ticker, [])
 
             if prices:
                 latest_price = prices[0].close
@@ -288,10 +387,15 @@ class PortfolioAggregator:
         gainers.sort(key=lambda x: x["change_pct"], reverse=True)
         losers.sort(key=lambda x: x["change_pct"])
 
-        return {
+        result = {
             "gainers": gainers[:top_n],
             "losers": losers[:top_n]
         }
+
+        # Cache the result for 60 seconds
+        await self._set_cache(cache_key, result, ttl_seconds=60)
+
+        return result
 
     async def get_unified_summary(
         self,
