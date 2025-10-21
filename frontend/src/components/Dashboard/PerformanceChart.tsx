@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useUnifiedPerformance } from '@/hooks/usePortfolio';
 import { useBenchmark } from '@/hooks/useBenchmark';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { formatCurrency, formatChartDate, formatDate } from '@/lib/utils';
 import type { TimeRange } from '@/lib/types';
 import { AlertCircle, RefreshCw } from 'lucide-react';
@@ -130,12 +130,10 @@ export function PerformanceChart() {
     );
   }
 
-  // Transform data for Recharts
+  // Transform data for Recharts - only show total
   const chartData = performanceData.map((point) => ({
     date: point.date,
-    total: point.total,
-    traditional: point.traditional,
-    crypto: point.crypto,
+    total: parseFloat(String(point.total)),
     ...(point.benchmark != null && { benchmark: point.benchmark }),
   }));
 
@@ -167,25 +165,11 @@ export function PerformanceChart() {
           <div className="h-96 flex items-center justify-center">
             <div className="text-center">
               <p className="text-gray-600 font-medium mb-4">Single Data Point</p>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <p className="text-sm text-gray-500">Total</p>
-                  <p className="text-lg font-semibold text-blue-600">
-                    {formatCurrency(chartData[0].total, portfolioCurrency)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Traditional</p>
-                  <p className="text-lg font-semibold text-gray-600">
-                    {formatCurrency(chartData[0].traditional, portfolioCurrency)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Crypto</p>
-                  <p className="text-lg font-semibold text-orange-600">
-                    {formatCurrency(chartData[0].crypto, portfolioCurrency)}
-                  </p>
-                </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-2">Total Portfolio Value</p>
+                <p className="text-3xl font-semibold text-blue-600">
+                  {formatCurrency(chartData[0].total, portfolioCurrency)}
+                </p>
               </div>
               <p className="text-xs text-gray-400 mt-4">
                 More data points will appear as your portfolio is tracked over time.
@@ -194,17 +178,7 @@ export function PerformanceChart() {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={400}>
-            <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id="colorTraditional" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorCrypto" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#F97316" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#F97316" stopOpacity={0} />
-                </linearGradient>
-              </defs>
+            <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 dataKey="date"
@@ -236,28 +210,10 @@ export function PerformanceChart() {
                 }}
               />
               <Legend />
-              <Area
-                type="monotone"
-                dataKey="traditional"
-                stroke="#3B82F6"
-                fill="url(#colorTraditional)"
-                name="Traditional"
-                yAxisId="left"
-                animationDuration={500}
-              />
-              <Area
-                type="monotone"
-                dataKey="crypto"
-                stroke="#F97316"
-                fill="url(#colorCrypto)"
-                name="Crypto"
-                yAxisId="left"
-                animationDuration={500}
-              />
               <Line
                 type="monotone"
                 dataKey="total"
-                stroke="#1F2937"
+                stroke="#2563EB"
                 strokeWidth={3}
                 dot={chartData.length <= 30}
                 name="Total Portfolio"
@@ -278,7 +234,7 @@ export function PerformanceChart() {
                   animationDuration={500}
                 />
               )}
-            </AreaChart>
+            </LineChart>
           </ResponsiveContainer>
         )}
       </CardContent>

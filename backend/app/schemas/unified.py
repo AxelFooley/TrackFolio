@@ -134,9 +134,13 @@ class UnifiedMover(BaseModel):
 
     ticker: str
     type: str
-    price: float
-    change_pct: float
+    price: Optional[float] = None
+    current_value: Optional[Decimal] = None
+    change_pct: Optional[float] = None
+    today_change: Optional[Decimal] = None
+    today_change_percent: Optional[float] = None
     portfolio_name: str
+    currency: str = "EUR"
 
     class Config:
         """Pydantic configuration."""
@@ -145,8 +149,12 @@ class UnifiedMover(BaseModel):
                 "ticker": "BTC",
                 "type": "CRYPTO",
                 "price": 45000.0,
+                "current_value": "45000.00",
                 "change_pct": 5.5,
-                "portfolio_name": "Crypto Portfolio 1"
+                "today_change": "2500.00",
+                "today_change_percent": 5.5,
+                "portfolio_name": "Crypto Portfolio 1",
+                "currency": "USD"
             }
         }
 

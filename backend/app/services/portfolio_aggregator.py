@@ -237,12 +237,19 @@ class PortfolioAggregator:
                     ((latest_price - previous_price) / previous_price) * 100
                 ) if previous_price > 0 else 0
 
+                current_value = Decimal(latest_price) * position.quantity
+                today_change = (Decimal(str(change_pct)) / Decimal("100")) * current_value
+
                 mover = {
                     "ticker": position.current_ticker,
                     "type": position.asset_type.value,
                     "price": float(latest_price),
+                    "current_value": str(current_value),
                     "change_pct": change_pct,
-                    "portfolio_name": "Main Portfolio"
+                    "today_change": str(today_change),
+                    "today_change_percent": change_pct,
+                    "portfolio_name": "Main Portfolio",
+                    "currency": "EUR"
                 }
 
                 if change_pct >= 0:
@@ -485,12 +492,19 @@ class PortfolioAggregator:
 
             for holding in holdings:
                 if holding.unrealized_gain_loss_pct is not None:
+                    current_value = holding.current_price * holding.quantity if holding.current_price else Decimal("0")
+                    today_change = holding.unrealized_gain_loss if holding.unrealized_gain_loss else Decimal("0")
+
                     mover = {
                         "ticker": holding.symbol,
                         "type": "CRYPTO",
                         "price": float(holding.current_price) if holding.current_price else 0,
+                        "current_value": str(current_value),
                         "change_pct": holding.unrealized_gain_loss_pct,
-                        "portfolio_name": portfolio.name
+                        "today_change": str(today_change),
+                        "today_change_percent": holding.unrealized_gain_loss_pct,
+                        "portfolio_name": portfolio.name,
+                        "currency": portfolio.base_currency or "USD"
                     }
 
                     if holding.unrealized_gain_loss_pct >= 0:
