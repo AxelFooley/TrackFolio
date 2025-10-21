@@ -562,11 +562,19 @@ export async function getUnifiedHoldings(params?: {
   skip?: number;
   limit?: number;
 }): Promise<PaginatedResponse<UnifiedHolding>> {
-  return apiRequest<PaginatedResponse<UnifiedHolding>>({
+  const items = await apiRequest<UnifiedHolding[]>({
     method: 'GET',
     url: '/portfolio/unified-holdings',
     params,
   });
+
+  // Wrap array response into PaginatedResponse format
+  return {
+    items: items,
+    total: items.length,
+    skip: params?.skip || 0,
+    limit: params?.limit || 100,
+  };
 }
 
 /**

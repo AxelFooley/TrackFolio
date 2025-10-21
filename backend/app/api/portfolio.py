@@ -506,7 +506,11 @@ async def get_position(
 # Unified Portfolio Endpoints (combining traditional and crypto)
 
 @router.get("/unified-holdings", response_model=List[UnifiedHolding])
-async def get_unified_holdings(db: AsyncSession = Depends(get_db)):
+async def get_unified_holdings(
+    skip: int = Query(0, ge=0, description="Number of holdings to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Max holdings to return"),
+    db: AsyncSession = Depends(get_db)
+):
     """
     Get unified list of all holdings (traditional and crypto).
 
@@ -515,13 +519,21 @@ async def get_unified_holdings(db: AsyncSession = Depends(get_db)):
 
     Each holding includes current price, value, and performance metrics.
 
+    Args:
+        skip: Number of holdings to skip (pagination offset)
+        limit: Maximum number of holdings to return (1-1000)
+
     Returns:
         List of unified holdings with standardized schema
     """
     try:
         aggregator = PortfolioAggregator(db)
-        holdings = await aggregator.get_unified_holdings()
-        return holdings
+        all_holdings = await aggregator.get_unified_holdings()
+
+        # Apply pagination
+        paginated_holdings = all_holdings[skip : skip + limit]
+
+        return paginated_holdings
     except Exception as e:
         logger.error(f"Error getting unified holdings: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve unified holdings")
@@ -628,7 +640,7 @@ async def get_unified_performance(
                     "crypto": Decimal("0")
                 }
             crypto_val = snapshot.total_value or Decimal("0")
-            snapshot_map[snapshot.snapshot_date]["crypto"] = crypto_val
+            snapshot_map[snapshot.snapshot_date]["crypto"] += crypto_val
             # Add to total
             snapshot_map[snapshot.snapshot_date]["total"] = (
                 snapshot_map[snapshot.snapshot_date]["total"] + crypto_val
