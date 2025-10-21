@@ -551,36 +551,127 @@ async def get_unified_overview(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to retrieve unified overview")
 
 
-@router.get("/unified-performance", response_model=UnifiedPerformance)
+@router.get("/unified-performance")
 async def get_unified_performance(
-    days: int = Query(365, ge=1, le=3650, description="Number of days of history"),
+    range: Optional[str] = Query(None, description="Time range (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)"),
+    days: Optional[int] = Query(None, ge=1, le=3650, description="Number of days of history (alternative to range)"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get unified performance data combining traditional and crypto portfolios.
 
     Merges daily snapshots from both portfolio systems into a single time-series.
-    Returns data for the last N days, aggregating values across all portfolios.
+    Returns data matching frontend expectations with portfolio_data and benchmark_data.
 
     Args:
-        days: Number of days of history to return (1-3650, default 365)
+        range: Time range string (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL). Takes precedence over days.
+        days: Number of days of history (1-3650, default 365) - used if range not provided
 
     Returns:
-        Unified performance data with daily values
+        JSON object with portfolio_data and benchmark_data arrays
     """
     try:
-        aggregator = PortfolioAggregator(db)
-        performance_data = await aggregator.get_unified_performance(days=days)
+        # Use range parameter if provided, otherwise use days (default 365)
+        if range:
+            start_date, end_date = parse_time_range(range)
+        else:
+            # Use days parameter or default to 365
+            days_to_fetch = days or 365
+            end_date = date.today()
+            start_date = end_date - timedelta(days=days_to_fetch)
+
+        # Get traditional portfolio snapshots
+        query = select(PortfolioSnapshot).order_by(PortfolioSnapshot.snapshot_date)
+        if start_date:
+            query = query.where(PortfolioSnapshot.snapshot_date >= start_date)
+        if end_date:
+            query = query.where(PortfolioSnapshot.snapshot_date <= end_date)
+
+        result = await db.execute(query)
+        traditional_snapshots = result.scalars().all()
+
+        # Get crypto snapshots
+        from app.models import CryptoPortfolioSnapshot
+        crypto_query = select(CryptoPortfolioSnapshot).order_by(CryptoPortfolioSnapshot.snapshot_date)
+        if start_date:
+            crypto_query = crypto_query.where(CryptoPortfolioSnapshot.snapshot_date >= start_date)
+        if end_date:
+            crypto_query = crypto_query.where(CryptoPortfolioSnapshot.snapshot_date <= end_date)
+
+        crypto_result = await db.execute(crypto_query)
+        crypto_snapshots = crypto_result.scalars().all()
+
+        # Merge snapshots by date
+        snapshot_map: dict[date, dict] = {}
+
+        for snapshot in traditional_snapshots:
+            if snapshot.snapshot_date not in snapshot_map:
+                snapshot_map[snapshot.snapshot_date] = {
+                    "date": str(snapshot.snapshot_date),
+                    "total": Decimal("0"),
+                    "traditional": Decimal("0"),
+                    "crypto": Decimal("0")
+                }
+            snapshot_map[snapshot.snapshot_date]["traditional"] = snapshot.total_value or Decimal("0")
+            # Add to total
+            snapshot_map[snapshot.snapshot_date]["total"] = (
+                snapshot_map[snapshot.snapshot_date]["total"] +
+                (snapshot.total_value or Decimal("0"))
+            )
+
+        for snapshot in crypto_snapshots:
+            if snapshot.snapshot_date not in snapshot_map:
+                snapshot_map[snapshot.snapshot_date] = {
+                    "date": str(snapshot.snapshot_date),
+                    "total": Decimal("0"),
+                    "traditional": Decimal("0"),
+                    "crypto": Decimal("0")
+                }
+            crypto_val = snapshot.total_value or Decimal("0")
+            snapshot_map[snapshot.snapshot_date]["crypto"] = crypto_val
+            # Add to total
+            snapshot_map[snapshot.snapshot_date]["total"] = (
+                snapshot_map[snapshot.snapshot_date]["total"] + crypto_val
+            )
+
+        # Convert to sorted list
+        portfolio_data = [
+            {
+                "date": p["date"],
+                "total": str(p["total"]),
+                "traditional": str(p["traditional"]),
+                "crypto": str(p["crypto"])
+            }
+            for p in sorted(snapshot_map.values(), key=lambda x: x["date"])
+        ]
+
+        # Get benchmark data if configured (aligned with merged snapshot dates)
+        benchmark_data = []
+        benchmark_result = await db.execute(select(Benchmark).limit(1))
+        benchmark = benchmark_result.scalar_one_or_none()
+
+        if benchmark:
+            snapshot_dates = [date.fromisoformat(p["date"]) for p in portfolio_data]
+            if snapshot_dates:
+                benchmark_query = select(PriceHistory).where(
+                    PriceHistory.ticker == benchmark.ticker,
+                    PriceHistory.date.in_(snapshot_dates)
+                ).order_by(PriceHistory.date)
+
+                benchmark_prices_result = await db.execute(benchmark_query)
+                benchmark_prices = benchmark_prices_result.scalars().all()
+
+                benchmark_data = [
+                    {
+                        "date": str(p.date),
+                        "value": str(p.close)
+                    }
+                    for p in benchmark_prices
+                ]
+
         return {
-            "data": [
-                UnifiedPerformanceDataPoint(
-                    date_point=p["date"],
-                    value=p["value"],
-                    crypto_value=p["crypto_value"],
-                    traditional_value=p["traditional_value"]
-                )
-                for p in performance_data
-            ]
+            "portfolio_data": portfolio_data,
+            "benchmark_data": benchmark_data
         }
     except Exception as e:
         logger.error(f"Error getting unified performance: {e}")
