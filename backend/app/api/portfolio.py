@@ -639,7 +639,13 @@ async def get_unified_performance(
                     "traditional": Decimal("0"),
                     "crypto": Decimal("0")
                 }
-            crypto_val = snapshot.total_value_eur or Decimal("0")
+            # Use the correct value field based on portfolio base_currency
+            # If base_currency is EUR, use total_value_eur; if USD, use total_value_usd
+            crypto_val = (
+                snapshot.total_value_eur
+                if snapshot.base_currency == "EUR"
+                else snapshot.total_value_usd
+            ) or Decimal("0")
             snapshot_map[snapshot.snapshot_date]["crypto"] += crypto_val
             # Add to total
             snapshot_map[snapshot.snapshot_date]["total"] = (
