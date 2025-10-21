@@ -18,10 +18,12 @@ import redis
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType, CryptoCurrency
+from app.models.price_history import PriceHistory
 from app.services.blockchain_fetcher import blockchain_fetcher
 from app.services.blockchain_deduplication import blockchain_deduplication
 from app.services.price_fetcher import PriceFetcher
 from app.config import settings
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -267,10 +269,10 @@ def _sync_bitcoin_wallets_impl():
 
 def _prefetch_prices_for_dates(symbol: str, dates: list, base_currency: str, logger) -> dict:
     """
-    Prefetch historical prices for multiple dates to avoid per-transaction API calls.
+    Prefetch historical prices for multiple dates from the database.
 
-    Batches price requests by date range to minimize API calls. For 1000 transactions
-    across 100 dates, this makes ~1-2 calls instead of 1000.
+    Reads prices from the local PostgreSQL database using currency-specific ticker format.
+    For example, reads BTC-USD or BTC-EUR depending on the base_currency.
 
     Args:
         symbol: Cryptocurrency symbol (e.g., 'BTC')
@@ -292,32 +294,37 @@ def _prefetch_prices_for_dates(symbol: str, dates: list, base_currency: str, log
         start_date = sorted_dates[0]
         end_date = sorted_dates[-1]
 
-        # Fetch all prices for the date range in one call
-        price_fetcher = PriceFetcher()
-        yahoo_ticker = f"{symbol}-{base_currency.upper()}"
+        # Build the ticker key with currency (e.g., BTC-USD, BTC-EUR)
+        ticker_key = f"{symbol}-{base_currency.upper()}"
 
         logger.info(
-            f"Batch fetching {len(set(dates))} unique prices for {symbol} "
-            f"from {start_date} to {end_date} in {base_currency}"
+            f"Batch fetching {len(set(dates))} unique prices for {ticker_key} "
+            f"from {start_date} to {end_date} from database"
         )
 
-        historical_prices = price_fetcher.fetch_historical_prices_sync(
-            ticker=yahoo_ticker,
-            start_date=start_date,
-            end_date=end_date
-        )
+        # Read prices from database
+        db = SyncSessionLocal()
+        try:
+            result = db.execute(
+                select(PriceHistory).where(
+                    (PriceHistory.ticker == ticker_key) &
+                    (PriceHistory.date >= start_date) &
+                    (PriceHistory.date <= end_date)
+                ).order_by(PriceHistory.date)
+            )
+            price_records = result.scalars().all()
 
-        if historical_prices:
-            # Build lookup map: date -> price
-            for price_data in historical_prices:
-                price_date = price_data.get('date')
-                close_price = price_data.get('close')
-                if price_date and close_price:
-                    price_cache[price_date] = close_price
+            if price_records:
+                # Build lookup map: date -> price
+                for price_record in price_records:
+                    price_cache[price_record.date] = price_record.close
 
-            logger.info(f"Successfully fetched {len(price_cache)} price records for {symbol}")
-        else:
-            logger.warning(f"No historical prices returned for {symbol} in date range {start_date} to {end_date}")
+                logger.info(f"Successfully fetched {len(price_cache)} price records for {ticker_key} from database")
+            else:
+                logger.warning(f"No historical prices found in database for {ticker_key} in date range {start_date} to {end_date}")
+
+        finally:
+            db.close()
 
     except Exception as e:
         logger.error(f"Error prefetching prices for {symbol}: {e}")
