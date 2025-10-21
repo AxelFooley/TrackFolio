@@ -106,6 +106,13 @@ async def search_assets(
     - Cached results: <100ms
     - No blocking of the event loop
     """
+    # Additional security validation - reject SQL injection patterns and dangerous sequences
+    if "--" in q or q.startswith("-") or q.endswith("-"):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid ticker format - consecutive hyphens and leading/trailing hyphens not allowed"
+        )
+
     # Create cache key from query
     cache_key = f"asset_search:{q.upper()}"
 
@@ -113,7 +120,8 @@ async def search_assets(
     cached_result = cache.get(cache_key)
     if cached_result is not None:
         logger.debug(f"Returning cached search results for {q}")
-        return cached_result
+        # Apply limit to cached results to ensure consistency
+        return cached_result[:10]
 
     try:
         search_results = []

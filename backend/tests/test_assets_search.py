@@ -240,9 +240,10 @@ class TestAssetSearchInputValidation:
         Test that unicode/special characters are rejected (422 validation error).
 
         Prevents unicode-based injection attacks.
+        Null bytes are invalid at HTTP protocol level, so we test with trademark symbol instead.
         """
-        response = client.get("/api/assets/search?q=AA\u0000PL")
-        assert response.status_code == 422, "Null byte should be rejected"
+        response = client.get("/api/assets/search?q=AA™PL")
+        assert response.status_code == 422, "Unicode special characters should be rejected"
 
     def test_numbers_only_valid(self, client):
         """Test that numeric-only queries are accepted (if they follow pattern)."""

@@ -576,7 +576,7 @@ class TestConcurrentCSVParsing:
         CSV parsing should be thread-safe and not cause data corruption.
         """
         csv_templates = [
-            """
+            f"""
 Intestazione
 Data Formato
 Numero record
@@ -586,10 +586,8 @@ Numero sequenziale estratto
 IBAN: IT60X0123456789
 Totale numero operazioni: 1
 Totale importo: 1500.00
-
-
-Data operazione	Data valuta	Tipo operazione	Ticker	Isin	Descrizione	Quantità	Importo euro	Importo Divisa	Divisa	Riferimento ordine
-20/10/2025	20/10/2025	ACQ	AAPL	US0378691033	Apple Inc.	10	1500.00	1500.00	EUR	ORD{i}
+Data operazione	Data valuta	Tipo operazione	Ticker	Isin	Protocollo	Descrizione	Quantità	Importo euro	Importo Divisa	Divisa	Riferimento ordine
+20-10-2025	20-10-2025	Acquisto	AAPL	US0378691033	PROTO{i}	Apple Inc.	10	1500.00	1500.00	EUR	ORD{i}
             """.strip()
             for i in range(5)
         ]
