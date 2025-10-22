@@ -548,7 +548,7 @@ class TestBlockchainIntegration:
             with patch('app.services.blockchain_deduplication.blockchain_deduplication.get_portfolio_transaction_hashes') as mock_hashes:
                 mock_hashes.return_value = set()
 
-              # Mock the price prefetching function to return price data
+                # Mock the price prefetching function to return price data
                 with patch('app.tasks.blockchain_sync._prefetch_prices_for_dates') as mock_prefetch_prices:
                     # Return a dict mapping date to price
                     mock_prefetch_prices.return_value = {
