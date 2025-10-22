@@ -403,29 +403,20 @@ async function handleRequest(
         }
       });
 
-      // Create response with appropriate body
-      let responseBody: ReadableStream | string | null = null;
-      const contentType = backendResponse.headers.get('content-type') || '';
+      // Create response with appropriate body - stream directly without modification
+      const responseBody = backendResponse.body;
+      const responseStatus = backendResponse.status;
+      const responseStatusText = backendResponse.statusText;
 
-      if (contentType.includes('application/json')) {
-        try {
-          const jsonData = await backendResponse.json();
-          responseBody = JSON.stringify(jsonData);
-          responseHeaders.set('Content-Type', 'application/json');
-        } catch (error) {
-          console.warn('[API Proxy] Failed to parse JSON response:', error);
-          // If JSON parsing fails, return text
-          responseBody = await backendResponse.text();
-          responseHeaders.set('Content-Type', 'text/plain');
-        }
-      } else {
-        // Stream non-JSON responses
-        responseBody = backendResponse.body;
+      // Copy content-length if available (this fixes the content length mismatch error)
+      const contentLength = backendResponse.headers.get('content-length');
+      if (contentLength) {
+        responseHeaders.set('Content-Length', contentLength);
       }
 
       const response = new NextResponse(responseBody, {
-        status: backendResponse.status,
-        statusText: backendResponse.statusText,
+        status: responseStatus,
+        statusText: responseStatusText,
         headers: responseHeaders,
       });
 

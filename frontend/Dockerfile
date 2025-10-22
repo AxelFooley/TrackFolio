@@ -11,8 +11,10 @@ COPY package.json package-lock.json ./
 RUN npm cache clean --force && \
     npm ci
 
-# Copy application code
+# Copy application code - move src to root for Next.js
 COPY . .
+# Move src to root since Next.js expects app/ at the root
+RUN mv src/* . && mv src/.[^.]* . 2>/dev/null || true && rmdir src
 
 # Build Next.js application with standalone output
 # Note: BACKEND_API_URL is a RUNTIME variable, not needed at build time
