@@ -46,7 +46,6 @@ class Position(Base):
     isin: Mapped[str | None] = mapped_column(
         String(12),
         nullable=True,
-        unique=True,
         index=True,
         comment="ISIN - unique identifier for the security (may be None for ticker-only positions)"
     )
