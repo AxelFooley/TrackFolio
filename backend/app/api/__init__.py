@@ -6,6 +6,7 @@ from app.api.prices import router as prices_router
 from app.api.benchmark import router as benchmark_router
 from app.api.crypto import router as crypto_router
 from app.api.blockchain import router as blockchain_router
+from app.api.news import router as news_router
 
 __all__ = [
     "transactions_router",
@@ -15,4 +16,5 @@ __all__ = [
     "benchmark_router",
     "crypto_router",
     "blockchain_router",
+    "news_router",
 ]

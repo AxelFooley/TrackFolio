@@ -5,6 +5,7 @@ Portfolio Tracker backend API.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.utils.news_cache import NewsRateLimitMiddleware
 import logging
 import time
 from typing import Dict, Any
@@ -17,7 +18,8 @@ from app.api import (
     prices_router,
     benchmark_router,
     crypto_router,
-    blockchain_router
+    blockchain_router,
+    news_router
 )
 
 # Configure logging
@@ -81,6 +83,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiting middleware for news API
+app.add_middleware(NewsRateLimitMiddleware)
+
 # Include routers
 app.include_router(transactions_router)
 app.include_router(portfolio_router)
@@ -89,6 +94,7 @@ app.include_router(prices_router)
 app.include_router(benchmark_router)
 app.include_router(crypto_router)
 app.include_router(blockchain_router)
+app.include_router(news_router)
 
 
 @app.get("/api/health")

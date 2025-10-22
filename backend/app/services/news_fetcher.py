@@ -29,6 +29,11 @@ from app.models.news import NewsArticle, NewsTickerSentiment, SentimentType, New
 logger = logging.getLogger(__name__)
 
 
+class RateLimitException(Exception):
+    """Exception raised when API rate limit is exceeded."""
+    pass
+
+
 class NewsQualityLevel(str, Enum):
     """News quality filtering levels."""
     HIGH = "high"  # relevance > 0.7, excludes neutral
@@ -183,8 +188,8 @@ class NewsRateLimiter:
 
         # Wait based on day limit
         if self.daily_calls >= settings.alpha_vantage_requests_per_day:
-            next_day = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-            wait_time = (next_day - datetime.now()).total_seconds()
+            # Use configured backoff hours instead of waiting until midnight
+            wait_time = settings.alpha_vantage_rate_limit_backoff_hours * 3600  # Convert hours to seconds
             return wait_time
 
         # Wait based on minute limit
@@ -450,11 +455,11 @@ class NewsFetcherService:
         return Decimal('0.5')
 
     def _make_api_request(self, ticker: str, limit: int = 50) -> List[Dict[str, Any]]:
-        """Make API request to Alpha Vantage with proper error handling."""
+        """Make API request to Alpha Vantage with proper error handling and rate limit detection."""
         if not settings.alpha_vantage_enabled or not settings.alpha_vantage_api_key:
             raise ValueError("Alpha Vantage API not configured")
 
-        # Check rate limits
+        # Check rate limits before making request
         if not self.rate_limiter.can_make_request():
             wait_time = self.rate_limiter.get_wait_time()
             logger.warning(f"Rate limit reached, waiting {wait_time:.1f} seconds")
@@ -494,11 +499,24 @@ class NewsFetcherService:
                 if 'Information' in data:
                     info_msg = data['Information']
                     logger.warning(f"Alpha Vantage API info: {info_msg}")
+
+                    # Enhanced rate limit detection
+                    if any(phrase in info_msg.lower() for phrase in [
+                        "rate limit", "api call frequency", "standard api rate limit",
+                        "25 requests per day", "premium plans", "daily limit"
+                    ]):
+                        # Mark rate limiter as hit
+                        self.rate_limiter.daily_calls = settings.alpha_vantage_requests_per_day
+                        logger.error(f"Alpha Vantage daily rate limit reached: {info_msg}")
+                        raise RateLimitException(f"Daily rate limit reached: {info_msg}")
+
                     if "API call frequency" in info_msg:
-                        # Hit rate limit, wait longer
+                        # Hit minute rate limit, wait longer
                         wait_time = self.rate_limiter.get_wait_time()
                         time.sleep(wait_time)
                         continue
+
+                    # Other informational messages
                     raise ValueError(f"Alpha Vantage API info: {info_msg}")
 
                 self.rate_limiter.record_request()
@@ -529,15 +547,17 @@ class NewsFetcherService:
         self,
         ticker: str,
         quality: NewsQualityLevel = NewsQualityLevel.HIGH,
-        limit: int = 50
+        limit: int = 50,
+        allow_fallback: bool = True
     ) -> NewsFetchResult:
         """
-        Fetch news for a single ticker with caching and filtering.
+        Fetch news for a single ticker with caching, filtering, and rate limit fallback.
 
         Args:
             ticker: Stock ticker symbol
             quality: Quality filtering level
             limit: Maximum number of articles to fetch
+            allow_fallback: Whether to allow fallback to cached/stale data when rate limited
 
         Returns:
             NewsFetchResult with processed articles and metadata
@@ -568,6 +588,16 @@ class NewsFetcherService:
                 return result
 
             self.rate_limiter.record_cache_miss()
+
+            # Check rate limits before attempting API call
+            if not self.rate_limiter.can_make_request():
+                logger.warning(f"Rate limit pre-check failed for {ticker}")
+                if settings.alpha_vantage_fallback_enabled:
+                    raise RateLimitException(f"Rate limit reached for {ticker}")
+                else:
+                    result.success = False
+                    result.error_message = f"Rate limit reached for {ticker} and fallback is disabled"
+                    return result
 
             # Fetch from API
             raw_articles = self._make_api_request(ticker, limit)
@@ -601,16 +631,122 @@ class NewsFetcherService:
 
             result.success = True
 
+        except RateLimitException as e:
+            logger.warning(f"Rate limit hit for {ticker}: {str(e)}")
+
+            if allow_fallback:
+                # Try to fallback to any cached data (even stale)
+                fallback_data = self._get_fallback_data(ticker, quality, limit)
+                if fallback_data:
+                    logger.info(f"Using fallback cached data for {ticker}")
+                    result.articles = fallback_data['articles']
+                    result.processed_articles = len(fallback_data['articles'])
+                    result.cached_articles = len(fallback_data['articles'])
+                    result.filter_applied = fallback_data.get('filter_applied', False)
+                    result.success = True
+                    result.error_message = f"Using cached data due to rate limit: {str(e)}"
+                else:
+                    # No cached data available, return a graceful error
+                    result.success = False
+                    result.error_message = f"Rate limit reached and no cached data available: {str(e)}"
+            else:
+                result.success = False
+                result.error_message = str(e)
+
         except Exception as e:
             logger.error(f"Error fetching news for {ticker}: {str(e)}")
-            result.error_message = str(e)
+
+            # For other errors, also try fallback if enabled
+            if allow_fallback:
+                fallback_data = self._get_fallback_data(ticker, quality, limit)
+                if fallback_data:
+                    logger.info(f"Using fallback cached data for {ticker} due to error: {str(e)}")
+                    result.articles = fallback_data['articles']
+                    result.processed_articles = len(fallback_data['articles'])
+                    result.cached_articles = len(fallback_data['articles'])
+                    result.filter_applied = fallback_data.get('filter_applied', False)
+                    result.success = True
+                    result.error_message = f"Using cached data due to API error: {str(e)}"
+                    return result
+
             result.success = False
+            result.error_message = str(e)
 
         # Calculate processing time
         processing_time = time.time() - start_time
         logger.debug(f"News fetch for {ticker} took {processing_time:.2f} seconds")
 
         return result
+
+    def _get_fallback_data(
+        self,
+        ticker: str,
+        quality: NewsQualityLevel = NewsQualityLevel.HIGH,
+        limit: int = 50
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get fallback cached data when API is rate limited.
+
+        Tries multiple cache key patterns to find any available cached news data.
+
+        Args:
+            ticker: Stock ticker symbol
+            quality: Quality filtering level
+            limit: Maximum number of articles to fetch
+
+        Returns:
+            Cached data dictionary or None if no cached data available
+        """
+        fallback_patterns = [
+            # Exact match with different quality levels
+            self._generate_cache_key(ticker, quality.value, limit),
+            self._generate_cache_key(ticker, NewsQualityLevel.HIGH.value, limit),
+            self._generate_cache_key(ticker, NewsQualityLevel.MEDIUM.value, limit),
+            self._generate_cache_key(ticker, NewsQualityLevel.LOW.value, limit),
+
+            # Different limits
+            self._generate_cache_key(ticker, quality.value, 50),
+            self._generate_cache_key(ticker, quality.value, 100),
+            self._generate_cache_key(ticker, NewsQualityLevel.HIGH.value, 50),
+            self._generate_cache_key(ticker, NewsQualityLevel.MEDIUM.value, 50),
+
+            # Summary cache
+            f"news:summary:{ticker}:7",
+            f"news:summary:{ticker}:30",
+        ]
+
+        for cache_key in fallback_patterns:
+            cached_data = self.cache_service.get(cache_key)
+            if cached_data:
+                logger.debug(f"Found fallback data with key: {cache_key}")
+
+                # For summary data, extract articles if available
+                if 'summary_generated_at' in cached_data:
+                    articles = cached_data.get('recent_articles', [])
+                    if articles:
+                        return {
+                            'articles': articles[:limit],
+                            'filter_applied': False,
+                            'fallback_used': True,
+                            'fallback_source': 'summary',
+                            'cache_key': cache_key
+                        }
+
+                # For regular cache data
+                if 'articles' in cached_data and cached_data['articles']:
+                    articles = cached_data['articles'][:limit]
+                    return {
+                        'articles': articles,
+                        'filter_applied': cached_data.get('filter_applied', False),
+                        'fallback_used': True,
+                        'fallback_source': 'cache',
+                        'cache_key': cache_key,
+                        'original_quality': cached_data.get('quality', quality.value),
+                        'original_timestamp': cached_data.get('timestamp')
+                    }
+
+        logger.info(f"No fallback cached data found for {ticker}")
+        return None
 
     def fetch_news_batch(
         self,

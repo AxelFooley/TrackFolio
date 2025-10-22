@@ -209,6 +209,7 @@ async def get_ticker_news(
         Success response with news articles for the specified ticker
     """
     try:
+
         # Validate ticker format
         if not ticker or len(ticker.strip()) == 0:
             raise HTTPException(
@@ -221,22 +222,55 @@ async def get_ticker_news(
 
         logger.info(f"Fetching news for ticker: {ticker}, limit={limit}, quality={quality_level.value}")
 
-        # Fetch news for the specific ticker
+        # Fetch news for the specific ticker with fallback enabled
         result = service._fetch_single_ticker(
             ticker=ticker,
             quality=quality_level,
-            limit=limit
+            limit=limit,
+            allow_fallback=True
         )
 
         if not result.success:
-            raise HTTPException(
-                status_code=500,
-                detail=_create_error_response(result.error_message or "Failed to fetch news for ticker", "TICKER_NEWS_FAILED")
-            )
+            # Check if this is a rate limit issue
+            if "rate limit" in result.error_message.lower():
+                # Return a more user-friendly error for rate limits
+                error_response = _create_error_response(
+                    result.error_message,
+                    "RATE_LIMIT_EXCEEDED"
+                )
+                # Add rate limit info to the response
+                error_response["rate_limit_info"] = {
+                    "daily_limit_reached": True,
+                    "message": "Alpha Vantage daily API limit reached. Showing cached news if available.",
+                    "retry_after_hours": service.rate_limiter.get_wait_time() / 3600 if service.rate_limiter.get_wait_time() > 0 else 24
+                }
+                raise HTTPException(
+                    status_code=429,
+                    detail=error_response
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=_create_error_response(result.error_message or "Failed to fetch news for ticker", "TICKER_NEWS_FAILED")
+                )
+
+        # Determine success message based on whether fallback was used
+        success_message = f"Successfully fetched {len(result.articles)} articles for {ticker}"
+        if result.error_message and "cached data" in result.error_message.lower():
+            success_message += f" (using cached data due to rate limits)"
+
+        # Add metadata about data source
+        response_data = result.__dict__.copy()
+        if result.error_message and "cached data" in result.error_message.lower():
+            response_data["data_source"] = "cache_fallback"
+            response_data["rate_limited"] = True
+        else:
+            response_data["data_source"] = "live_api"
+            response_data["rate_limited"] = False
 
         return _create_success_response(
-            data=result,
-            message=f"Successfully fetched {len(result.articles)} articles for {ticker}",
+            data=response_data,
+            message=success_message,
             status_code=200
         )
 

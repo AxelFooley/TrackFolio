@@ -26,7 +26,8 @@ celery_app = Celery(
         "app.tasks.update_crypto_prices",
         "app.tasks.crypto_metric_calculation",
         "app.tasks.crypto_snapshots",
-        "app.tasks.blockchain_sync"
+        "app.tasks.blockchain_sync",
+        "app.tasks.news_updates"
     ]
 )
 
@@ -109,6 +110,33 @@ celery_app.conf.update(
             "schedule": crontab(minute="*/30"),  # Every 30 minutes
             "options": {
                 "expires": 1800,  # Task expires after 30 minutes
+            }
+        },
+
+        # News update tasks - fetch news for top movers
+        "fetch-news-for-movers": {
+            "task": "app.tasks.news_updates.fetch_news_for_todays_movers",
+            "schedule": crontab(minute="*/15"),  # Every 15 minutes during market hours
+            "options": {
+                "expires": 900,  # Task expires after 15 minutes
+            }
+        },
+
+        # News cache refresh - daily at market close
+        "refresh-news-cache": {
+            "task": "app.tasks.news_updates.refresh_news_cache",
+            "schedule": crontab(hour=22, minute=30),  # 22:30 CET (4:30 PM ET)
+            "options": {
+                "expires": 3600,  # Task expires after 1 hour
+            }
+        },
+
+        # News cleanup - daily early morning
+        "cleanup-old-news": {
+            "task": "app.tasks.news_updates.cleanup_old_news_articles",
+            "schedule": crontab(hour=2, minute=0),  # 02:00 CET
+            "options": {
+                "expires": 3600,  # Task expires after 1 hour
             }
         },
     },

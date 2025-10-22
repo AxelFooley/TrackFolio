@@ -3,7 +3,7 @@ Application configuration from environment variables.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, PositiveInt, PositiveFloat, NonNegativeInt, HttpUrl
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -116,6 +116,83 @@ class Settings(BaseSettings):
         86400 * 7,
         env="BLOCKCHAIN_DEDUPLICATION_CACHE_TTL",
         description="Cache TTL for blockchain transaction deduplication (seconds)"
+    )
+
+    # News API settings
+    news_rate_limit_requests_per_minute: int = Field(
+        60,
+        env="NEWS_RATE_LIMIT_REQUESTS_PER_MINUTE",
+        description="Rate limit for news API requests per minute"
+    )
+    news_cache_ttl_seconds: int = Field(
+        600,  # 10 minutes
+        env="NEWS_CACHE_TTL_SECONDS",
+        description="Cache TTL for news API responses (seconds)"
+    )
+    news_sentiment_cache_ttl_seconds: int = Field(
+        1800,  # 30 minutes
+        env="NEWS_SENTIMENT_CACHE_TTL_SECONDS",
+        description="Cache TTL for news sentiment analysis (seconds)"
+    )
+    news_movers_cache_ttl_seconds: int = Field(
+        300,  # 5 minutes
+        env="NEWS_MOVERS_CACHE_TTL_SECONDS",
+        description="Cache TTL for news movers endpoint (seconds)"
+    )
+    alpha_vantage_enabled: bool = Field(
+        True,
+        env="ALPHA_VANTAGE_ENABLED",
+        description="Enable Alpha Vantage news API integration"
+    )
+    alpha_vantage_api_key: Optional[str] = Field(
+        None,
+        env="ALPHA_VANTAGE_API_KEY",
+        description="Alpha Vantage API key for news fetching"
+    )
+    alpha_vantage_base_url: str = Field(
+        "https://www.alphavantage.co/query",
+        env="ALPHA_VANTAGE_BASE_URL",
+        description="Alpha Vantage API base URL"
+    )
+    alpha_vantage_timeout: PositiveInt = Field(
+        30,
+        env="ALPHA_VANTAGE_TIMEOUT",
+        description="Timeout for Alpha Vantage API requests in seconds"
+    )
+    alpha_vantage_request_delay: PositiveFloat = Field(
+        1.0,
+        env="ALPHA_VANTAGE_REQUEST_DELAY",
+        description="Delay between Alpha Vantage API requests in seconds"
+    )
+    alpha_vantage_requests_per_minute: PositiveInt = Field(
+        5,
+        env="ALPHA_VANTAGE_REQUESTS_PER_MINUTE",
+        description="Alpha Vantage API requests per minute limit"
+    )
+    alpha_vantage_requests_per_day: PositiveInt = Field(
+        25,
+        env="ALPHA_VANTAGE_REQUESTS_PER_DAY",
+        description="Alpha Vantage API requests per day limit"
+    )
+    alpha_vantage_fallback_enabled: bool = Field(
+        True,
+        env="ALPHA_VANTAGE_FALLBACK_ENABLED",
+        description="Enable fallback to cached data when rate limited"
+    )
+    alpha_vantage_cache_fallback_ttl: int = Field(
+        86400,  # 24 hours
+        env="ALPHA_VANTAGE_CACHE_FALLBACK_TTL",
+        description="Extended TTL for cached data used as fallback during rate limits"
+    )
+    alpha_vantage_stale_data_threshold_hours: int = Field(
+        48,  # 2 days
+        env="ALPHA_VANTAGE_STALE_DATA_THRESHOLD_HOURS",
+        description="Maximum age of cached data to use as fallback (hours)"
+    )
+    alpha_vantage_rate_limit_backoff_hours: float = Field(
+        24.0,
+        env="ALPHA_VANTAGE_RATE_LIMIT_BACKOFF_HOURS",
+        description="Hours to wait before retrying after daily rate limit is hit"
     )
 
 

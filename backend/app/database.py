@@ -6,6 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 import os
+import asyncio
+import redis.asyncio as aioredis
 
 
 # Database URL from environment variable
@@ -113,3 +115,36 @@ async def drop_tables():
     """Drop all database tables. DANGER: Use only in testing."""
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+# Redis connection setup
+_redis_client = None
+
+async def get_redis():
+    """
+    Get Redis client connection.
+
+    Returns:
+        aioredis.Redis: Redis client instance
+    """
+    global _redis_client
+    if _redis_client is None:
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        _redis_client = aioredis.from_url(redis_url, decode_responses=True)
+        # Test connection
+        try:
+            await _redis_client.ping()
+            print("Redis connection established")
+        except Exception as e:
+            print(f"Redis connection failed: {e}")
+            _redis_client = None
+            raise
+    return _redis_client
+
+
+async def close_redis():
+    """Close Redis connection."""
+    global _redis_client
+    if _redis_client:
+        await _redis_client.close()
+        _redis_client = None

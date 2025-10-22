@@ -55,6 +55,7 @@ services:
       RUN_MIGRATIONS: "true"
       MIGRATION_TIMEOUT: "300"
       AUTO_ROLLBACK_ON_FAILURE: "false"
+      ALPHA_VANTAGE_API_KEY: "57LYM6FMG5QUTTSF"
     depends_on:
       postgres:
         condition: service_healthy

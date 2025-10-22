@@ -185,7 +185,8 @@ export function NewsCards({
   }
 
   // No data state
-  if (!newsData || newsData.articles.length === 0) {
+  const articles = newsData?.articles?.slice(0, limit) || [];
+  if (!newsData || articles.length === 0) {
     return (
       <div className={`text-center py-8 ${className}`}>
         <h3 className="text-lg font-semibold text-gray-600 mb-2">No News Available</h3>
@@ -196,15 +197,13 @@ export function NewsCards({
     );
   }
 
-  const articles = newsData?.articles?.slice(0, limit) || [];
-
   return (
     <div className={`space-y-4 ${className}`}>
       {showTitle && (
         <div className="mb-4">
           <h2 className="text-xl font-semibold text-gray-900">Latest News</h2>
           <p className="text-sm text-gray-600 mt-1">
-            {newsData?.total || 0} articles found
+            {articles.length} articles found
           </p>
         </div>
       )}
@@ -314,14 +313,14 @@ export function NewsCards({
         })}
       </div>
 
-      {articles.length < newsData.total && (
+      {articles.length < 20 && (
         <div className="text-center">
           <Button
             variant="outline"
             size="sm"
             onClick={() => router.push('/news')}
           >
-            View All {newsData.total} Articles
+            View All Articles
           </Button>
         </div>
       )}

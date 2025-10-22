@@ -9,6 +9,7 @@ from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.cached_metrics import CachedMetrics
 from app.models.stock_split import StockSplit
 from app.models.system_state import SystemState
+from app.models.news import NewsArticle, NewsTickerSentiment, SentimentType, NewsSource
 from app.models.crypto import (
     CryptoPortfolio,
     CryptoTransaction,
@@ -27,6 +28,10 @@ __all__ = [
     "CachedMetrics",
     "StockSplit",
     "SystemState",
+    "NewsArticle",
+    "NewsTickerSentiment",
+    "SentimentType",
+    "NewsSource",
     "CryptoPortfolio",
     "CryptoTransaction",
     "CryptoTransactionType",

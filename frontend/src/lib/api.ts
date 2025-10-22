@@ -572,30 +572,41 @@ export async function getNews(filters: NewsFilters = {}): Promise<NewsResponse> 
       params: {
         limit,
         min_change_percent: 2.0, // Default minimum change percentage
-        quality: 'high'
+        quality: 'medium'
       },
     });
 
     // Transform movers response to match NewsResponse format
+    const allArticles = [];
+    for (const mover of moversResponse.movers || []) {
+      if (mover.data && mover.data.articles) {
+        // Transform articles from each mover's data
+        for (const article of mover.data.articles) {
+          allArticles.push({
+            id: article.title || `news-${Date.now()}`,
+            title: article.title || 'Untitled Article',
+            summary: article.summary || 'No summary available',
+            content: article.summary || 'No content available',
+            url: article.url || '#',
+            source: article.source || article.source_name || 'Unknown',
+            publish_date: article.time_published || new Date().toISOString(),
+            sentiment: article.overall_sentiment_label || 'neutral',
+            sentiment_score: parseFloat(article.overall_sentiment_score || '0.5'),
+            relevance_score: article.relevance_score || 0.5,
+            tickers: (article.ticker_sentiment || []).map((ts: any) => ts.ticker).filter(Boolean),
+            categories: (article.topics || []).map((t: any) => t.topic || 'finance').filter(Boolean),
+            language: language || 'en'
+          });
+        }
+      }
+    }
+
     return {
-      articles: moversResponse.movers?.map((mover: any) => ({
-        id: mover.ticker || `news-${Date.now()}`,
-        title: `${mover.ticker || 'Unknown'} - ${mover.title || mover.summary || 'Latest news'}`,
-        summary: mover.summary || mover.description || 'No summary available',
-        url: mover.url || '#',
-        source: mover.source || 'Unknown',
-        publish_date: mover.publish_date || new Date().toISOString(),
-        sentiment: mover.sentiment || 'neutral',
-        sentiment_score: mover.sentiment_score || 0.5,
-        relevance_score: mover.relevance_score || 0.5,
-        tickers: [mover.ticker].filter(Boolean),
-        categories: ['finance'],
-        language: language || 'en'
-      })) || [],
-      total: moversResponse.total_movers || 0,
+      articles: allArticles,
+      total: allArticles.length,
       page: 1,
-      has_next: false,
       per_page: limit,
+      has_next: allArticles.length >= limit,
       has_prev: false
     };
   }
@@ -626,27 +637,39 @@ export async function getNews(filters: NewsFilters = {}): Promise<NewsResponse> 
     },
   });
 
-  return {
-    articles: moversResponse.movers?.map((mover: any) => ({
-      id: mover.ticker || `news-${Date.now()}`,
-      title: `${mover.ticker || 'Unknown'} - ${mover.title || mover.summary || 'Latest news'}`,
-      summary: mover.summary || mover.description || 'No summary available',
-      url: mover.url || '#',
-      source: mover.source || 'Unknown',
-      publish_date: mover.publish_date || new Date().toISOString(),
-      sentiment: mover.sentiment || 'neutral',
-      sentiment_score: mover.sentiment_score || 0.5,
-      relevance_score: mover.relevance_score || 0.5,
-      tickers: [mover.ticker].filter(Boolean),
-      categories: ['finance'],
-      language: language || 'en'
-    })) || [],
-    total: moversResponse.total_movers || 0,
-    page: 1,
-    has_next: false,
-    per_page: limit,
-    has_prev: false
-  };
+  // Transform movers response to match NewsResponse format (same logic as above)
+    const allArticles = [];
+    for (const mover of moversResponse.movers || []) {
+      if (mover.data && mover.data.articles) {
+        // Transform articles from each mover's data
+        for (const article of mover.data.articles) {
+          allArticles.push({
+            id: article.title || `news-${Date.now()}`,
+            title: article.title || 'Untitled Article',
+            summary: article.summary || 'No summary available',
+            content: article.summary || 'No content available',
+            url: article.url || '#',
+            source: article.source || article.source_name || 'Unknown',
+            publish_date: article.time_published || new Date().toISOString(),
+            sentiment: article.overall_sentiment_label || 'neutral',
+            sentiment_score: parseFloat(article.overall_sentiment_score || '0.5'),
+            relevance_score: article.relevance_score || 0.5,
+            tickers: (article.ticker_sentiment || []).map((ts: any) => ts.ticker).filter(Boolean),
+            categories: (article.topics || []).map((t: any) => t.topic || 'finance').filter(Boolean),
+            language: language || 'en'
+          });
+        }
+      }
+    }
+
+    return {
+      articles: allArticles,
+      total: allArticles.length,
+      page: 1,
+      per_page: limit,
+      has_next: allArticles.length >= limit,
+      has_prev: false
+    };
 }
 
 // Get news article by ID

@@ -228,3 +228,64 @@ export function getWalletSyncStatusInfo(status: string | null | undefined) {
       };
   }
 }
+
+// News utility functions
+export function getSentimentInfo(sentiment: 'positive' | 'negative' | 'neutral') {
+  switch (sentiment) {
+    case 'positive':
+      return {
+        label: 'Positive',
+        color: 'text-green-600',
+        bgColor: 'bg-green-100',
+        borderColor: 'border-green-200',
+        icon: '▲'
+      };
+    case 'negative':
+      return {
+        label: 'Negative',
+        color: 'text-red-600',
+        bgColor: 'bg-red-100',
+        borderColor: 'border-red-200',
+        icon: '▼'
+      };
+    case 'neutral':
+      return {
+        label: 'Neutral',
+        color: 'text-gray-600',
+        bgColor: 'bg-gray-100',
+        borderColor: 'border-gray-200',
+        icon: '●'
+      };
+  }
+}
+
+export function formatRelevanceScore(score: number): string {
+  if (score >= 0.8) return 'High';
+  if (score >= 0.5) return 'Medium';
+  return 'Low';
+}
+
+export function getRelevanceColor(score: number): string {
+  if (score >= 0.8) return 'text-green-600';
+  if (score >= 0.5) return 'text-yellow-600';
+  return 'text-gray-600';
+}
+
+export function formatRelativeDate(date: string): string {
+  const now = new Date();
+  const publishDate = new Date(date);
+  const diffMs = now.getTime() - publishDate.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffHours < 1) return 'Just now';
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+  return `${Math.floor(diffDays / 30)}mo ago`;
+}
+
+export function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength).trim() + '...';
+}
