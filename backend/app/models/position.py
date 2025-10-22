@@ -23,6 +23,13 @@ class Position(Base):
 
     Based on PRD Section 6 - Database Schema.
     Aggregates transaction data to show current position state.
+
+    Uniqueness Model:
+    - Each ISIN should have at most one position (via UNIQUE constraint on isin)
+    - Ticker-only positions (isin IS NULL) must have unique ticker values
+      (enforced via partial unique index: idx_position_ticker_only on current_ticker WHERE isin IS NULL)
+    - Multiple positions can have the same ticker if they have different ISINs
+      (e.g., different share classes of the same company)
     """
     __tablename__ = "positions"
 
@@ -36,12 +43,12 @@ class Position(Base):
         index=True,
         comment="Current ticker symbol (may change after splits)"
     )
-    isin: Mapped[str] = mapped_column(
+    isin: Mapped[str | None] = mapped_column(
         String(12),
-        nullable=False,
+        nullable=True,
         unique=True,
         index=True,
-        comment="ISIN - unique identifier for the security"
+        comment="ISIN - unique identifier for the security (may be None for ticker-only positions)"
     )
     description: Mapped[str] = mapped_column(String(500), nullable=False)
 

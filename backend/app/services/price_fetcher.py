@@ -210,9 +210,11 @@ class PriceFetcher:
 
     def fetch_latest_price(self, ticker: str, isin: Optional[str] = None) -> Optional[Dict]:
         """
-        Synchronous wrapper to fetch latest price (for Celery tasks).
+        Synchronous wrapper to fetch latest price (for Celery tasks and background tasks).
 
         If ISIN is provided, resolves to correct Yahoo Finance ticker.
+
+        Runs in a separate thread to avoid event loop conflicts when called from async contexts.
 
         Args:
             ticker: Asset ticker symbol (broker format)
@@ -228,8 +230,8 @@ class PriceFetcher:
             resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
             logger.info(f"Fetching price for {ticker} (resolved: {resolved_ticker})")
 
-            # Create a new event loop in a thread to run async function
-            def run_async_in_thread():
+            # Run in a separate thread to avoid event loop conflicts
+            def run_async_in_new_loop():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
@@ -237,7 +239,11 @@ class PriceFetcher:
                 finally:
                     loop.close()
 
-            return run_async_in_thread()
+            # Use ThreadPoolExecutor to run in a separate thread
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_async_in_new_loop)
+                return future.result()
+
         except Exception as e:
             logger.error(f"Error fetching latest price for {ticker}: {str(e)}")
             return None
@@ -250,9 +256,11 @@ class PriceFetcher:
         end_date: date = None
     ) -> List[Dict]:
         """
-        Synchronous wrapper to fetch historical prices (for Celery tasks).
+        Synchronous wrapper to fetch historical prices (for Celery tasks and background tasks).
 
         If ISIN is provided, resolves to correct Yahoo Finance ticker.
+
+        Runs in a separate thread to avoid event loop conflicts when called from async contexts.
 
         Args:
             ticker: Asset ticker symbol (broker format)
@@ -270,8 +278,8 @@ class PriceFetcher:
             resolved_ticker = TickerMapper.resolve_ticker(ticker, isin) if isin else ticker
             logger.info(f"Fetching historical prices for {ticker} (resolved: {resolved_ticker})")
 
-            # Create a new event loop in a thread to run async function
-            def run_async_in_thread():
+            # Run in a separate thread to avoid event loop conflicts
+            def run_async_in_new_loop():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
@@ -281,7 +289,11 @@ class PriceFetcher:
                 finally:
                     loop.close()
 
-            return run_async_in_thread()
+            # Use ThreadPoolExecutor to run in a separate thread
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_async_in_new_loop)
+                return future.result()
+
         except Exception as e:
             logger.error(f"Error fetching historical prices for {ticker}: {str(e)}")
             return []

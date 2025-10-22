@@ -137,12 +137,13 @@ All configuration is managed through `docker-compose.yml` environment variables:
 - `DATABASE_URL`: PostgreSQL connection (default: `postgresql://portfolio:portfolio@postgres:5432/portfolio_db`)
 - `REDIS_URL`: Redis connection (default: `redis://redis:6379/0`)
 
+**Frontend Runtime Variables:**
+- `BACKEND_API_URL`: Runtime backend URL for Next.js API routes (default: `http://backend:8000`)
+- `NEXT_PUBLIC_API_URL`: Public API URL for client-side calls (default: `http://localhost:8000/api`)
+
 **External APIs:**
 - `COINGECKO_API_KEY`: Optional CoinGecko API key for higher cryptocurrency rate limits
   - Get free key from: https://www.coingecko.com/en/api
-
-**Frontend:**
-- `NEXT_PUBLIC_API_URL`: API base URL (default: `http://localhost:8000/api`)
 
 **Blockchain (Bitcoin Wallet Sync):**
 - `BLOCKCHAIN_SYNC_ENABLED`: Enable/disable wallet sync (default: true)
@@ -155,6 +156,97 @@ All configuration is managed through `docker-compose.yml` environment variables:
    ```bash
    docker compose up --build
    ```
+
+---
+
+## Production Deployment
+
+### Production Docker Compose
+
+For production deployments, use the provided production configuration:
+
+```bash
+# 1. Copy production environment template
+cp .env.prod.example .env
+
+# 2. Edit environment variables
+nano .env  # Set secure passwords and domains
+
+# 3. Start production services
+docker-compose -f docker-compose.prod.yml up --build -d
+
+# 4. Run database migrations
+docker-compose -f docker-compose.prod.yml exec backend aleambic upgrade head
+```
+
+### Production Features
+
+- **Health Checks**: All services include health monitoring
+- **Resource Limits**: Memory and CPU constraints for stability
+- **Persistent Volumes**: Separate production data volumes
+- **Security**: Stronger defaults and isolation
+- **SSL Ready**: Compatible with Nginx reverse proxy
+
+### Multi-Host Deployment
+
+For separating frontend and backend across different hosts:
+
+```bash
+# Backend host
+BACKEND_API_URL=https://api.yourdomain.com \
+NEXT_PUBLIC_API_URL=https://api.yourdomain.com/api \
+docker-compose -f docker-compose.prod.yml up -d postgres redis backend celery-worker celery-beat
+
+# Frontend host
+BACKEND_API_URL=https://api.yourdomain.com \
+NEXT_PUBLIC_API_URL=https://api.yourdomain.com/api \
+docker-compose -f docker-compose.prod.yml up -d frontend
+```
+
+### Nginx Reverse Proxy
+
+Production setup with SSL termination:
+
+```bash
+# 1. Install SSL certificates
+mkdir -p nginx/ssl
+# Place cert.pem and key.pem in nginx/ssl/
+
+# 2. Update nginx configuration
+nano nginx/nginx.prod.conf  # Update domain names
+
+# 3. Start with Nginx
+docker-compose -f docker-compose.prod.yml -f docker-compose.nginx.yml up -d
+```
+
+### Runtime Environment Variables
+
+The frontend now supports **runtime environment variables** for flexible deployment:
+
+- **`BACKEND_API_URL`**: Used by Next.js API routes for backend proxying
+- **`NEXT_PUBLIC_API_URL`**: Used by client-side browser calls
+
+This allows you to:
+- Build once, deploy to multiple environments
+- Separate frontend/backend hosts easily
+- Use different backend URLs per environment
+
+**Example Environments:**
+```bash
+# Local development
+BACKEND_API_URL=http://backend:8000
+NEXT_PUBLIC_API_URL=http://localhost:8000/api
+
+# Production single host
+BACKEND_API_URL=http://backend:8000
+NEXT_PUBLIC_API_URL=https://api.yourdomain.com/api
+
+# Production separate hosts
+BACKEND_API_URL=https://api.yourdomain.com
+NEXT_PUBLIC_API_URL=https://api.yourdomain.com/api
+```
+
+For complete deployment guide, see [DEPLOYMENT.md](./DEPLOYMENT.md)
 
 ---
 

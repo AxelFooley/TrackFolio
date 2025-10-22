@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -8,6 +8,7 @@ import { useWalletSyncStatus, useSyncWallet } from '@/hooks/useCrypto';
 import { formatDateTime, getWalletSyncStatusInfo } from '@/lib/utils';
 import { Wallet, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface WalletSyncProps {
   portfolioId: number;
@@ -27,6 +28,43 @@ export function WalletSync({ portfolioId, walletAddress }: WalletSyncProps) {
   const { data: syncStatus, isLoading: statusLoading } = useWalletSyncStatus(portfolioId);
   const syncWalletMutation = useSyncWallet();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [previousSyncStatus, setPreviousSyncStatus] = useState<string | null>(null);
+
+  // Detect sync completion and show appropriate toast + invalidate queries
+  useEffect(() => {
+    if (syncStatus && previousSyncStatus) {
+      // Sync just completed (was syncing, now synced)
+      if (previousSyncStatus === 'syncing' && syncStatus.status === 'synced') {
+        const transactionCount = syncStatus.transaction_count || 0;
+        toast({
+          title: 'Wallet Sync Complete!',
+          description: `Successfully synced ${transactionCount} transactions. Your portfolio data has been updated.`,
+          duration: 5000,
+        });
+
+        // Invalidate relevant queries to refresh the UI with new data
+        queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId] });
+        queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'holdings'] });
+        queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['crypto', 'portfolios', portfolioId, 'metrics'] });
+      }
+      // Sync failed
+      else if (previousSyncStatus === 'syncing' && syncStatus.status === 'error') {
+        toast({
+          title: 'Wallet Sync Failed',
+          description: syncStatus.error_message || 'Failed to sync wallet transactions. Please try again.',
+          variant: 'destructive',
+          duration: 5000,
+        });
+      }
+    }
+
+    // Update previous status for next comparison
+    if (syncStatus?.status) {
+      setPreviousSyncStatus(syncStatus.status);
+    }
+  }, [syncStatus, previousSyncStatus, toast, queryClient, portfolioId]);
 
   const handleSync = async () => {
     try {

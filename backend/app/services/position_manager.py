@@ -2,6 +2,7 @@
 Position manager service - Calculates and updates position data.
 
 Recalculates positions based on transactions as per PRD Section 5.2.
+Implements database-level locking to prevent race conditions during position updates.
 """
 from datetime import datetime
 from decimal import Decimal
@@ -21,30 +22,62 @@ class PositionManager:
     """Manage position calculations and updates."""
 
     @staticmethod
-    async def recalculate_position(db: AsyncSession, isin: str) -> Optional[Position]:
+    async def recalculate_position(db: AsyncSession, isin: str | None, ticker: str | None = None) -> Optional[Position]:
         """
-        Recalculate position for a specific ISIN based on all transactions.
+        Recalculate position for a specific ISIN or ticker based on all transactions.
+
+        This method uses database-level row locking (with_for_update) to prevent
+        race conditions when multiple concurrent requests attempt to update the same position.
+        All position updates happen atomically within a single transaction.
 
         Args:
             db: Database session
-            isin: Asset ISIN (unique identifier)
+            isin: Asset ISIN (unique identifier) - can be None
+            ticker: Asset ticker symbol - used when ISIN is None
 
         Returns:
             Updated Position object or None if no position exists
+
+        Raises:
+            ValueError: If neither ISIN nor ticker is provided
         """
-        # Get all transactions for this ISIN (not ticker!)
-        result = await db.execute(
-            select(Transaction)
-            .where(Transaction.isin == isin)
-            .order_by(Transaction.operation_date)
-        )
+        # Validate that at least one identifier is provided
+        if not isin and not ticker:
+            raise ValueError("At least one identifier (ISIN or ticker) must be provided")
+
+        # Get all transactions for this ISIN/ticker
+        if isin:
+            # Query by ISIN if provided
+            result = await db.execute(
+                select(Transaction)
+                .where(Transaction.isin == isin)
+                .order_by(Transaction.operation_date)
+            )
+        else:
+            # Query by ticker if ISIN is None
+            result = await db.execute(
+                select(Transaction)
+                .where(Transaction.ticker == ticker)
+                .order_by(Transaction.operation_date)
+            )
+
         transactions = result.scalars().all()
 
         if not transactions:
             # No transactions, delete position if it exists
-            result = await db.execute(
-                select(Position).where(Position.isin == isin)
-            )
+            # Use row-level locking to prevent concurrent deletes
+            if isin:
+                result = await db.execute(
+                    select(Position)
+                    .where(Position.isin == isin)
+                    .with_for_update()  # Acquire exclusive lock before deleting
+                )
+            else:
+                result = await db.execute(
+                    select(Position)
+                    .where(Position.current_ticker == ticker)
+                    .with_for_update()  # Acquire exclusive lock before deleting
+                )
             position = result.scalar_one_or_none()
             if position:
                 await db.delete(position)
@@ -69,9 +102,14 @@ class PositionManager:
 
         # If quantity is zero or negative, position is closed
         if quantity <= 0:
-            result = await db.execute(
-                select(Position).where(Position.isin == isin)
-            )
+            if isin:
+                result = await db.execute(
+                    select(Position).where(Position.isin == isin)
+                )
+            else:
+                result = await db.execute(
+                    select(Position).where(Position.current_ticker == ticker)
+                )
             position = result.scalar_one_or_none()
             if position:
                 await db.delete(position)
@@ -84,21 +122,56 @@ class PositionManager:
         # Get current ticker (most recent transaction's ticker)
         current_ticker = transactions[-1].ticker
 
-        # Get or create position BY ISIN
-        result = await db.execute(
-            select(Position).where(Position.isin == isin)
-        )
-        position = result.scalar_one_or_none()
+        # Get or create position - try by ISIN first, then by ticker
+        # Use row-level locking to prevent concurrent updates to the same position
+        position = None
+        if isin:
+            result = await db.execute(
+                select(Position)
+                .where(Position.isin == isin)
+                .with_for_update()  # Acquire exclusive lock if position exists
+            )
+            position = result.scalar_one_or_none()
+
+        # If ISIN is None or not found, try to find by ticker
+        if position is None and ticker:
+            result = await db.execute(
+                select(Position)
+                .where(Position.current_ticker == ticker)
+                .with_for_update()  # Acquire exclusive lock if position exists
+            )
+            position = result.scalar_one_or_none()
 
         # Get asset metadata from first transaction
         first_txn = transactions[0]
         asset_type = PositionManager._determine_asset_type(current_ticker)
 
         if position is None:
+            # Validate ticker uniqueness for ticker-only positions
+            if not isin and ticker:
+                # For ticker-only positions, check if another position already exists with this ticker
+                # Use row-level locking to prevent race conditions during uniqueness check
+                result = await db.execute(
+                    select(Position)
+                    .where(
+                        and_(
+                            Position.current_ticker == ticker,
+                            Position.isin.is_(None)
+                        )
+                    )
+                    .with_for_update()  # Lock all matching rows during uniqueness check
+                )
+                existing_ticker_only = result.scalar_one_or_none()
+                if existing_ticker_only:
+                    raise ValueError(
+                        f"Duplicate ticker-only position: {ticker} already has a position without ISIN. "
+                        f"Each ticker can only have one position when ISIN is NULL."
+                    )
+
             # Create new position
             position = Position(
-                isin=isin,  # ISIN is primary unique key now
-                current_ticker=current_ticker,  # Changed from ticker
+                isin=isin,  # ISIN can be None
+                current_ticker=current_ticker,
                 description=first_txn.description,
                 asset_type=asset_type,
                 quantity=quantity,
@@ -110,6 +183,7 @@ class PositionManager:
         else:
             # Update existing position
             position.current_ticker = current_ticker  # Update to latest ticker
+            position.isin = isin  # Update ISIN if we now have one
             position.quantity = quantity
             position.average_cost = average_cost
             position.cost_basis = cost_basis
@@ -131,21 +205,47 @@ class PositionManager:
         """
         Recalculate all positions based on current transactions.
 
+        Handles both ISIN-based and ticker-based transactions (when ISIN is NULL).
+
+        Position Uniqueness:
+        - Positions are identified by ISIN if available (one position per ISIN)
+        - If ISIN is NULL, positions are identified by ticker (one position per ticker)
+        - This means each ticker can have multiple positions if they have different ISINs
+        - But can only have one position when ISIN is NULL
+
         Args:
             db: Database session
 
         Returns:
             Number of positions recalculated
+
+        Raises:
+            ValueError: If duplicate ticker-only positions are detected
         """
-        # Get all unique ISINs from transactions (not tickers!)
+        # Optimized: Single query fetches both ISIN and ticker in one round trip
+        # Separates ISIN-based positions (where ISIN is not None) from
+        # ticker-only positions (where ISIN is None) in Python
         result = await db.execute(
-            select(Transaction.isin).distinct()
+            select(Transaction.isin, Transaction.ticker).distinct()
         )
-        isins = [row[0] for row in result.all()]
+        rows = result.all()
+
+        # Separate into ISIN-based and ticker-only positions
+        # Using sets to ensure uniqueness
+        isins = {row[0] for row in rows if row[0] is not None}
+        tickers_without_isin = {row[1] for row in rows if row[0] is None}
 
         count = 0
+
+        # Recalculate ISIN-based positions
         for isin in isins:
-            position = await PositionManager.recalculate_position(db, isin)
+            position = await PositionManager.recalculate_position(db, isin=isin)
+            if position:
+                count += 1
+
+        # Recalculate ticker-based positions (where ISIN is NULL)
+        for ticker in tickers_without_isin:
+            position = await PositionManager.recalculate_position(db, ticker=ticker)
             if position:
                 count += 1
 

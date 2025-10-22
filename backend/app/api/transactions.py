@@ -12,6 +12,7 @@ from datetime import datetime
 import logging
 import asyncio
 import requests.exceptions
+from sqlalchemy import and_
 
 from app.database import get_db
 from app.models import Transaction, TransactionType
@@ -149,9 +150,20 @@ async def import_transactions(
                 )
             raise
 
-        # Recalculate positions for affected ISINs
+        # Recalculate positions for affected ISINs with database-level locking
+        # This prevents race conditions when multiple concurrent requests modify the same positions
         for isin in affected_isins:
-            await PositionManager.recalculate_position(db, isin)
+            # Query for a single transaction with this ISIN to get its ticker
+            result = await db.execute(
+                select(Transaction.ticker)
+                .where(Transaction.isin == isin)
+                .limit(1)
+            )
+            ticker = result.scalar_one_or_none()
+
+            # Recalculate position with row-level locking to ensure atomicity
+            # The PositionManager will use with_for_update() to acquire exclusive locks
+            await PositionManager.recalculate_position(db, isin=isin, ticker=ticker)
 
         # Detect and record any new splits
         await PositionManager.detect_and_record_splits(db)
@@ -282,9 +294,13 @@ async def create_transaction(
         await db.commit()
         await db.refresh(transaction)
 
-        # 11. Recalculate position for this ISIN
-        if transaction.isin:
-            await PositionManager.recalculate_position(db, transaction.isin)
+        # 11. Recalculate position for this transaction
+        # Use ISIN if available, otherwise use ticker
+        await PositionManager.recalculate_position(
+            db,
+            isin=transaction.isin,
+            ticker=transaction.ticker
+        )
 
         # 12. Detect and record any new splits
         await PositionManager.detect_and_record_splits(db)
@@ -490,12 +506,19 @@ async def update_transaction(
     await db.refresh(transaction)
 
     # Recalculate positions for both original and new ISINs
-    if transaction.isin:
-        await PositionManager.recalculate_position(db, transaction.isin)
+    await PositionManager.recalculate_position(
+        db,
+        isin=transaction.isin,
+        ticker=transaction.ticker
+    )
 
     # Also recalculate original ISIN if it's different and not None
     if original_isin and original_isin != transaction.isin:
-        await PositionManager.recalculate_position(db, original_isin)
+        await PositionManager.recalculate_position(
+            db,
+            isin=original_isin,
+            ticker=transaction.ticker  # Use current ticker since ISIN might have been for an old position
+        )
 
     # Detect and record any new splits
     await PositionManager.detect_and_record_splits(db)
@@ -523,10 +546,11 @@ async def delete_transaction(
         raise HTTPException(status_code=404, detail="Transaction not found")
 
     isin = transaction.isin
+    ticker = transaction.ticker
     await db.delete(transaction)
     await db.commit()
 
     # Recalculate position
-    await PositionManager.recalculate_position(db, isin)
+    await PositionManager.recalculate_position(db, isin=isin, ticker=ticker)
 
     return {"message": "Transaction deleted successfully"}

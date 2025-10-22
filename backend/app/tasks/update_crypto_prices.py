@@ -16,7 +16,7 @@ import json
 
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
-from app.models import PriceHistory, CryptoTransaction, CryptoTransactionType
+from app.models import PriceHistory, CryptoTransaction, CryptoTransactionType, CryptoPortfolio
 from app.services.price_fetcher import PriceFetcher
 from app.services.currency_converter import get_exchange_rate
 
@@ -53,7 +53,7 @@ def update_crypto_prices(self):
 
     try:
         # Get all unique crypto symbols from transactions
-        result = db.execute(
+        symbols_result = db.execute(
             select(func.distinct(CryptoTransaction.symbol))
             .where(
                 CryptoTransaction.transaction_type.in_([
@@ -64,7 +64,16 @@ def update_crypto_prices(self):
             )
             .order_by(CryptoTransaction.symbol)
         )
-        crypto_symbols = [row[0] for row in result.all()]
+        crypto_symbols = [row[0] for row in symbols_result.all()]
+
+        # Get unique base currencies from active crypto portfolios
+        currencies_result = db.execute(
+            select(func.distinct(CryptoPortfolio.base_currency))
+            .where(CryptoPortfolio.is_active == True)
+        )
+        base_currencies = [row[0] for row in currencies_result.all()]
+
+        logger.info(f"Found {len(crypto_symbols)} crypto symbols and {len(base_currencies)} base currencies: {base_currencies}")
 
         if not crypto_symbols:
             logger.info("No crypto symbols found. Skipping crypto price update.")
@@ -91,77 +100,79 @@ def update_crypto_prices(self):
         failed = 0
         failed_symbols = []
 
+        # Fetch prices for each symbol in each base currency
         for symbol in crypto_symbols:
-            try:
-                # Check if price already exists for this date (idempotency)
-                existing = db.execute(
-                    select(PriceHistory)
-                    .where(
-                        PriceHistory.ticker == symbol,
-                        PriceHistory.date == price_date
-                    )
-                ).scalar_one_or_none()
-
-                if existing:
-                    logger.debug(f"Price already exists for {symbol} on {price_date}. Skipping.")
-                    skipped += 1
-                    continue
-
-                # Rate limiting: sleep 0.15s between requests to avoid Yahoo Finance rate limits
-                time.sleep(0.15)
-
-                # Fetch current price from Yahoo Finance
-                price_fetcher = PriceFetcher()
-                yahoo_symbol = f"{symbol}-USD"
-                price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
-
-                if not price_data or not price_data.get("current_price"):
-                    logger.warning(f"No price data returned for {symbol}")
-                    failed += 1
-                    failed_symbols.append(symbol)
-                    continue
-
-                # Convert to EUR if needed (Yahoo returns USD)
-                price_usd = price_data["current_price"]
-                # Convert to EUR using dynamic exchange rate
+            for base_currency in base_currencies:
                 try:
-                    usd_to_eur_rate = get_exchange_rate("USD", "EUR")
-                    price_eur = price_usd * usd_to_eur_rate
+                    # base_currency is already a string from the database (e.g., "USD", "EUR")
+                    currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
+                    ticker_key = f"{symbol}-{currency_upper}"
+
+                    # Check if price already exists for this date and currency (idempotency)
+                    existing = db.execute(
+                        select(PriceHistory)
+                        .where(
+                            PriceHistory.ticker == ticker_key,
+                            PriceHistory.date == price_date
+                        )
+                    ).scalar_one_or_none()
+
+                    if existing:
+                        logger.debug(f"Price already exists for {ticker_key} on {price_date}. Skipping.")
+                        skipped += 1
+                        continue
+
+                    # Rate limiting: sleep 0.15s between requests to avoid Yahoo Finance rate limits
+                    time.sleep(0.15)
+
+                    # Fetch current price from Yahoo Finance in the correct currency
+                    price_fetcher = PriceFetcher()
+                    yahoo_symbol = ticker_key
+                    price_data = price_fetcher.fetch_realtime_price(yahoo_symbol)
+
+                    if not price_data or not price_data.get("current_price"):
+                        logger.warning(f"No price data returned for {ticker_key}")
+                        failed += 1
+                        failed_symbols.append(ticker_key)
+                        continue
+
+                    # Use price directly in the correct currency (no conversion needed)
+                    price = price_data["current_price"]
+
+                    # Create price record with currency-specific ticker
+                    price_record = PriceHistory(
+                        ticker=ticker_key,  # Store currency-specific ticker
+                        date=price_date,
+                        open=price,  # Use same price for open/high/low for intraday
+                        high=price,
+                        low=price,
+                        close=price,
+                        volume=0,  # Yahoo Finance real-time endpoint doesn't provide volume
+                        source="yahoo"
+                    )
+
+                    db.add(price_record)
+                    db.commit()
+
+                    logger.info(
+                        f"Updated crypto price for {ticker_key}: {price} {currency_upper} on {price_date}"
+                    )
+                    updated += 1
+
+                except IntegrityError as e:
+                    # Race condition: another process already inserted this price
+                    db.rollback()
+                    currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
+                    logger.debug(f"Price already exists for {symbol}-{currency_upper} (race condition)")
+                    skipped += 1
+
                 except Exception as e:
-                    logger.warning(f"Failed to fetch USD→EUR rate for {symbol}: {e}. Using fallback rate.")
-                    price_eur = price_usd * Decimal("0.92")  # Fallback conversion rate
-
-                # Create price record
-                price_record = PriceHistory(
-                    ticker=symbol,
-                    date=price_date,
-                    open=price_eur,  # Use same price for open/high/low for intraday
-                    high=price_eur,
-                    low=price_eur,
-                    close=price_eur,
-                    volume=0,  # Yahoo Finance real-time endpoint doesn't provide volume
-                    source="yahoo"
-                )
-
-                db.add(price_record)
-                db.commit()
-
-                logger.info(
-                    f"Updated crypto price for {symbol}: {price_eur} EUR on {price_date}"
-                )
-                updated += 1
-
-            except IntegrityError as e:
-                # Race condition: another process already inserted this price
-                db.rollback()
-                logger.debug(f"Price already exists for {symbol} (race condition)")
-                skipped += 1
-
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Error fetching crypto price for {symbol}: {str(e)}")
-                failed += 1
-                failed_symbols.append(symbol)
+                    db.rollback()
+                    currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
+                    logger.error(f"Error fetching crypto price for {symbol}-{currency_upper}: {str(e)}")
+                    failed += 1
+                    currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
+                    failed_symbols.append(f"{symbol}-{currency_upper}")
 
         # Summary
         summary = {
@@ -178,7 +189,7 @@ def update_crypto_prices(self):
 
         logger.info(
             f"Crypto price update complete: {updated} updated, {skipped} skipped, "
-            f"{failed} failed out of {len(crypto_symbols)} symbols"
+            f"{failed} failed out of {len(crypto_symbols)} symbols in {len(base_currencies)} currencies"
         )
 
         return summary

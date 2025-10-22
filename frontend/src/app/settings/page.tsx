@@ -1,20 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useBenchmark, useSetBenchmark } from '@/hooks/useBenchmark';
-import { useLastUpdate, useRefreshPrices } from '@/hooks/usePrices';
+import { useLastUpdate } from '@/hooks/usePrices';
 import { useToast } from '@/hooks/use-toast';
 import { formatDateTime } from '@/lib/utils';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { TickerAutocomplete } from '@/components/TickerAutocomplete';
 
 export default function SettingsPage() {
   const { data: benchmark, isLoading: benchmarkLoading } = useBenchmark();
-  const { data: lastUpdate, refetch: refetchLastUpdate } = useLastUpdate();
   const setBenchmarkMutation = useSetBenchmark();
-  const refreshPricesMutation = useRefreshPrices();
   const { toast } = useToast();
   const [benchmarkTicker, setBenchmarkTicker] = useState('');
 
@@ -42,24 +40,6 @@ await setBenchmarkMutation.mutateAsync({
     } catch (error: any) {
       toast({
         title: 'Failed to update benchmark',
-        description: error.response?.data?.detail || 'An error occurred',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleRefreshPrices = async () => {
-    try {
-      await refreshPricesMutation.mutateAsync(false);
-      // Refetch last update timestamp immediately
-      await refetchLastUpdate();
-      toast({
-        title: 'Prices refreshed',
-        description: 'All prices have been updated successfully',
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Failed to refresh prices',
         description: error.response?.data?.detail || 'An error occurred',
         variant: 'destructive',
       });
@@ -133,53 +113,6 @@ await setBenchmarkMutation.mutateAsync({
                 </form>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Price Data Management */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Price Data Management</CardTitle>
-            <CardDescription>
-              Manually refresh price data for all assets in your portfolio
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {lastUpdate && (
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600">Last Price Update</p>
-                  <p className="text-lg font-semibold">
-                    {lastUpdate.last_update
-                      ? formatDateTime(lastUpdate.last_update)
-                      : 'Never'}
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <Button
-                  onClick={handleRefreshPrices}
-                  disabled={refreshPricesMutation.isPending}
-                >
-                  {refreshPricesMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Refreshing...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Refresh Prices Now
-                    </>
-                  )}
-                </Button>
-                <p className="text-sm text-gray-500 mt-2">
-                  This will fetch the latest prices for all assets in your portfolio.
-                  Price data is also automatically updated daily.
-                </p>
-              </div>
-            </div>
           </CardContent>
         </Card>
 

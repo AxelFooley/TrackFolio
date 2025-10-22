@@ -226,12 +226,15 @@ async def configure_wallet(
 ):
     """
     Configure or update the Bitcoin wallet address for a portfolio.
-    
+
+    Automatically triggers a full sync when a wallet address is configured for the first time.
+
     Parameters:
         request (WalletConfigRequest): Contains `portfolio_id` and the `wallet_address` to set.
-    
+
     Returns:
-        dict: Response with keys `status` ("success"), `message`, `portfolio_id`, `wallet_address`, and `timestamp` (UTC).
+        dict: Response with keys `status` ("success"), `message`, `portfolio_id`, `wallet_address`,
+              `sync_task_started` (bool), and `timestamp` (UTC).
     """
     try:
         # Verify portfolio exists
@@ -244,6 +247,10 @@ async def configure_wallet(
                 status_code=404,
                 detail=f"Portfolio with ID {request.portfolio_id} not found"
             )
+
+        # Check if this is a new wallet configuration
+        is_new_wallet = portfolio.wallet_address is None
+        wallet_address_changed = portfolio.wallet_address != request.wallet_address
 
         # Validate wallet address using the model's validator
         try:
@@ -259,17 +266,45 @@ async def configure_wallet(
         # Clear deduplication cache for this portfolio
         blockchain_deduplication.clear_portfolio_cache(request.portfolio_id)
 
+        # Trigger automatic full sync if this is a new wallet or wallet address changed
+        sync_task_started = False
+        if is_new_wallet or wallet_address_changed:
+            try:
+                # Start background sync task with no limits (fetch all history)
+                task = sync_wallet_manually.delay(
+                    wallet_address=request.wallet_address,
+                    portfolio_id=request.portfolio_id,
+                    max_transactions=None,  # No limit - fetch all transactions
+                    days_back=None           # No date limit - fetch complete history
+                )
+
+                logger.info(
+                    f"Started automatic full sync task {task.id} for new wallet {request.wallet_address} "
+                    f"(portfolio {request.portfolio_id})"
+                )
+                sync_task_started = True
+
+            except Exception as e:
+                logger.error(f"Failed to start automatic sync for wallet {request.wallet_address}: {e}")
+                # Don't fail the wallet configuration, just log the error
+
         logger.info(
             f"Configured wallet address {request.wallet_address} for portfolio {request.portfolio_id}"
         )
 
-        return {
+        response = {
             "status": "success",
             "message": f"Wallet address configured successfully",
             "portfolio_id": request.portfolio_id,
             "wallet_address": request.wallet_address,
+            "sync_task_started": sync_task_started,
             "timestamp": datetime.utcnow()
         }
+
+        if sync_task_started:
+            response["message"] += ". Automatic full sync started."
+
+        return response
 
     except HTTPException:
         raise
@@ -372,33 +407,29 @@ async def get_wallet_transactions(
 @router.get("/status", response_model=BlockchainStatusResponse)
 async def get_blockchain_status():
     """
-    Report overall blockchain API connectivity and deduplication cache statistics.
-    
-    Computes an overall status of "error", "warning", or "success" based on how many configured blockchain APIs are reachable and includes cache statistics from the deduplication layer. If an internal error occurs while gathering results, returns a response indicating an error with empty api_results and cache_stats and an explanatory message.
-    
+    Report Blockchain.info API connectivity and deduplication cache statistics.
+
+    Computes status based on Blockchain.info API reachability and includes cache statistics from the deduplication layer. If an internal error occurs while gathering results, returns a response indicating an error with empty api_results and cache_stats and an explanatory message.
+
     Returns:
-        BlockchainStatusResponse: Object containing `status` ("error", "warning", or "success"), a human-readable `message`, `api_results` mapping each API to a boolean connectivity result, `cache_stats` from the deduplication store, and a `timestamp`.
+        BlockchainStatusResponse: Object containing `status` ("error" or "success"), a human-readable `message`, `api_results` with a single entry for blockchain.info, `cache_stats` from the deduplication store, and a `timestamp`.
     """
     try:
-        # Test API connections
-        api_results = blockchain_fetcher.test_api_connection()
+        # Test API connection
+        api_result = blockchain_fetcher.test_api_connection()
 
         # Get cache statistics
         cache_stats = blockchain_deduplication.get_cache_stats()
 
         # Determine overall status
-        connected_apis = sum(1 for status in api_results.values() if status)
-        total_apis = len(api_results)
-
-        if connected_apis == 0:
-            status = "error"
-            message = "No blockchain APIs are reachable"
-        elif connected_apis < total_apis:
-            status = "warning"
-            message = f"Only {connected_apis}/{total_apis} blockchain APIs are reachable"
-        else:
+        if api_result:
             status = "success"
-            message = "All blockchain APIs are reachable"
+            message = "Blockchain.info API is reachable"
+            api_results = {"blockchain_info": True}
+        else:
+            status = "error"
+            message = "Blockchain.info API is not reachable"
+            api_results = {"blockchain_info": False}
 
         return BlockchainStatusResponse(
             status=status,
@@ -413,7 +444,7 @@ async def get_blockchain_status():
         return BlockchainStatusResponse(
             status="error",
             message=f"Failed to get blockchain status: {str(e)}",
-            api_results={},
+            api_results={"blockchain_info": False},
             cache_stats={},
             timestamp=datetime.utcnow()
         )
@@ -422,15 +453,15 @@ async def get_blockchain_status():
 @router.post("/test-connection")
 async def test_blockchain_apis():
     """
-    Start a background task to test connectivity to all configured blockchain APIs.
-    
+    Start a background task to test connectivity to Blockchain.info API.
+
     Returns:
         result (dict): Dictionary with keys:
             - status (str): "started" when the task was scheduled.
             - message (str): Human-readable message about task start.
             - task_id (str): Identifier of the scheduled Celery task.
             - timestamp (datetime): UTC timestamp when the task was scheduled.
-    
+
     Raises:
         HTTPException: If the background task cannot be started (HTTP 500).
     """

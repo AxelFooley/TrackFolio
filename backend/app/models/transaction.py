@@ -39,11 +39,11 @@ class Transaction(Base):
 
     # Asset identification
     ticker: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    isin: Mapped[str] = mapped_column(
+    isin: Mapped[str | None] = mapped_column(
         String(12),
-        nullable=False,
+        nullable=True,
         index=True,
-        comment="ISIN - unique identifier for the security"
+        comment="ISIN - unique identifier for the security (may be None if not available)"
     )
     description: Mapped[str] = mapped_column(String(500), nullable=False)
 

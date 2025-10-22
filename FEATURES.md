@@ -7,14 +7,15 @@ Comprehensive documentation of TrackFolio's capabilities and features.
 ## Table of Contents
 
 1. [Portfolio Management](#portfolio-management)
-2. [Performance Calculations](#performance-calculations)
-3. [Cryptocurrency Support](#cryptocurrency-support)
-4. [Blockchain Wallet Sync](#blockchain-wallet-sync)
-5. [Stock Split Detection](#stock-split-detection)
-6. [Multi-Currency Support](#multi-currency-support)
-7. [Data Import](#data-import)
-8. [Automated Background Jobs](#automated-background-jobs)
-9. [Benchmarking](#benchmarking)
+2. [Asset Search](#asset-search)
+3. [Performance Calculations](#performance-calculations)
+4. [Cryptocurrency Support](#cryptocurrency-support)
+5. [Blockchain Wallet Sync](#blockchain-wallet-sync)
+6. [Stock Split Detection](#stock-split-detection)
+7. [Multi-Currency Support](#multi-currency-support)
+8. [Data Import](#data-import)
+9. [Automated Background Jobs](#automated-background-jobs)
+10. [Benchmarking](#benchmarking)
 
 ---
 
@@ -102,6 +103,101 @@ Cost basis: 15 × $103.33 = $1,549.95
 Profit: $250.05
 Profit %: 16.13%
 ```
+
+---
+
+## Asset Search
+
+### Overview
+
+TrackFolio provides an intelligent asset search feature to quickly find and add securities to your portfolio.
+
+**Search Capabilities:**
+- Search by ticker symbol (AAPL, MSFT, SPY)
+- Search by company name (Apple, Microsoft, SPDR)
+- Support for international tickers with special characters (VWCE.DE, CSPX.L)
+- 40+ pre-indexed common stocks and ETFs for instant results
+- Fallback to Yahoo Finance for 5000+ additional securities
+
+### How It Works
+
+**1. Input Validation**
+- Accepts uppercase letters (A-Z), numbers (0-9), dots (.), and hyphens (-)
+- Maximum 20 characters to prevent abuse
+- Rejects special characters and lowercase input
+- Fails fast with clear validation error messages
+
+**2. Search Process**
+- First: Searches 40+ pre-indexed common assets (instant, no network)
+- Second: If fewer than 5 results, queries Yahoo Finance (5-second timeout)
+- Combines results and returns top 10 matches
+
+**3. Caching**
+- Results cached for 1 hour to minimize API calls
+- Case-insensitive search (query normalized to uppercase)
+- Cache key: `asset_search:{QUERY}`
+- Significantly reduces latency on repeated searches
+
+### Usage Examples
+
+**Search for US Stock:**
+```
+Query: AAPL
+Results:
+- Apple Inc. (EQUITY)
+- AAPL (ticker)
+```
+
+**Search for European ETF:**
+```
+Query: VWCE.DE
+Results:
+- Vanguard FTSE All-World UCITS ETF (ETF)
+- VWCE.DE (ticker)
+```
+
+**Search for Index:**
+```
+Query: SPY
+Results:
+- SPDR S&P 500 ETF Trust (ETF)
+- SPY (ticker)
+```
+
+### Security Features
+
+**Regex Pattern Validation:**
+- Pattern: `^[A-Z0-9.\-]{1,20}$`
+- Prevents SQL injection attempts
+- Blocks special character attacks
+- Validates input before processing
+
+**Rate Limiting:**
+- Yahoo Finance integration respects rate limits
+- 5-second timeout prevents hanging requests
+- Graceful fallback if external API unavailable
+
+### API Reference
+
+```bash
+GET /api/assets/search?q=AAPL
+```
+
+**Parameters:**
+- `q`: Search query (required, 1-20 chars, pattern: `^[A-Z0-9.\-]{1,20}$`)
+
+**Response:**
+```json
+[
+  {
+    "ticker": "AAPL",
+    "name": "Apple Inc.",
+    "type": "EQUITY"
+  }
+]
+```
+
+See [API.md](API.md#search-assets) for detailed API documentation.
 
 ---
 
@@ -682,6 +778,21 @@ docker compose exec celery-worker celery -A app.celery_app inspect registered
 # Monitor Redis queue
 docker compose exec redis redis-cli LLEN celery
 ```
+
+### Real-Time Price Updates
+
+**Frontend Price Updates:**
+- Prices automatically fetched every 30 seconds from `/api/prices/realtime`
+- No manual refresh button needed
+- Real-time display with automatic refresh
+
+**Note on Removed Features:**
+The manual price refresh feature (PriceRefreshButton component) was removed as it was redundant with the existing architecture:
+- Real-time prices: Already fetched every 30 seconds by the frontend
+- Daily snapshots: Already handled by scheduled task at 23:00 CET
+- Crypto prices: Updated every 5 minutes by background task
+
+All price updates are now fully automated and require no user intervention.
 
 ### Logs
 
