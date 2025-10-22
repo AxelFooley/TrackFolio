@@ -281,6 +281,62 @@ export interface TickerSearchResult {
   type: string;
 }
 
+// Unified Holdings Types (Traditional + Crypto)
+export type AssetType = 'STOCK' | 'ETF' | 'CRYPTO';
+
+export interface UnifiedHolding {
+  id: string;
+  type: AssetType;
+  ticker: string;
+  isin?: string;
+  name?: string;
+  quantity: number;
+  current_price: number;
+  current_value: number;
+  average_cost: number;
+  total_cost: number;
+  profit_loss: number;
+  profit_loss_pct: number;
+  currency: string;
+  portfolio_id?: number;
+  portfolio_name?: string;
+  today_change?: number;
+  today_change_percent?: number;
+}
+
+export interface UnifiedOverview {
+  total_value: number;
+  traditional_value: number;
+  crypto_value: number;
+  total_cost: number;
+  total_profit: number;
+  total_profit_pct: number;
+  today_change: number;
+  today_change_pct: number;
+  currency: string;
+}
+
+export interface UnifiedPerformanceData {
+  date: string;
+  total: number;
+  traditional: number;
+  crypto: number;
+  benchmark?: number;
+  currency?: string;
+}
+
+export interface UnifiedMover {
+  id: string;
+  type: AssetType;
+  ticker: string;
+  name?: string;
+  current_value: number;
+  today_change: number;
+  today_change_percent: number;
+  currency: string;
+  portfolio_name?: string;
+}
+
 // Wallet Types
 export interface WalletSyncStatus {
   status: 'synced' | 'syncing' | 'error' | 'never' | 'disabled';
