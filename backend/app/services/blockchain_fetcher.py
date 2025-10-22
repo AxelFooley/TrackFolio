@@ -59,6 +59,11 @@ class BlockchainFetcherService:
             'max_retries': settings.blockchain_max_retries
         }
 
+        # Configure pagination limits from settings
+        self.max_transactions_per_request = settings.blockchain_max_transactions_per_request
+        self.max_pages_per_sync = settings.blockchain_max_pages_per_sync
+        self.delay_between_pages = settings.blockchain_delay_between_pages_seconds
+
         # Initialize Redis connection
         try:
             self._redis_client = redis.from_url(settings.redis_url, decode_responses=False)
@@ -72,10 +77,13 @@ class BlockchainFetcherService:
     TRANSACTION_CACHE_TTL = settings.blockchain_transaction_cache_ttl
     ADDRESS_CACHE_TTL = settings.blockchain_address_cache_ttl
 
-    # Transaction limits
-    MAX_TRANSACTIONS_PER_REQUEST = 50  # Blockchain.info limit per request
+    # Transaction limits - now use configuration
     MAX_HISTORY_DAYS = 365  # Don't fetch more than 1 year of history by default
-    MAX_PAGES = 1000  # Safety limit to prevent infinite loops (~50k transactions per wallet)
+
+    # These will be set from configuration
+    max_transactions_per_request = 50  # Default overridden in __init__
+    max_pages_per_sync = 1000  # Safety limit to prevent infinite loops (~50k transactions per wallet)
+    delay_between_pages = 0.2  # Default overridden in __init__
 
     def _get_cache_key(self, prefix: str, *args) -> str:
         """
@@ -508,7 +516,7 @@ class BlockchainFetcherService:
             # Build request URL - use the correct rawaddr endpoint structure
             endpoint = f"/rawaddr/{wallet_address}"
 
-            # Blockchain.info has a 50 transaction limit per request, but supports pagination via offset
+            # Blockchain.info supports pagination via offset
             transactions = []
             offset = 0
             page_num = 1
@@ -516,9 +524,9 @@ class BlockchainFetcherService:
 
             logger.info(f"Starting paginated fetch for wallet {wallet_address} (max: {max_str})")
 
-            while page_num <= self.MAX_PAGES:
+            while page_num <= self.max_pages_per_sync:
                 params = {
-                    'limit': 50,  # Blockchain.info max per request
+                    'limit': self.max_transactions_per_request,
                     'offset': offset
                 }
 
@@ -568,18 +576,18 @@ class BlockchainFetcherService:
                 logger.debug(f"Page {page_num}: added {page_added} transactions (total: {len(transactions)})")
 
                 # Move to next page
-                offset += 50
+                offset += self.max_transactions_per_request
                 page_num += 1
 
-                # Add small delay between pages to respect rate limits
-                time.sleep(0.2)
+                # Add configurable delay between pages to respect rate limits
+                time.sleep(self.delay_between_pages)
 
             # Check if we hit the safety limit
-            if page_num > self.MAX_PAGES:
+            if page_num > self.max_pages_per_sync:
                 logger.warning(
                     f"Pagination safety limit reached for wallet {wallet_address}: "
                     f"fetched {len(transactions)} transactions across {page_num - 1} pages. "
-                    f"Set MAX_PAGES={self.MAX_PAGES} to increase limit."
+                    f"Set blockchain_max_pages_per_sync={self.max_pages_per_sync} to increase limit."
                 )
                 return self._build_result(
                     transactions,

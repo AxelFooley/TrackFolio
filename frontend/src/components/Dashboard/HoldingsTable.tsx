@@ -263,11 +263,11 @@ export function HoldingsTable() {
                       {formatNumber(holding.quantity, 4)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(holding.average_cost, holding.currency)}
+                      {formatCurrency(holding.average_cost, holding.currency || 'EUR')}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       <div className="flex items-center justify-end gap-1.5">
-                        {formatCurrency(holding.current_price, holding.currency)}
+                        {formatCurrency(holding.current_price, holding.currency || 'EUR')}
                         {hasRealtimeData && (
                           <span className="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
                         )}
@@ -286,7 +286,7 @@ export function HoldingsTable() {
                             <TrendingDown className="h-3 w-3" />
                           )}
                           <span>
-                            {formatCurrency(Math.abs(todayChange), holding.currency)} (
+                            {formatCurrency(Math.abs(todayChange), holding.currency || 'EUR')} (
                             {formatPercentage(todayChangePercent)})
                           </span>
                         </div>
@@ -295,14 +295,14 @@ export function HoldingsTable() {
                       )}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {formatCurrency(holding.current_value, holding.currency)}
+                      {formatCurrency(holding.current_value, holding.currency || 'EUR')}
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono ${
                         (holding.unrealized_gain ?? 0) >= 0 ? 'text-success' : 'text-danger'
                       }`}
                     >
-                      {formatCurrency(holding.unrealized_gain, holding.currency)}
+                      {formatCurrency(holding.unrealized_gain, holding.currency || 'EUR')}
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono ${

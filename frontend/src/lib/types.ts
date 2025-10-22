@@ -281,6 +281,12 @@ export interface TickerSearchResult {
   type: string;
 }
 
+export interface CryptoSearchResult {
+  symbol: string;
+  name: string;
+  type: string;
+}
+
 // Wallet Types
 export interface WalletSyncStatus {
   status: 'synced' | 'syncing' | 'error' | 'never' | 'disabled';

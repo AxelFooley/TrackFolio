@@ -63,6 +63,21 @@ class Settings(BaseSettings):
         env="BLOCKCHAIN_MAX_TRANSACTIONS_PER_SYNC",
         description="Maximum number of transactions to sync per run"
     )
+    blockchain_max_transactions_per_request: PositiveInt = Field(
+        50,
+        env="BLOCKCHAIN_MAX_TRANSACTIONS_PER_REQUEST",
+        description="Maximum number of transactions per API request (depends on API provider)"
+    )
+    blockchain_max_pages_per_sync: PositiveInt = Field(
+        100,
+        env="BLOCKCHAIN_MAX_PAGES_PER_SYNC",
+        description="Maximum number of pages to fetch per sync (prevents infinite loops)"
+    )
+    blockchain_delay_between_pages_seconds: PositiveInt = Field(
+        2,
+        env="BLOCKCHAIN_DELAY_BETWEEN_PAGES_SECONDS",
+        description="Delay between API requests when paginating (seconds)"
+    )
     blockchain_sync_days_back: PositiveInt = Field(
         7,
         env="BLOCKCHAIN_SYNC_DAYS_BACK",

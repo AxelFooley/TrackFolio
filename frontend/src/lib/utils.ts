@@ -6,15 +6,20 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+const VALID_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'INR', 'KRW'];
+
 export function formatCurrency(
   amount: number | null | undefined,
   currency: string = 'EUR'
 ): string {
   if (amount === null || amount === undefined) return '—'
 
+  // Validate currency and fallback to USD if invalid
+  const validatedCurrency = VALID_CURRENCIES.includes(currency) ? currency : 'USD';
+
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: currency,
+    currency: validatedCurrency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount)

@@ -111,14 +111,14 @@ export function PortfolioOverview() {
   const metrics = [
     {
       title: 'Current Value',
-      value: formatCurrency(currentValue, overview.currency || 'EUR'),
+      value: formatCurrency(currentValue, overview.currency),
       icon: DollarSign,
       color: 'text-blue-600',
       hasLiveData: !!realtimeMetrics,
     },
     {
       title: 'Total Profit',
-      value: formatCurrency(totalProfit, overview.currency || 'EUR'),
+      value: formatCurrency(totalProfit, overview.currency),
       change: formatPercentage(profitPercent),
       icon: totalProfit >= 0 ? TrendingUp : TrendingDown,
       color: totalProfit >= 0 ? 'text-success' : 'text-danger',
@@ -136,7 +136,7 @@ export function PortfolioOverview() {
     {
       title: "Today's Change",
       value: todayGainLoss !== null && todayGainLoss !== undefined
-        ? formatCurrency(todayGainLoss, overview.currency || 'EUR')
+        ? formatCurrency(todayGainLoss, overview.currency)
         : '—',
       change: todayGainLossPct !== null && todayGainLossPct !== undefined
         ? formatPercentage(todayGainLossPct)
