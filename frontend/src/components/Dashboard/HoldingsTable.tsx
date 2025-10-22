@@ -253,6 +253,7 @@ export function HoldingsTable() {
                         profitLoss >= 0 ? 'text-success' : 'text-danger'
                       }`}
                     >
+<<<<<<< HEAD
                       <div className="flex items-center justify-end gap-1">
                         {profitLoss >= 0 ? (
                           <TrendingUp className="h-3 w-3" />
@@ -261,6 +262,9 @@ export function HoldingsTable() {
                         )}
                         {formatCurrency(profitLoss, holding.currency)}
                       </div>
+=======
+                      {formatCurrency(holding.unrealized_gain, holding.currency || 'EUR')}
+>>>>>>> main
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono ${

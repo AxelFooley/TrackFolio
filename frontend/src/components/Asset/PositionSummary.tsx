@@ -9,6 +9,8 @@ interface PositionSummaryProps {
 }
 
 export function PositionSummary({ position }: PositionSummaryProps) {
+  const currency = position.currency || 'EUR';
+
   const metrics = [
     {
       title: 'Shares',
@@ -17,22 +19,22 @@ export function PositionSummary({ position }: PositionSummaryProps) {
     },
     {
       title: 'Average Cost',
-      value: formatCurrency(position.average_cost, position.currency),
+      value: formatCurrency(position.average_cost, currency),
       mono: true,
     },
     {
       title: 'Cost Basis',
-      value: formatCurrency(position.cost_basis, position.currency),
+      value: formatCurrency(position.cost_basis, currency),
       mono: true,
     },
     {
       title: 'Current Value',
-      value: formatCurrency(position.current_value, position.currency),
+      value: formatCurrency(position.current_value, currency),
       mono: true,
     },
     {
       title: 'Total Profit',
-      value: formatCurrency(position.unrealized_gain, position.currency),
+      value: formatCurrency(position.unrealized_gain, currency),
       change: position.return_percentage !== null && position.return_percentage !== undefined
         ? formatPercentage(position.return_percentage * 100)
         : undefined,

@@ -351,15 +351,26 @@ def calculate_portfolio_metrics(db) -> dict:
     total_value = Decimal("0")
     total_cost = Decimal("0")
 
+    # Batch load latest prices for all positions
+    position_tickers = [position.current_ticker for position in positions]
+    price_result = db.execute(
+        select(PriceHistory)
+        .where(PriceHistory.ticker.in_(position_tickers))
+        .order_by(PriceHistory.ticker, PriceHistory.date.desc())
+    )
+    price_records = price_result.scalars().all()
+
+    # Find latest price for each ticker
+    latest_prices = {}
+    for record in price_records:
+        ticker = record.ticker
+        if ticker not in latest_prices or record.date > latest_prices[ticker].date:
+            latest_prices[ticker] = record
+
     # Calculate totals
     for position in positions:
-        # Get latest price (use current_ticker)
-        latest_price_record = db.execute(
-            select(PriceHistory)
-            .where(PriceHistory.ticker == position.current_ticker)
-            .order_by(PriceHistory.date.desc())
-            .limit(1)
-        ).scalar_one_or_none()
+        # Get latest price for this position from batch-loaded data
+        latest_price_record = latest_prices.get(position.current_ticker)
 
         if latest_price_record:
             current_price = latest_price_record.close

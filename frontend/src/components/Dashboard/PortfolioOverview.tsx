@@ -67,7 +67,7 @@ export function PortfolioOverview() {
     },
     {
       title: 'Total Profit',
-      value: formatCurrency(overview.total_profit, overview.currency || 'EUR'),
+    value: formatCurrency(overview.total_profit, overview.currency || 'EUR'),
       change: formatPercentage(overview.total_profit_pct),
       icon: overview.total_profit >= 0 ? TrendingUp : TrendingDown,
       color: overview.total_profit >= 0 ? 'text-success' : 'text-danger',

@@ -281,6 +281,12 @@ export interface TickerSearchResult {
   type: string;
 }
 
+export interface CryptoSearchResult {
+  symbol: string;
+  name: string;
+  type: string;
+}
+
 // Unified Holdings Types (Traditional + Crypto)
 export type AssetType = 'STOCK' | 'ETF' | 'CRYPTO';
 

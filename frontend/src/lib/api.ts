@@ -144,13 +144,32 @@ export async function getPerformanceData(range: string): Promise<PerformanceData
   // Convert portfolio_data.value to portfolio, merge benchmark data by date
   // Convert string values (Decimal) to numbers for Recharts
   const benchmarkMap = new Map(
-    response.benchmark_data.map((b) => [b.date, parseFloat(String(b.value))])
+    response.benchmark_data.map((b) => {
+      const value = Number(b.value);
+      if (isNaN(value)) {
+        console.warn(`Invalid benchmark value for date ${b.date}: ${b.value}`);
+        return [b.date, 0];
+      }
+      return [b.date, value];
+    })
   );
 
-  return response.portfolio_data.map((point) => ({
-    date: point.date,
-    portfolio: parseFloat(String(point.value)), // Convert string to number for chart
-    ...(benchmarkMap.has(point.date) && { benchmark: benchmarkMap.get(point.date) }),
+  return response.portfolio_data.map((point) => {
+    const value = Number(point.value);
+    if (isNaN(value)) {
+      console.warn(`Invalid portfolio value for date ${point.date}: ${point.value}`);
+      return {
+        date: point.date,
+        portfolio: 0,
+        ...(benchmarkMap.has(point.date) && { benchmark: benchmarkMap.get(point.date) })
+      };
+    }
+    return {
+      date: point.date,
+      portfolio: value,
+      ...(benchmarkMap.has(point.date) && { benchmark: benchmarkMap.get(point.date) })
+    };
+  });
   }));
 }
 
@@ -430,8 +449,8 @@ export async function getCryptoPortfolioMetrics(
 }
 
 // Crypto Search
-export async function searchCryptoAssets(query: string): Promise<any[]> {
-  return apiRequest<any[]>({
+export async function searchCryptoAssets(query: string): Promise<CryptoSearchResult[]> {
+  return apiRequest<CryptoSearchResult[]>({
     method: 'GET',
     url: '/crypto/search',
     params: { q: query },
