@@ -217,7 +217,7 @@ export default function CryptoPortfolioDetailPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <CryptoPriceChart portfolioId={portfolioId} timeRange={selectedTimeRange} />
+            <CryptoPriceChart portfolioId={portfolioId} timeRange={selectedTimeRange} currency={currency} />
           </CardContent>
         </Card>
 

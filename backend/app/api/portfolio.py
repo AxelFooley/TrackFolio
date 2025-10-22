@@ -1,17 +1,24 @@
 """Portfolio API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from decimal import Decimal
 from datetime import date, timedelta
 from typing import List, Optional
+import logging
 
 from app.database import get_db
 from app.models import Position, PortfolioSnapshot, PriceHistory, CachedMetrics, Benchmark, StockSplit
 from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance, PerformanceDataPoint
 from app.schemas.position import PositionResponse
+from app.schemas.unified import (
+    UnifiedHolding, UnifiedOverview, UnifiedPerformance, UnifiedMovers,
+    UnifiedSummary, UnifiedPerformanceDataPoint
+)
 from app.services.price_fetcher import PriceFetcher
+from app.services.portfolio_aggregator import PortfolioAggregator
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 
@@ -494,3 +501,275 @@ async def get_position(
             for s in splits
         ] if splits else []
     }
+
+
+# Unified Portfolio Endpoints (combining traditional and crypto)
+
+@router.get("/unified-holdings", response_model=List[UnifiedHolding])
+async def get_unified_holdings(
+    skip: int = Query(0, ge=0, description="Number of holdings to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Max holdings to return"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get unified list of all holdings (traditional and crypto).
+
+    Returns combined positions from traditional portfolio (Position model)
+    and all crypto portfolios (CryptoPortfolio/CryptoTransaction).
+
+    Each holding includes current price, value, and performance metrics.
+
+    Args:
+        skip: Number of holdings to skip (pagination offset)
+        limit: Maximum number of holdings to return (1-1000)
+
+    Returns:
+        List of unified holdings with standardized schema
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        all_holdings = await aggregator.get_unified_holdings()
+
+        # Apply pagination
+        paginated_holdings = all_holdings[skip : skip + limit]
+
+        return paginated_holdings
+    except Exception as e:
+        logger.error(f"Error getting unified holdings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified holdings")
+
+
+@router.get("/unified-overview", response_model=UnifiedOverview)
+async def get_unified_overview(db: AsyncSession = Depends(get_db)):
+    """
+    Get aggregated portfolio overview combining traditional and crypto.
+
+    Returns top-level metrics:
+    - total_value: combined current value
+    - traditional_value, crypto_value: breakdown
+    - total_profit, total_profit_pct: combined P&L
+    - traditional_profit, crypto_profit: breakdown by portfolio type
+    - today_change, today_change_pct
+
+    Returns:
+        Unified overview metrics
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        overview = await aggregator.get_unified_overview()
+        return overview
+    except Exception as e:
+        logger.error(f"Error getting unified overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified overview")
+
+
+@router.get("/unified-performance")
+async def get_unified_performance(
+    range: Optional[str] = Query(None, description="Time range (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)"),
+    days: Optional[int] = Query(None, ge=1, le=3650, description="Number of days of history (alternative to range)"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get unified performance data combining traditional and crypto portfolios.
+
+    Merges daily snapshots from both portfolio systems into a single time-series.
+    Returns data matching frontend expectations with portfolio_data and benchmark_data.
+
+    Args:
+        range: Time range string (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL). Takes precedence over days.
+        days: Number of days of history (1-3650, default 365) - used if range not provided
+
+    Returns:
+        JSON object with portfolio_data and benchmark_data arrays
+    """
+    try:
+        # Use range parameter if provided, otherwise use days (default 365)
+        if range:
+            start_date, end_date = parse_time_range(range)
+        else:
+            # Use days parameter or default to 365
+            days_to_fetch = days or 365
+            end_date = date.today()
+            start_date = end_date - timedelta(days=days_to_fetch)
+
+        # Get traditional portfolio snapshots
+        query = select(PortfolioSnapshot).order_by(PortfolioSnapshot.snapshot_date)
+        if start_date:
+            query = query.where(PortfolioSnapshot.snapshot_date >= start_date)
+        if end_date:
+            query = query.where(PortfolioSnapshot.snapshot_date <= end_date)
+
+        result = await db.execute(query)
+        traditional_snapshots = result.scalars().all()
+
+        # Get crypto snapshots
+        from app.models import CryptoPortfolioSnapshot
+        crypto_query = select(CryptoPortfolioSnapshot).order_by(CryptoPortfolioSnapshot.snapshot_date)
+        if start_date:
+            crypto_query = crypto_query.where(CryptoPortfolioSnapshot.snapshot_date >= start_date)
+        if end_date:
+            crypto_query = crypto_query.where(CryptoPortfolioSnapshot.snapshot_date <= end_date)
+
+        crypto_result = await db.execute(crypto_query)
+        crypto_snapshots = crypto_result.scalars().all()
+
+        # Merge snapshots by date
+        snapshot_map: dict[date, dict] = {}
+
+        for snapshot in traditional_snapshots:
+            if snapshot.snapshot_date not in snapshot_map:
+                snapshot_map[snapshot.snapshot_date] = {
+                    "date": str(snapshot.snapshot_date),
+                    "total": Decimal("0"),
+                    "traditional": Decimal("0"),
+                    "crypto": Decimal("0")
+                }
+            snapshot_map[snapshot.snapshot_date]["traditional"] = snapshot.total_value or Decimal("0")
+            # Add to total
+            snapshot_map[snapshot.snapshot_date]["total"] = (
+                snapshot_map[snapshot.snapshot_date]["total"] +
+                (snapshot.total_value or Decimal("0"))
+            )
+
+        for snapshot in crypto_snapshots:
+            if snapshot.snapshot_date not in snapshot_map:
+                snapshot_map[snapshot.snapshot_date] = {
+                    "date": str(snapshot.snapshot_date),
+                    "total": Decimal("0"),
+                    "traditional": Decimal("0"),
+                    "crypto": Decimal("0")
+                }
+            # Use the correct value field based on portfolio base_currency
+            # If base_currency is EUR, use total_value_eur; if USD, use total_value_usd
+            crypto_val = (
+                snapshot.total_value_eur
+                if snapshot.base_currency == "EUR"
+                else snapshot.total_value_usd
+            ) or Decimal("0")
+            snapshot_map[snapshot.snapshot_date]["crypto"] += crypto_val
+            # Add to total
+            snapshot_map[snapshot.snapshot_date]["total"] = (
+                snapshot_map[snapshot.snapshot_date]["total"] + crypto_val
+            )
+
+        # Convert to sorted list
+        portfolio_data = [
+            {
+                "date": p["date"],
+                "total": str(p["total"]),
+                "traditional": str(p["traditional"]),
+                "crypto": str(p["crypto"])
+            }
+            for p in sorted(snapshot_map.values(), key=lambda x: x["date"])
+        ]
+
+        # Get benchmark data if configured (aligned with merged snapshot dates)
+        benchmark_data = []
+        benchmark_result = await db.execute(select(Benchmark).limit(1))
+        benchmark = benchmark_result.scalar_one_or_none()
+
+        if benchmark:
+            snapshot_dates = [date.fromisoformat(p["date"]) for p in portfolio_data]
+            if snapshot_dates:
+                benchmark_query = select(PriceHistory).where(
+                    PriceHistory.ticker == benchmark.ticker,
+                    PriceHistory.date.in_(snapshot_dates)
+                ).order_by(PriceHistory.date)
+
+                benchmark_prices_result = await db.execute(benchmark_query)
+                benchmark_prices = benchmark_prices_result.scalars().all()
+
+                benchmark_data = [
+                    {
+                        "date": str(p.date),
+                        "value": str(p.close)
+                    }
+                    for p in benchmark_prices
+                ]
+
+        return {
+            "portfolio_data": portfolio_data,
+            "benchmark_data": benchmark_data
+        }
+    except Exception as e:
+        logger.error(f"Error getting unified performance: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified performance")
+
+
+@router.get("/unified-movers", response_model=UnifiedMovers)
+async def get_unified_movers(
+    top_n: int = Query(5, ge=1, le=50, description="Number of top gainers/losers"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get top gainers and losers from both traditional and crypto portfolios.
+
+    Calculates return percentage for each holding and returns the top N gainers
+    and top N losers across all holdings, sorted by change percentage.
+
+    Args:
+        top_n: Number of gainers and losers to return (1-50, default 5)
+
+    Returns:
+        Top gainers and losers
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        movers = await aggregator.get_unified_movers(top_n=top_n)
+        return movers
+    except Exception as e:
+        logger.error(f"Error getting unified movers: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified movers")
+
+
+@router.get("/unified-summary", response_model=UnifiedSummary)
+async def get_unified_summary(
+    holdings_limit: int = Query(20, ge=1, le=100, description="Max holdings to return"),
+    performance_days: int = Query(365, ge=1, le=3650, description="Days of performance history"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get complete unified summary combining all aggregated data.
+
+    This is a convenience endpoint that returns overview, holdings (paginated),
+    movers, and performance data in a single response to reduce API round trips.
+
+    Args:
+        holdings_limit: Maximum number of holdings to return (1-100, default 20)
+        performance_days: Days of performance history (1-3650, default 365)
+
+    Returns:
+        Complete unified portfolio summary
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        summary = await aggregator.get_unified_summary(
+            holdings_limit=holdings_limit,
+            performance_days=performance_days
+        )
+
+        # Transform performance data to proper schema
+        perf_data = [
+            UnifiedPerformanceDataPoint(
+                date_point=p["date"],
+                value=p["value"],
+                crypto_value=p["crypto_value"],
+                traditional_value=p["traditional_value"]
+            )
+            for p in summary["performance_summary"]["data"]
+        ]
+
+        return UnifiedSummary(
+            overview=summary["overview"],
+            holdings=summary["holdings"],
+            holdings_total=summary["holdings_total"],
+            movers=summary["movers"],
+            performance_summary={
+                "period_days": summary["performance_summary"]["period_days"],
+                "data_points": summary["performance_summary"]["data_points"],
+                "data": perf_data
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting unified summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified summary")
