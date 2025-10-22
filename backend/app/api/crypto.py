@@ -14,6 +14,7 @@ import logging
 
 from app.database import get_db
 from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
+from app.models.crypto_portfolio_snapshot import CryptoPortfolioSnapshot
 from app.schemas.crypto import (
     CryptoPortfolioCreate,
     CryptoPortfolioUpdate,
@@ -108,6 +109,19 @@ async def create_crypto_portfolio(
         db.add(portfolio)
         await db.commit()
         await db.refresh(portfolio)
+
+        # Backfill snapshots from first transaction date to today (or just today if no transactions yet)
+        # Use a Celery task to backfill snapshots asynchronously (avoids sync/async issues)
+        try:
+            from app.tasks.crypto_snapshots import backfill_crypto_portfolio_snapshots
+            # Schedule the backfill task which will handle both empty and populated portfolios
+            task = backfill_crypto_portfolio_snapshots.delay(
+                portfolio_id=portfolio.id
+            )
+            logger.info(f"Scheduled automatic snapshot backfill for new crypto portfolio {portfolio.id}")
+        except Exception as e:
+            logger.error(f"Failed to schedule snapshot backfill for portfolio {portfolio.id}: {e}")
+            # Don't fail portfolio creation if snapshot scheduling fails
 
         # Trigger automatic full sync if wallet address is provided
         sync_task_started = False
@@ -1082,7 +1096,8 @@ async def get_crypto_portfolio_performance(
                 "portfolio_value": float(data_point.portfolio_value) if data_point.portfolio_value else 0.0,
                 "cost_basis": float(data_point.cost_basis) if data_point.cost_basis else 0.0,
                 "profit_loss": float(data_point.profit_loss) if data_point.profit_loss else 0.0,
-                "profit_loss_pct": float(data_point.profit_loss_pct) if data_point.profit_loss_pct is not None else 0.0
+                "profit_loss_pct": float(data_point.profit_loss_pct) if data_point.profit_loss_pct is not None else 0.0,
+                "currency": data_point.currency or portfolio.base_currency.value
             })
 
         return frontend_performance_data

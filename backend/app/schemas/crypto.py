@@ -234,6 +234,7 @@ class CryptoPerformanceData(BaseModel):
     cost_basis: Decimal
     profit_loss: Decimal
     profit_loss_pct: float
+    currency: Optional[str] = None  # Portfolio base currency (EUR/USD)
 
 
 class CryptoPortfolioPerformance(BaseModel):

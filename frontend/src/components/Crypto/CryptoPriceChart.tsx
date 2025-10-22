@@ -60,12 +60,12 @@ export function CryptoPriceChart({ portfolioId, timeRange, height = 400, currenc
     );
   }
 
-  // Format currency for tooltip
+  // Format currency for tooltip - uses the passed currency parameter
   const formatTooltipValue = (value: number) => {
     return formatCurrency(value, currency);
   };
 
-  // Format Y-axis values
+  // Format Y-axis values - uses the passed currency parameter
   const formatYAxisValue = (value: number) => {
     const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency;
     if (value >= 1000000) return `${symbol}${(value / 1000000).toFixed(1)}M`;

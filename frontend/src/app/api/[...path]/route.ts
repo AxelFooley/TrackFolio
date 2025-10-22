@@ -404,23 +404,14 @@ async function handleRequest(
       });
 
       // Create response with appropriate body
-      let responseBody: ReadableStream | string | null = null;
-      const contentType = backendResponse.headers.get('content-type') || '';
+      // Pass through the body directly to avoid content-length mismatches
+      // from re-parsing and re-stringifying JSON
+      const responseBody = backendResponse.body;
 
-      if (contentType.includes('application/json')) {
-        try {
-          const jsonData = await backendResponse.json();
-          responseBody = JSON.stringify(jsonData);
-          responseHeaders.set('Content-Type', 'application/json');
-        } catch (error) {
-          console.warn('[API Proxy] Failed to parse JSON response:', error);
-          // If JSON parsing fails, return text
-          responseBody = await backendResponse.text();
-          responseHeaders.set('Content-Type', 'text/plain');
-        }
-      } else {
-        // Stream non-JSON responses
-        responseBody = backendResponse.body;
+      // Preserve original content-type header
+      const contentType = backendResponse.headers.get('content-type');
+      if (contentType) {
+        responseHeaders.set('Content-Type', contentType);
       }
 
       const response = new NextResponse(responseBody, {
