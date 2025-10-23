@@ -6,8 +6,6 @@ from typing import List
 import yfinance as yf
 import logging
 import asyncio
-from functools import lru_cache
-import re
 
 from app.database import get_db
 from app.models import Position, Transaction, PriceHistory
