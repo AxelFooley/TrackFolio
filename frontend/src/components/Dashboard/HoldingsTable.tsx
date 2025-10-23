@@ -243,7 +243,12 @@ export function HoldingsTable() {
                       {formatNumber(holding.quantity, 8)}
                     </TableCell>
                     <TableCell className="text-right font-mono">
+<<<<<<< Updated upstream
                       {formatCurrency(holding.current_price, holding.currency)}
+=======
+<<<<<<< HEAD
+                      {formatNumber(holding.quantity, 8)}
+>>>>>>> Stashed changes
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {formatCurrency(holding.current_value, holding.currency)}
@@ -262,9 +267,51 @@ export function HoldingsTable() {
                         )}
                         {formatCurrency(profitLoss, holding.currency)}
                       </div>
+<<<<<<< Updated upstream
 =======
                       {formatCurrency(holding.unrealized_gain, holding.currency || 'EUR')}
 >>>>>>> main
+=======
+                    </TableCell>
+                    <TableCell
+                      className={`text-right font-mono ${
+                        todayChange >= 0 ? 'text-success' : 'text-danger'
+                      }`}
+                    >
+                      {hasRealtimeData ? (
+                        <div className="flex items-center justify-end gap-1">
+                          {todayChange >= 0 ? (
+                            <TrendingUp className="h-3 w-3" />
+                          ) : (
+                            <TrendingDown className="h-3 w-3" />
+                          )}
+                          <span>
+                            {formatCurrency(Math.abs(todayChange), holding.currency || 'EUR')} (
+                            {formatPercentage(todayChangePercent)})
+                          </span>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    {formatCurrency(holding.current_price, holding.currency || 'EUR')}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatCurrency(holding.current_value, holding.currency || 'EUR')}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right font-mono ${
+                        profitLoss >= 0 ? 'text-success' : 'text-danger'
+                      }`}
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        {profitLoss >= 0 ? (
+                          <TrendingUp className="h-3 w-3" />
+                        ) : (
+                          <TrendingDown className="h-3 w-3" />
+                        )}
+                        {formatCurrency(profitLoss, holding.currency)}
+                      </div>
+>>>>>>> Stashed changes
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono ${

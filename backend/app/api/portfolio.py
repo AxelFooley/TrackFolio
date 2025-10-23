@@ -18,6 +18,7 @@ from app.schemas.unified import (
 from app.services.price_fetcher import PriceFetcher
 from app.services.portfolio_aggregator import PortfolioAggregator
 from app.services.query_optimizer import query_optimizer
+from app.services.portfolio_aggregator import PortfolioAggregator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
