@@ -68,10 +68,10 @@ class PriceFetcher:
     async def fetch_stock_price(ticker: str) -> Optional[Dict[str, Decimal]]:
         """
         Fetch the latest OHLCV price for a stock or ETF from Yahoo Finance.
-        
+
         Parameters:
             ticker (str): The Yahoo Finance ticker symbol to query.
-        
+
         Returns:
             Optional[Dict[str, Decimal | int | str]]: A dictionary with keys:
                 - `open` (Decimal): Opening price for the latest trading period.
@@ -105,7 +105,7 @@ class PriceFetcher:
             logger.error(f"Error fetching price for {ticker} from Yahoo Finance: {str(e)}")
             return None
 
-  
+
     @staticmethod
     async def fetch_historical_prices(
         ticker: str,
@@ -114,12 +114,12 @@ class PriceFetcher:
     ) -> List[Dict]:
         """
         Retrieve historical OHLCV price records for the given ticker between start_date and end_date.
-        
+
         Parameters:
             ticker (str): Asset ticker symbol to fetch.
             start_date (date): Inclusive start date for the historical range.
             end_date (date): Inclusive end date for the historical range.
-        
+
         Returns:
             List[Dict]: A list of price records, each containing keys `date`, `open`, `high`, `low`, `close`, `volume`, and `source`; returns an empty list if no data is available or on failure.
         """
@@ -133,12 +133,12 @@ class PriceFetcher:
     ) -> List[Dict]:
         """
         Retrieve historical OHLCV records for a ticker between two dates.
-        
+
         Parameters:
             ticker (str): Ticker symbol to query on Yahoo Finance.
             start_date (date): Inclusive start date for the historical range.
             end_date (date): Exclusive end date for the historical range.
-        
+
         Returns:
             List[Dict]: A list of price records. Each record contains:
                 - `date` (date): The trading date.
@@ -176,16 +176,16 @@ class PriceFetcher:
             logger.error(f"Error fetching historical data for {ticker}: {str(e)}")
             return []
 
-    
+
     @staticmethod
     async def fetch_fx_rate(base: str = "EUR", quote: str = "USD") -> Optional[Decimal]:
         """
         Fetch the FX exchange rate for a currency pair from Yahoo Finance.
-        
+
         Parameters:
         	base (str): Base currency code (default "EUR").
         	quote (str): Quote currency code (default "USD").
-        
+
         Returns:
         	Decimal: Exchange rate expressing how many units of `quote` equal one unit of `base` (e.g., 1.10 for EUR/USD), or `None` if the rate is unavailable.
         """
@@ -456,10 +456,10 @@ class PriceFetcher:
     ) -> List[Dict]:
         """
         Fetch real-time prices for multiple tickers in parallel.
-        
+
         Parameters:
             tickers (List[Tuple[str, Optional[str]]]): List of (ticker, isin) pairs to fetch.
-        
+
         Returns:
             List[Dict]: Price dictionaries for tickers that were successfully fetched.
         """
@@ -489,4 +489,4 @@ class PriceFetcher:
         logger.info(f"Successfully fetched {len(results)} out of {len(tickers)} real-time prices")
         return results
 
-    
+

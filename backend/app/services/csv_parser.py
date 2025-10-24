@@ -78,10 +78,10 @@ class DirectaCSVParser:
             data_lines = lines[9:]
             csv_data = '\n'.join(data_lines)
 
-            # Parse with pandas (Directa uses tab-delimited format)
+            # Parse with pandas (Detect delimiter automatically)
             df = pd.read_csv(
                 StringIO(csv_data),
-                delimiter='\t',
+                delimiter=',',  # Change to comma for comma-separated format
                 skipinitialspace=True
             )
 

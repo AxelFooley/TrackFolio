@@ -32,7 +32,7 @@ class TestPositionManagerEdgeCases:
     async def test_recalculate_position_with_null_isin_and_ticker(self):
         """Test position recalculation with only ticker (NULL ISIN)."""
         async_db = self.get_db()
-        ticker = f"TEST_TICKER_{datetime.utcnow().timestamp()}"
+        ticker = f"TEST_NULL_ISIN_{datetime.utcnow().timestamp()}"
 
         # Create transaction with NULL ISIN but valid ticker
         transaction = Transaction(
@@ -66,7 +66,8 @@ class TestPositionManagerEdgeCases:
         assert position.current_ticker == ticker
         assert position.quantity == Decimal("10.0")
 
-        # Clean up
+        # Clean up - use refresh to get the updated object
+        await async_db.refresh(position)
         await async_db.delete(transaction)
         await async_db.delete(position)
         await async_db.commit()
@@ -86,7 +87,7 @@ class TestPositionManagerEdgeCases:
     async def test_duplicate_tickers_with_different_isins(self):
         """Test that same ticker with different ISINs creates separate positions."""
         async_db = self.get_db()
-        shared_ticker = "MULTI_ISIN"
+        shared_ticker = f"DUP_MULTI_ISIN_{datetime.utcnow().timestamp()}"
         isin1 = "US0000000001"
         isin2 = "US0000000002"
 
@@ -143,7 +144,9 @@ class TestPositionManagerEdgeCases:
         assert position1.quantity == Decimal("10.0")
         assert position2.quantity == Decimal("20.0")
 
-        # Clean up
+        # Clean up - refresh objects before deletion
+        await async_db.refresh(position1)
+        await async_db.refresh(position2)
         await async_db.delete(txn1)
         await async_db.delete(txn2)
         await async_db.delete(position1)
@@ -155,14 +158,14 @@ class TestPositionManagerEdgeCases:
         """Test recalculate_all_positions with both ISIN-based and ticker-only transactions."""
         async_db = self.get_db()
         isin = "US1234567890"
-        ticker_only = f"TICKET_ONLY_{datetime.utcnow().timestamp()}"
+        ticker_only = f"MIXED_TICKER_ONLY_{datetime.utcnow().timestamp()}"
 
         # Create ISIN-based transaction
         txn_with_isin = Transaction(
             operation_date=datetime.utcnow(),
             value_date=datetime.utcnow(),
             transaction_type=TransactionType.BUY,
-            ticker="MIXED_TICKER",
+            ticker="MIXED_ISIN_TICKER",
             isin=isin,
             description="Asset with ISIN",
             quantity=Decimal("5.0"),
@@ -204,7 +207,7 @@ class TestPositionManagerEdgeCases:
 
         # Verify both positions exist
         pos_with_isin = await PositionManager.recalculate_position(async_db, isin=isin)
-        pos_ticker_only = await PositionManager.recalculate_position(async_db, ticker=ticker_only)
+        pos_ticker_only = await PositionManager.recalculate_position(async_db, isin=None, ticker=ticker_only)
 
         assert pos_with_isin is not None
         assert pos_with_isin.isin == isin
@@ -212,7 +215,9 @@ class TestPositionManagerEdgeCases:
         assert pos_ticker_only.isin is None
         assert pos_ticker_only.current_ticker == ticker_only
 
-        # Clean up
+        # Clean up - refresh objects before deletion
+        await async_db.refresh(pos_with_isin)
+        await async_db.refresh(pos_ticker_only)
         await async_db.delete(txn_with_isin)
         await async_db.delete(txn_ticker_only)
         await async_db.delete(pos_with_isin)
@@ -247,7 +252,7 @@ class TestPositionManagerEdgeCases:
         await async_db.commit()
 
         # Create first position
-        pos1 = await PositionManager.recalculate_position(async_db, ticker=ticker_only)
+        pos1 = await PositionManager.recalculate_position(async_db, isin=None, ticker=ticker_only)
         assert pos1 is not None
 
         # Try to create duplicate ticker-only position (should fail with validation)
@@ -274,7 +279,7 @@ class TestPositionManagerEdgeCases:
 
         # Try to recalculate - should detect existing ticker-only position
         # and either update or skip (not create duplicate)
-        result = await PositionManager.recalculate_position(async_db, ticker=ticker_only)
+        result = await PositionManager.recalculate_position(async_db, isin=None, ticker=ticker_only)
 
         # Should update existing position with new transaction
         assert result is not None
@@ -290,8 +295,8 @@ class TestPositionManagerEdgeCases:
     async def test_position_closed_when_quantity_becomes_zero(self):
         """Test that position is deleted when quantity becomes zero after sell."""
         async_db = self.get_db()
-        ticker = f"CLOSE_POS_{datetime.utcnow().timestamp()}"
-        isin = "US0000CLOSE01"
+        ticker = f"CLOSE_POS_ZERO_{datetime.utcnow().timestamp()}"
+        isin = "US000000011"  # 12 characters
 
         # Create BUY transaction
         buy_txn = Transaction(
@@ -344,7 +349,9 @@ class TestPositionManagerEdgeCases:
         result = await PositionManager.recalculate_position(async_db, isin=isin)
         assert result is None
 
-        # Clean up
+        # Clean up - refresh objects before deletion
+        await async_db.refresh(buy_txn)
+        await async_db.refresh(sell_txn)
         await async_db.delete(buy_txn)
         await async_db.delete(sell_txn)
         await async_db.commit()

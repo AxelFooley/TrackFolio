@@ -95,6 +95,8 @@ jobs:
 
       - name: Run pytest (unit tests only)
         run: |
+          # Uses pytest marker system: @pytest.mark.integration marks slow/integration tests
+          # Unit tests run with: -m "not integration" to exclude integration tests
           pip install pytest pytest-asyncio
           cd backend && PYTHONPATH=. pytest tests/ -v -m "not integration"
   lint-frontend:

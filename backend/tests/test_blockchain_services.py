@@ -508,6 +508,7 @@ class TestBlockchainDeduplicationService:
         assert stats['total_cached_hashes'] == 2
 
 
+@pytest.mark.integration
 class TestBlockchainIntegration:
     """Integration tests for blockchain services."""
 

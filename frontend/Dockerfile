@@ -41,6 +41,14 @@ RUN npm cache clean --force && \
     npm ci --only=production && \
     npm cache clean --force
 
+# Copy source files for linting (needed for GitHub Actions CI)
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/tsconfig.json ./
+COPY --from=builder /app/next.config.js ./
+COPY --from=builder /app/tailwind.config.js ./
+COPY --from=builder /app/.eslintrc.json ./
+
 # Copy built application from builder stage
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

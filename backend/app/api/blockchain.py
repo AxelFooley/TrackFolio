@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, validator
 import logging
 
 from app.database import SyncSessionLocal
-from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
+from app.models.crypto import CryptoPortfolio, CryptoTransaction
 from app.services.blockchain_fetcher import blockchain_fetcher, BlockchainFetchError
 from app.services.blockchain_deduplication import blockchain_deduplication
 from app.tasks.blockchain_sync import sync_wallet_manually, test_blockchain_connection
@@ -32,22 +32,32 @@ class WalletSyncRequest(BaseModel):
     """Request model for manual wallet synchronization."""
     portfolio_id: int = Field(..., description="Portfolio ID to sync")
     wallet_address: str = Field(..., description="Bitcoin wallet address to sync")
-    max_transactions: Optional[int] = Field(None, description="Maximum number of transactions to fetch (None for unlimited)", ge=1, le=500)
-    days_back: Optional[int] = Field(None, description="Number of days to look back (None for all history)", ge=1, le=365)
+    max_transactions: Optional[int] = Field(
+        None,
+        description="Maximum number of transactions to fetch (None for unlimited)",
+        ge=1,
+        le=500
+    )
+    days_back: Optional[int] = Field(
+        None,
+        description="Number of days to look back (None for all history)",
+        ge=1,
+        le=365
+    )
 
     @validator('wallet_address')
     def validate_wallet_address(cls, v):
         """
         Validate and normalize a wallet address string.
-        
+
         Strips surrounding whitespace and ensures the resulting address is not empty.
-        
+
         Parameters:
             v (str): Wallet address input to validate.
-        
+
         Returns:
             str: The wallet address with surrounding whitespace removed.
-        
+
         Raises:
             ValueError: If the wallet address is empty or contains only whitespace.
         """
@@ -65,15 +75,15 @@ class WalletConfigRequest(BaseModel):
     def validate_wallet_address(cls, v):
         """
         Validate and normalize a wallet address string.
-        
+
         Strips surrounding whitespace and ensures the resulting address is not empty.
-        
+
         Parameters:
             v (str): Wallet address input to validate.
-        
+
         Returns:
             str: The wallet address with surrounding whitespace removed.
-        
+
         Raises:
             ValueError: If the wallet address is empty or contains only whitespace.
         """
@@ -136,7 +146,7 @@ class WalletTransactionsResponse(BaseModel):
 def get_db():
     """
     Provide a database session for a request and ensure it is closed when the request completes.
-    
+
     Returns:
         db (Session): A SQLAlchemy session connected to the application's database.
     """
@@ -154,16 +164,19 @@ async def sync_wallet(
 ):
     """
     Manually trigger synchronization for a Bitcoin wallet and start a background task to fetch transactions.
-    
+
     Parameters:
         request (WalletSyncRequest): Sync parameters including portfolio_id, wallet_address, max_transactions, and days_back.
         db (Session): Database session dependency.
-    
+
     Returns:
-        WalletSyncResponse: Status and metadata indicating the sync task was started, with initial transaction counts and a timestamp.
-    
+        WalletSyncResponse: Status and metadata indicating the sync task was started,
+                           with initial transaction counts and a timestamp.
+
     Raises:
-        HTTPException: 404 if the portfolio does not exist; 400 if the provided wallet address does not match the portfolio; 500 on unexpected errors when starting the sync.
+        HTTPException: 404 if the portfolio does not exist;
+                      400 if the provided wallet address does not match the portfolio;
+                      500 on unexpected errors when starting the sync.
     """
     try:
         # Verify portfolio exists
@@ -294,7 +307,7 @@ async def configure_wallet(
 
         response = {
             "status": "success",
-            "message": f"Wallet address configured successfully",
+            "message": "Wallet address configured successfully",
             "portfolio_id": request.portfolio_id,
             "wallet_address": request.wallet_address,
             "sync_task_started": sync_task_started,
@@ -327,12 +340,15 @@ async def get_wallet_transactions(
 ):
     """
     Fetches transactions for the given Bitcoin wallet for preview and does not persist them.
-    
-    Filters out transactions already present for the portfolio and returns the new unique transactions along with counts and a timestamp.
-    
+
+    Filters out transactions already present for the portfolio and returns the new unique
+    transactions along with counts and a timestamp.
+
     Returns:
-        WalletTransactionsResponse: Response containing the wallet_address, list of unique transactions, `count` of new transactions, `total_fetched` from the fetch result, `status`, `message`, and `timestamp`.
-    
+        WalletTransactionsResponse: Response containing the wallet_address, list of unique
+                                  transactions, `count` of new transactions, `total_fetched`
+                                  from the fetch result, `status`, `message`, and `timestamp`.
+
     Raises:
         HTTPException: 404 if the portfolio is not found.
         HTTPException: 400 if the blockchain fetch returns an error or no transactions.
@@ -358,7 +374,7 @@ async def get_wallet_transactions(
             max_transactions=max_transactions,
             days_back=days_back
         )
-        
+
         # Check for success: either status is 'success' or transactions are present
         if result.get('status') != 'success' and not result.get('transactions'):
             error_message = result.get('message', 'Unknown error') if isinstance(result, dict) else 'No transactions returned'
@@ -409,10 +425,15 @@ async def get_blockchain_status():
     """
     Report Blockchain.info API connectivity and deduplication cache statistics.
 
-    Computes status based on Blockchain.info API reachability and includes cache statistics from the deduplication layer. If an internal error occurs while gathering results, returns a response indicating an error with empty api_results and cache_stats and an explanatory message.
+    Computes status based on Blockchain.info API reachability and includes cache statistics from
+    the deduplication layer. If an internal error occurs while gathering results, returns a response
+    indicating an error with empty api_results and cache_stats and an explanatory message.
 
     Returns:
-        BlockchainStatusResponse: Object containing `status` ("error" or "success"), a human-readable `message`, `api_results` with a single entry for blockchain.info, `cache_stats` from the deduplication store, and a `timestamp`.
+        BlockchainStatusResponse: Object containing `status` ("error" or "success"),
+                                 a human-readable `message`, `api_results` with a single entry
+                                 for blockchain.info, `cache_stats` from the deduplication store,
+                                 and a `timestamp`.
     """
     try:
         # Test API connection
@@ -493,7 +514,7 @@ async def get_portfolio_blockchain_transactions(
 ):
     """
     Retrieve blockchain transactions (exchange == "Bitcoin Blockchain") for the given portfolio, applying limit/offset paging.
-    
+
     Returns:
         A dictionary containing:
         - portfolio_id (int): The requested portfolio ID.
@@ -567,10 +588,10 @@ async def get_portfolio_blockchain_transactions(
 async def clear_portfolio_cache(portfolio_id: int, db: Session = Depends(get_db)):
     """
     Clear the deduplication cache for a given portfolio.
-    
+
     Parameters:
         portfolio_id (int): ID of the portfolio whose deduplication cache should be cleared.
-    
+
     Returns:
         dict: Result object containing `status` ("success"), `message`, `portfolio_id`, and `timestamp`.
     """
@@ -616,13 +637,16 @@ async def get_sync_history(
 ):
     """
     Retrieve per-day synchronization summaries of blockchain transactions for a portfolio over a recent period.
-    
-    Returns a dictionary containing the portfolio id, configured wallet address, a list of daily sync summaries (each with date, transaction_count, total_amount, and transaction_types map), the number of days with activity, total transactions found, the requested period in days, and a timestamp of the response.
-    
+
+    Returns a dictionary containing the portfolio id, configured wallet address, a list of daily
+    sync summaries (each with date, transaction_count, total_amount, and transaction_types map),
+    the number of days with activity, total transactions found, the requested period in days,
+    and a timestamp of the response.
+
     Parameters:
         portfolio_id (int): ID of the portfolio to query.
         days (int): Number of days to include in the history (1–365).
-    
+
     Returns:
         dict: {
             "portfolio_id": int,
@@ -638,7 +662,7 @@ async def get_sync_history(
             "period_days": int,                # requested `days` value
             "timestamp": datetime              # UTC timestamp when response was generated
         }
-    
+
     Raises:
         HTTPException: 404 if the portfolio is not found; 500 if an unexpected error occurs.
     """

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class BlockchainFetchError(Exception):
     """
     Custom exception raised when blockchain API operations fail.
-    
+
     This exception is raised when all available blockchain API sources fail
     to fetch transaction data or when critical blockchain operations cannot
     be completed.
@@ -88,13 +88,13 @@ class BlockchainFetcherService:
     def _get_cache_key(self, prefix: str, *args) -> str:
         """
         Builds a Redis cache key namespaced for the blockchain fetcher.
-        
+
         Constructs a colon-delimited key that starts with the "blockchain" namespace, followed by the provided prefix and any additional components.
-        
+
         Parameters:
         	prefix (str): A namespace segment describing the cached item (e.g., "tx", "address").
         	*args: Additional key components that will be appended in order.
-        
+
         Returns:
         	cache_key (str): A string in the format "blockchain:{prefix}:{arg1}:{arg2}:...".
         """
@@ -103,12 +103,12 @@ class BlockchainFetcherService:
     def _cache_get(self, key: str) -> Optional[Any]:
         """
         Retrieve and return the JSON-deserialized value stored in Redis for the given key.
-        
+
         Attempts to read and parse the value associated with key from Redis. If Redis is unavailable, the key does not exist, or parsing/Redis errors occur, returns None.
-        
+
         Parameters:
             key (str): Redis key to read.
-        
+
         Returns:
             Optional[Any]: The deserialized Python object stored at key, or None if not found or on error.
         """
@@ -129,9 +129,9 @@ class BlockchainFetcherService:
     def _cache_set(self, key: str, data: Any, ttl: int) -> None:
         """
         Store a Python object in Redis under the given key with a time-to-live, converting it to JSON-serializable form.
-        
+
         If Redis is not available this is a no-op. The value is converted to JSON-safe types and stored with the provided TTL (seconds). Serialization or Redis errors are logged and suppressed; this method does not raise on failure.
-        
+
         Parameters:
             key (str): Redis key under which to store the data.
             data (Any): Python object to serialize and cache.
@@ -153,9 +153,9 @@ class BlockchainFetcherService:
     def _make_json_serializable(self, obj: Any) -> Any:
         """
         Convert an arbitrary object into a JSON-serializable representation.
-        
+
         Recursively converts dicts and lists; converts Decimal to a string, datetime to an ISO 8601 string, preserves str/int/float/bool/None, and coerces any other type to its string representation.
-        
+
         Returns:
             A JSON-serializable representation of the input object.
         """
@@ -276,10 +276,10 @@ class BlockchainFetcherService:
     def _validate_bitcoin_address(self, address: str) -> bool:
         """
         Validate whether a string is a syntactically valid Bitcoin address (legacy, P2SH, or Bech32).
-        
+
         Parameters:
             address (str): Bitcoin address to validate.
-        
+
         Returns:
             True if the address is a valid Bitcoin address, False otherwise.
         """
@@ -319,10 +319,10 @@ class BlockchainFetcherService:
     def _generate_transaction_hash(self, tx_data: Dict) -> str:
         """
         Generate a deterministic fingerprint for a transaction for deduplication.
-        
+
         Parameters:
             tx_data (Dict): Transaction dictionary; uses the values of the keys 'txid', 'timestamp', 'value', and 'address' when present.
-        
+
         Returns:
             str: SHA-256 hex digest of the concatenation of the transaction's key fields.
         """
@@ -359,15 +359,15 @@ class BlockchainFetcherService:
             # Default to transfer_in for zero-value transactions
             return CryptoTransactionType.TRANSFER_IN
 
-    
+
     def _convert_blockchaincom_transaction(self, tx_data: Dict, wallet_address: str) -> Optional[Dict]:
         """
         Converts a Blockchain.com transaction payload into the service's internal transaction representation.
-        
+
         Parameters:
             tx_data: Raw transaction object returned by the Blockchain.com API.
             wallet_address: The Bitcoin address being tracked; used to compute the wallet-specific amount.
-        
+
         Returns:
             A dictionary with normalized transaction fields (including `transaction_hash`, `timestamp`, `transaction_type`, `symbol`, `quantity`, `price_at_execution`, `total_amount`, `currency`, `fee`, `fee_currency`, `exchange`, `notes`, and `raw_data`) if conversion succeeds, `None` otherwise.
         """
@@ -421,7 +421,7 @@ class BlockchainFetcherService:
             logger.error(f"Error converting Blockchain.com transaction: {e}")
             return None
 
-    
+
     def fetch_transactions(
         self,
         wallet_address: str,
@@ -486,7 +486,7 @@ class BlockchainFetcherService:
             logger.error(error_msg)
             return self._build_result([], 'error', error_msg)
 
-    
+
     def _fetch_from_blockchain_com(
         self,
         wallet_address: str,
@@ -602,7 +602,7 @@ class BlockchainFetcherService:
             logger.error(f"Error fetching from Blockchain.info API: {e}")
             return self._build_result([], 'error', str(e))
 
-    
+
     def _build_result(
         self,
         transactions: List[Dict],
@@ -611,12 +611,12 @@ class BlockchainFetcherService:
     ) -> Dict[str, Any]:
         """
         Construct a standardized result dictionary for transaction fetch operations.
-        
+
         Parameters:
             transactions (List[Dict]): List of transaction records to include in the result.
             status (str): Operation status label (e.g., "success", "error").
             message (str): Human-readable message describing the result.
-        
+
         Returns:
             Dict[str, Any]: Dictionary with keys:
                 - 'status': the provided status string,

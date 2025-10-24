@@ -10,11 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 import logging
 
-from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import Position, PriceHistory, PortfolioSnapshot, Transaction, TransactionType
 from app.services.price_fetcher import PriceFetcher
-from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +245,7 @@ def create_daily_snapshot(self, snapshot_date: str = None):
 
         return summary
 
-    except IntegrityError as e:
+    except IntegrityError:
         # Race condition: another process already created this snapshot
         db.rollback()
         logger.debug(f"Snapshot already exists for {target_date} (race condition)")

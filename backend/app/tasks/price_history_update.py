@@ -4,12 +4,10 @@ Price history update tasks.
 Maintains comprehensive price history database with optimized fetching.
 """
 from celery import shared_task
-from datetime import date, timedelta
-from typing import List, Dict, Any
+from datetime import date
 import logging
 import time
 
-from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.services.price_history_manager import price_history_manager
 from app.services.system_state_manager import SystemStateManager

@@ -96,10 +96,10 @@ class CryptoTransactionCreate(BaseModel):
     def validate_symbol(cls, v: str) -> str:
         """
         Normalize a crypto symbol by trimming surrounding whitespace and converting to uppercase.
-        
+
         Parameters:
             v (str): The input symbol to normalize.
-        
+
         Returns:
             str: The normalized symbol (trimmed and uppercased).
         """
@@ -234,6 +234,7 @@ class CryptoPerformanceData(BaseModel):
     cost_basis: Decimal
     profit_loss: Decimal
     profit_loss_pct: float
+    currency: Optional[str] = None  # Portfolio base currency (EUR/USD)
 
 
 class CryptoPortfolioPerformance(BaseModel):

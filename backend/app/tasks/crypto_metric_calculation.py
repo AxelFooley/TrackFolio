@@ -79,9 +79,9 @@ def _calculate_holdings_from_transactions(transactions):
 def calculate_crypto_metrics(self):
     """
     Calculate and cache per-portfolio and aggregated crypto metrics for all active crypto portfolios.
-    
+
     Performs portfolio-level metric computation, upserts each portfolio's metrics into CachedMetrics with a 24-hour expiry, computes and upserts global metrics, cleans up expired cached entries, and aggregates success/failure counts.
-    
+
     Returns:
         dict: Summary with keys "status", "calculated" (number cached), "failed" (number failed), "total_portfolios", and optionally "failed_portfolios" (list of failed portfolio names).
     """
@@ -228,12 +228,12 @@ def calculate_crypto_metrics(self):
 def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
     """
     Compute portfolio-level crypto metrics for the specified portfolio.
-    
+
     Calculates current value, cost basis, unrealized P&L, simple total return, per-symbol holdings and asset allocation using transaction history and realtime prices. Returns None if the portfolio does not exist or is not active.
-    
+
     Parameters:
         portfolio_id (int): ID of the crypto portfolio to compute metrics for.
-    
+
     Returns:
         dict or None: Metrics dictionary when the portfolio is found and active, otherwise `None`.
         The metrics dictionary includes at least the following keys:
@@ -391,10 +391,10 @@ def calculate_crypto_portfolio_metrics(db, portfolio_id: int) -> dict:
 def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
     """
     Calculate per-symbol position metrics for a crypto portfolio.
-    
+
     Parameters:
         portfolio_id (int): ID of the crypto portfolio to analyze.
-    
+
     Returns:
         dict: Mapping from symbol (str) to a metrics dictionary containing:
             - symbol (str)
@@ -407,7 +407,7 @@ def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
             - unrealized_pnl_pct (float)
             - irr (float)
             - calculated_at (str, UTC ISO timestamp)
-    
+
         Returns an empty dict if the portfolio has no transactions or no positive-quantity positions.
     """
     # Get portfolio transactions
@@ -474,9 +474,9 @@ def calculate_crypto_position_metrics(db, portfolio_id: int) -> dict:
 def calculate_global_crypto_metrics(db) -> dict:
     """
     Compute aggregated crypto metrics across all active portfolios.
-    
+
     If there are active portfolios, returns a dictionary containing aggregated totals, returns, asset allocation, counts, and a UTC ISO timestamp; returns `None` if no active portfolios are found.
-    
+
     Returns:
         dict or None: Aggregated metrics with keys:
             - total_value_eur (float): Sum market value in EUR across portfolios.

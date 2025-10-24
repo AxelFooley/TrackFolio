@@ -6,8 +6,6 @@ from typing import List
 import yfinance as yf
 import logging
 import asyncio
-from functools import lru_cache
-import re
 
 from app.database import get_db
 from app.models import Position, Transaction, PriceHistory
@@ -130,7 +128,7 @@ async def search_assets(
         # Filter common assets by query (fast, in-memory)
         for item in COMMON_ASSETS:
             if (query_lower in item["ticker"].lower() or
-                query_lower in item["name"].lower()):
+                    query_lower in item["name"].lower()):
                 search_results.append(item)
 
         # If we have fewer than 5 results, try to fetch additional info from yfinance

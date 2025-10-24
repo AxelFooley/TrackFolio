@@ -18,10 +18,12 @@ import redis
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType, CryptoCurrency
+from app.models.price_history import PriceHistory
 from app.services.blockchain_fetcher import blockchain_fetcher
 from app.services.blockchain_deduplication import blockchain_deduplication
 from app.services.price_fetcher import PriceFetcher
 from app.config import settings
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +64,9 @@ def get_syncing_status(portfolio_id: int) -> Optional[dict]:
 def get_usd_to_eur_rate() -> Optional[Decimal]:
     """
     Retrieve the USD-to-EUR exchange rate using Yahoo Finance FX data.
-    
+
     Fetches the EUR/USD rate and returns its reciprocal so the result represents how many EUR equal 1 USD.
-    
+
     Returns:
         Decimal: Amount of EUR per 1 USD (e.g., Decimal('0.92')), or `None` if the rate could not be obtained.
     """
@@ -100,9 +102,9 @@ def get_usd_to_eur_rate() -> Optional[Decimal]:
 def sync_all_wallets(self):
     """
     Orchestrates a full synchronization for all configured Bitcoin wallets and returns a summary of the global results.
-    
+
     Runs synchronization across every portfolio that has a Bitcoin wallet address and aggregates per-wallet outcomes into a single result.
-    
+
     Returns:
         dict: Summary containing overall status, counts (added/skipped/failed/fetched), and per-wallet result details.
     """
@@ -116,9 +118,9 @@ sync_bitcoin_wallets = sync_all_wallets
 def _sync_bitcoin_wallets_impl():
     """
     Synchronizes all active Bitcoin wallets' transactions into the database.
-    
+
     Finds active portfolios with wallet addresses, runs per-wallet synchronization (adds new transactions, skips duplicates, records failures), and returns an aggregated summary of the run. If blockchain synchronization is disabled in settings, returns a disabled status without performing work.
-    
+
     Returns:
         dict: Summary of the synchronization run. Common keys:
             - status (str): "success" when run completed, or "disabled" if sync is turned off.
@@ -267,10 +269,10 @@ def _sync_bitcoin_wallets_impl():
 
 def _prefetch_prices_for_dates(symbol: str, dates: list, base_currency: str, logger) -> dict:
     """
-    Prefetch historical prices for multiple dates to avoid per-transaction API calls.
+    Prefetch historical prices for multiple dates from the database.
 
-    Batches price requests by date range to minimize API calls. For 1000 transactions
-    across 100 dates, this makes ~1-2 calls instead of 1000.
+    Reads prices from the local PostgreSQL database using currency-specific ticker format.
+    For example, reads BTC-USD or BTC-EUR depending on the base_currency.
 
     Args:
         symbol: Cryptocurrency symbol (e.g., 'BTC')
@@ -292,32 +294,37 @@ def _prefetch_prices_for_dates(symbol: str, dates: list, base_currency: str, log
         start_date = sorted_dates[0]
         end_date = sorted_dates[-1]
 
-        # Fetch all prices for the date range in one call
-        price_fetcher = PriceFetcher()
-        yahoo_ticker = f"{symbol}-{base_currency.upper()}"
+        # Build the ticker key with currency (e.g., BTC-USD, BTC-EUR)
+        ticker_key = f"{symbol}-{base_currency.upper()}"
 
         logger.info(
-            f"Batch fetching {len(set(dates))} unique prices for {symbol} "
-            f"from {start_date} to {end_date} in {base_currency}"
+            f"Batch fetching {len(set(dates))} unique prices for {ticker_key} "
+            f"from {start_date} to {end_date} from database"
         )
 
-        historical_prices = price_fetcher.fetch_historical_prices_sync(
-            ticker=yahoo_ticker,
-            start_date=start_date,
-            end_date=end_date
-        )
+        # Read prices from database
+        db = SyncSessionLocal()
+        try:
+            result = db.execute(
+                select(PriceHistory).where(
+                    (PriceHistory.ticker == ticker_key) &
+                    (PriceHistory.date >= start_date) &
+                    (PriceHistory.date <= end_date)
+                ).order_by(PriceHistory.date)
+            )
+            price_records = result.scalars().all()
 
-        if historical_prices:
-            # Build lookup map: date -> price
-            for price_data in historical_prices:
-                price_date = price_data.get('date')
-                close_price = price_data.get('close')
-                if price_date and close_price:
-                    price_cache[price_date] = close_price
+            if price_records:
+                # Build lookup map: date -> price
+                for price_record in price_records:
+                    price_cache[price_record.date] = price_record.close
 
-            logger.info(f"Successfully fetched {len(price_cache)} price records for {symbol}")
-        else:
-            logger.warning(f"No historical prices returned for {symbol} in date range {start_date} to {end_date}")
+                logger.info(f"Successfully fetched {len(price_cache)} price records for {ticker_key} from database")
+            else:
+                logger.warning(f"No historical prices found in database for {ticker_key} in date range {start_date} to {end_date}")
+
+        finally:
+            db.close()
 
     except Exception as e:
         logger.error(f"Error prefetching prices for {symbol}: {e}")
@@ -558,14 +565,14 @@ def get_historical_price_at_time(
 ) -> Optional[Decimal]:
     """
     Retrieve the price of a cryptocurrency closest to a given timestamp in the requested currency.
-    
+
     Attempts to obtain a historical price near the provided timestamp and falls back to a current price when historical data is unavailable. Returned value is expressed in the requested base currency; if a conversion from USD to EUR is required but unavailable, the function may return the USD value or None when no price can be determined.
-    
+
     Parameters:
         symbol (str): Cryptocurrency symbol (e.g., 'BTC').
         timestamp (datetime): Target point in time for the price lookup.
         base_currency (str): Desired currency for the returned price (case-insensitive, typically 'EUR' or 'USD').
-    
+
     Returns:
         Decimal or None: Price of the cryptocurrency in the requested base currency, or `None` if no price data could be obtained.
     """
@@ -695,6 +702,17 @@ def sync_wallet_manually(
         )
 
         logger.info(f"Manual sync completed for wallet {wallet_address}: {result}")
+
+        # After successful sync, trigger snapshot backfill
+        if result.get("status") == "success" and result.get("transactions_added", 0) > 0:
+            try:
+                from app.tasks.crypto_snapshots import backfill_crypto_portfolio_snapshots
+                backfill_task = backfill_crypto_portfolio_snapshots.delay(portfolio_id=portfolio_id)
+                logger.info(f"Triggered snapshot backfill for portfolio {portfolio_id} after wallet sync")
+            except Exception as e:
+                logger.error(f"Failed to trigger snapshot backfill after wallet sync: {e}")
+                # Don't fail the sync result, just log the error
+
         return result
 
     except Exception as e:

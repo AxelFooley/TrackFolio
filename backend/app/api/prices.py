@@ -3,12 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, date, timedelta
-from typing import List, Optional
+from typing import Optional
 import logging
 
 from app.database import get_db
 from app.models.position import Position
-from app.schemas.price import RealtimePriceResponse, RealtimePricesResponse, PriceHistoryResponse
+from app.schemas.price import RealtimePriceResponse, RealtimePricesResponse
 from app.services.price_fetcher import PriceFetcher
 from app.services.price_history_manager import price_history_manager
 from app.services.system_state_manager import SystemStateManager

@@ -1,18 +1,23 @@
 """Portfolio API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 from decimal import Decimal
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 from typing import List, Optional
+import logging
 
 from app.database import get_db
 from app.models import Position, PortfolioSnapshot, PriceHistory, CachedMetrics, Benchmark, StockSplit
 from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance, PerformanceDataPoint
 from app.schemas.position import PositionResponse
-from app.services.price_fetcher import PriceFetcher
-from app.services.query_optimizer import query_optimizer
+from app.schemas.unified import (
+    UnifiedHolding, UnifiedOverview, UnifiedMovers,
+    UnifiedSummary, UnifiedPerformanceDataPoint
+)
+from app.services.portfolio_aggregator import PortfolioAggregator
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 
@@ -94,63 +99,168 @@ def parse_time_range(range_str: str) -> tuple[Optional[date], Optional[date]]:
 
 @router.get("/overview", response_model=PortfolioOverview)
 async def get_portfolio_overview(db: AsyncSession = Depends(get_db)):
-    """Get portfolio overview metrics for dashboard with intelligent caching."""
-    # Use optimized query with caching
-    overview_data = await query_optimizer.get_portfolio_overview_optimized(db)
+    """Get portfolio overview metrics for dashboard."""
+    result = await db.execute(select(Position))
+    positions = result.scalars().all()
 
-    # Calculate additional metrics if not cached
-    total_cost_basis = overview_data['total_cost_basis']
-    current_value = overview_data['total_value']
-    total_profit = overview_data['total_profit']
+    if not positions:
+        return PortfolioOverview(
+            current_value=Decimal("0"),
+            total_cost_basis=Decimal("0"),
+            total_profit=Decimal("0"),
+            average_annual_return=None,
+            today_gain_loss=None,
+            today_gain_loss_pct=None
+        )
 
-    # Calculate average annual return
-    if total_cost_basis and total_cost_basis > 0:
-        total_return_percent = (total_profit / total_cost_basis) * 100
+    # Calculate total cost basis and current value
+    total_cost_basis = Decimal("0")
+    current_value = Decimal("0")
 
-        # Placeholder for actual annual return calculation
-        # This would normally involve time-series analysis of portfolio value over time
-        average_annual_return = total_return_percent / 3  # Placeholder 3-year annualization
-    else:
-        average_annual_return = None
-        total_return_percent = None
+    for position in positions:
+        total_cost_basis += position.cost_basis
 
-    # Get currency from first position or default to EUR
-    currency = "EUR"  # This should be properly determined from user settings
+        # Get latest price (use current_ticker)
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == position.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(1)
+        )
+        latest_price = price_result.scalar_one_or_none()
+
+        if latest_price:
+            current_value += position.quantity * latest_price.close
+
+    total_profit = current_value - total_cost_basis
+
+    # Get portfolio metrics from cached_metrics
+    portfolio_metrics_result = await db.execute(
+        select(CachedMetrics)
+        .where(
+            CachedMetrics.metric_type == "portfolio_metrics",
+            CachedMetrics.metric_key == "global"
+        )
+    )
+    portfolio_metrics = portfolio_metrics_result.scalar_one_or_none()
+
+    # Calculate today's gain/loss by summing all positions' today changes
+    today_gain_loss = Decimal("0")
+    total_previous_value = Decimal("0")
+
+    for position in positions:
+        # Get latest and previous prices for each position
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == position.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(2)
+        )
+        price_history = price_result.scalars().all()
+
+        if price_history and len(price_history) >= 2:
+            latest_price = price_history[0]
+            previous_price = price_history[1]
+
+            # Add to today's change
+            price_change = latest_price.close - previous_price.close
+            today_gain_loss += position.quantity * price_change
+
+            # Track previous value for percentage calculation
+            total_previous_value += position.quantity * previous_price.close
+
+    # Calculate percentage change
+    today_gain_loss_pct = None
+    if total_previous_value > 0:
+        today_gain_loss_pct = float((today_gain_loss / total_previous_value) * 100)
+
+    # Get average annual return from portfolio metrics
+    average_annual_return = None
+    if portfolio_metrics and portfolio_metrics.metric_value:
+        average_annual_return = portfolio_metrics.metric_value.get("portfolio_return")
 
     return PortfolioOverview(
         current_value=current_value,
-        total_profit=total_profit,
         total_cost_basis=total_cost_basis,
-        total_return_percent=total_return_percent,
+        total_profit=total_profit,
         average_annual_return=average_annual_return,
-        today_gain_loss=Decimal('0'),  # Will be calculated with real-time prices
-        today_gain_loss_pct=Decimal('0'),  # Will be calculated with real-time prices
-        currency=currency,
-        snapshot_date=date.today(),
-        last_updated=datetime.utcnow()
+        today_gain_loss=today_gain_loss,
+        today_gain_loss_pct=today_gain_loss_pct
     )
 
 
-@router.get("/holdings")
-async def get_holdings(
-    db: AsyncSession = Depends(get_db),
-    limit: int = 50,
-    offset: int = 0,
-    sort_by: str = "current_value",
-    sort_direction: str = "desc"
-):
-    """Get portfolio holdings with optimized queries and caching."""
-    # Use optimized holdings query with caching
-    holdings = await query_optimizer.get_holdings_optimized(
-        db, limit=limit, offset=offset, sort_by=sort_by, sort_direction=sort_direction
-    )
+@router.get("/holdings", response_model=List[PositionResponse])
+async def get_holdings(db: AsyncSession = Depends(get_db)):
+    """Get all current holdings/positions with calculated metrics."""
+    result = await db.execute(select(Position))
+    positions = result.scalars().all()
 
-    # Convert to response format
-    return holdings
+    response = []
 
+    for position in positions:
+        # Get latest and previous prices (use current_ticker)
+        price_result = await db.execute(
+            select(PriceHistory)
+            .where(PriceHistory.ticker == position.current_ticker)
+            .order_by(PriceHistory.date.desc())
+            .limit(2)  # Get latest and previous day's price
+        )
+        price_history = price_result.scalars().all()
 
-# Export the query optimizer for use in other modules
-__all__ = ['query_optimizer']
+        # Get cached metrics (IRR, etc.) - use current_ticker for backwards compatibility
+        metrics_result = await db.execute(
+            select(CachedMetrics)
+            .where(
+                CachedMetrics.metric_type == "position_metrics",
+                CachedMetrics.metric_key == position.current_ticker
+            )
+        )
+        cached_metrics = metrics_result.scalar_one_or_none()
+
+        # Calculate current values
+        latest_price = price_history[0] if price_history else None
+        current_price = latest_price.close if latest_price else None
+        current_value = position.quantity * current_price if current_price else None
+        unrealized_gain = current_value - position.cost_basis if current_value else None
+        return_percentage = (
+            float((current_value - position.cost_basis) / position.cost_basis)
+            if current_value and position.cost_basis > 0
+            else None
+        )
+
+        # Calculate today's change using helper function
+        today_change, today_change_percent = calculate_today_change(
+            position.quantity,
+            price_history
+        )
+
+        # Get IRR from cached metrics
+        irr = None
+        if cached_metrics and cached_metrics.metric_value:
+            irr = cached_metrics.metric_value.get("irr")
+
+        response.append(
+            PositionResponse(
+                id=position.id,
+                ticker=position.current_ticker,  # Return current_ticker as 'ticker'
+                isin=position.isin,
+                description=position.description,
+                asset_type=position.asset_type.value,
+                quantity=position.quantity,
+                average_cost=position.average_cost,
+                cost_basis=position.cost_basis,
+                current_price=current_price,
+                current_value=current_value,
+                unrealized_gain=unrealized_gain,
+                return_percentage=return_percentage,
+                irr=irr,
+                today_change=today_change,
+                today_change_percent=today_change_percent,
+                last_calculated_at=position.last_calculated_at
+            )
+        )
+
+    return response
 
 
 @router.get("/performance", response_model=PortfolioPerformance)
@@ -390,3 +500,275 @@ async def get_position(
             for s in splits
         ] if splits else []
     }
+
+
+# Unified Portfolio Endpoints (combining traditional and crypto)
+
+@router.get("/unified-holdings", response_model=List[UnifiedHolding])
+async def get_unified_holdings(
+    skip: int = Query(0, ge=0, description="Number of holdings to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Max holdings to return"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get unified list of all holdings (traditional and crypto).
+
+    Returns combined positions from traditional portfolio (Position model)
+    and all crypto portfolios (CryptoPortfolio/CryptoTransaction).
+
+    Each holding includes current price, value, and performance metrics.
+
+    Args:
+        skip: Number of holdings to skip (pagination offset)
+        limit: Maximum number of holdings to return (1-1000)
+
+    Returns:
+        List of unified holdings with standardized schema
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        all_holdings = await aggregator.get_unified_holdings()
+
+        # Apply pagination
+        paginated_holdings = all_holdings[skip : skip + limit]
+
+        return paginated_holdings
+    except Exception as e:
+        logger.error(f"Error getting unified holdings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified holdings")
+
+
+@router.get("/unified-overview", response_model=UnifiedOverview)
+async def get_unified_overview(db: AsyncSession = Depends(get_db)):
+    """
+    Get aggregated portfolio overview combining traditional and crypto.
+
+    Returns top-level metrics:
+    - total_value: combined current value
+    - traditional_value, crypto_value: breakdown
+    - total_profit, total_profit_pct: combined P&L
+    - traditional_profit, crypto_profit: breakdown by portfolio type
+    - today_change, today_change_pct
+
+    Returns:
+        Unified overview metrics
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        overview = await aggregator.get_unified_overview()
+        return overview
+    except Exception as e:
+        logger.error(f"Error getting unified overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified overview")
+
+
+@router.get("/unified-performance")
+async def get_unified_performance(
+    range: Optional[str] = Query(None, description="Time range (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)"),
+    days: Optional[int] = Query(None, ge=1, le=3650, description="Number of days of history (alternative to range)"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get unified performance data combining traditional and crypto portfolios.
+
+    Merges daily snapshots from both portfolio systems into a single time-series.
+    Returns data matching frontend expectations with portfolio_data and benchmark_data.
+
+    Args:
+        range: Time range string (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL). Takes precedence over days.
+        days: Number of days of history (1-3650, default 365) - used if range not provided
+
+    Returns:
+        JSON object with portfolio_data and benchmark_data arrays
+    """
+    try:
+        # Use range parameter if provided, otherwise use days (default 365)
+        if range:
+            start_date, end_date = parse_time_range(range)
+        else:
+            # Use days parameter or default to 365
+            days_to_fetch = days or 365
+            end_date = date.today()
+            start_date = end_date - timedelta(days=days_to_fetch)
+
+        # Get traditional portfolio snapshots
+        query = select(PortfolioSnapshot).order_by(PortfolioSnapshot.snapshot_date)
+        if start_date:
+            query = query.where(PortfolioSnapshot.snapshot_date >= start_date)
+        if end_date:
+            query = query.where(PortfolioSnapshot.snapshot_date <= end_date)
+
+        result = await db.execute(query)
+        traditional_snapshots = result.scalars().all()
+
+        # Get crypto snapshots
+        from app.models import CryptoPortfolioSnapshot
+        crypto_query = select(CryptoPortfolioSnapshot).order_by(CryptoPortfolioSnapshot.snapshot_date)
+        if start_date:
+            crypto_query = crypto_query.where(CryptoPortfolioSnapshot.snapshot_date >= start_date)
+        if end_date:
+            crypto_query = crypto_query.where(CryptoPortfolioSnapshot.snapshot_date <= end_date)
+
+        crypto_result = await db.execute(crypto_query)
+        crypto_snapshots = crypto_result.scalars().all()
+
+        # Merge snapshots by date
+        snapshot_map: dict[date, dict] = {}
+
+        for snapshot in traditional_snapshots:
+            if snapshot.snapshot_date not in snapshot_map:
+                snapshot_map[snapshot.snapshot_date] = {
+                    "date": str(snapshot.snapshot_date),
+                    "total": Decimal("0"),
+                    "traditional": Decimal("0"),
+                    "crypto": Decimal("0")
+                }
+            snapshot_map[snapshot.snapshot_date]["traditional"] = snapshot.total_value or Decimal("0")
+            # Add to total
+            snapshot_map[snapshot.snapshot_date]["total"] = (
+                snapshot_map[snapshot.snapshot_date]["total"] +
+                (snapshot.total_value or Decimal("0"))
+            )
+
+        for snapshot in crypto_snapshots:
+            if snapshot.snapshot_date not in snapshot_map:
+                snapshot_map[snapshot.snapshot_date] = {
+                    "date": str(snapshot.snapshot_date),
+                    "total": Decimal("0"),
+                    "traditional": Decimal("0"),
+                    "crypto": Decimal("0")
+                }
+            # Use the correct value field based on portfolio base_currency
+            # If base_currency is EUR, use total_value_eur; if USD, use total_value_usd
+            crypto_val = (
+                snapshot.total_value_eur
+                if snapshot.base_currency == "EUR"
+                else snapshot.total_value_usd
+            ) or Decimal("0")
+            snapshot_map[snapshot.snapshot_date]["crypto"] += crypto_val
+            # Add to total
+            snapshot_map[snapshot.snapshot_date]["total"] = (
+                snapshot_map[snapshot.snapshot_date]["total"] + crypto_val
+            )
+
+        # Convert to sorted list
+        portfolio_data = [
+            {
+                "date": p["date"],
+                "total": str(p["total"]),
+                "traditional": str(p["traditional"]),
+                "crypto": str(p["crypto"])
+            }
+            for p in sorted(snapshot_map.values(), key=lambda x: x["date"])
+        ]
+
+        # Get benchmark data if configured (aligned with merged snapshot dates)
+        benchmark_data = []
+        benchmark_result = await db.execute(select(Benchmark).limit(1))
+        benchmark = benchmark_result.scalar_one_or_none()
+
+        if benchmark:
+            snapshot_dates = [date.fromisoformat(p["date"]) for p in portfolio_data]
+            if snapshot_dates:
+                benchmark_query = select(PriceHistory).where(
+                    PriceHistory.ticker == benchmark.ticker,
+                    PriceHistory.date.in_(snapshot_dates)
+                ).order_by(PriceHistory.date)
+
+                benchmark_prices_result = await db.execute(benchmark_query)
+                benchmark_prices = benchmark_prices_result.scalars().all()
+
+                benchmark_data = [
+                    {
+                        "date": str(p.date),
+                        "value": str(p.close)
+                    }
+                    for p in benchmark_prices
+                ]
+
+        return {
+            "portfolio_data": portfolio_data,
+            "benchmark_data": benchmark_data
+        }
+    except Exception as e:
+        logger.error(f"Error getting unified performance: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified performance")
+
+
+@router.get("/unified-movers", response_model=UnifiedMovers)
+async def get_unified_movers(
+    top_n: int = Query(5, ge=1, le=50, description="Number of top gainers/losers"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get top gainers and losers from both traditional and crypto portfolios.
+
+    Calculates return percentage for each holding and returns the top N gainers
+    and top N losers across all holdings, sorted by change percentage.
+
+    Args:
+        top_n: Number of gainers and losers to return (1-50, default 5)
+
+    Returns:
+        Top gainers and losers
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        movers = await aggregator.get_unified_movers(top_n=top_n)
+        return movers
+    except Exception as e:
+        logger.error(f"Error getting unified movers: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified movers")
+
+
+@router.get("/unified-summary", response_model=UnifiedSummary)
+async def get_unified_summary(
+    holdings_limit: int = Query(20, ge=1, le=100, description="Max holdings to return"),
+    performance_days: int = Query(365, ge=1, le=3650, description="Days of performance history"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get complete unified summary combining all aggregated data.
+
+    This is a convenience endpoint that returns overview, holdings (paginated),
+    movers, and performance data in a single response to reduce API round trips.
+
+    Args:
+        holdings_limit: Maximum number of holdings to return (1-100, default 20)
+        performance_days: Days of performance history (1-3650, default 365)
+
+    Returns:
+        Complete unified portfolio summary
+    """
+    try:
+        aggregator = PortfolioAggregator(db)
+        summary = await aggregator.get_unified_summary(
+            holdings_limit=holdings_limit,
+            performance_days=performance_days
+        )
+
+        # Transform performance data to proper schema
+        perf_data = [
+            UnifiedPerformanceDataPoint(
+                date_point=p["date"],
+                value=p["value"],
+                crypto_value=p["crypto_value"],
+                traditional_value=p["traditional_value"]
+            )
+            for p in summary["performance_summary"]["data"]
+        ]
+
+        return UnifiedSummary(
+            overview=summary["overview"],
+            holdings=summary["holdings"],
+            holdings_total=summary["holdings_total"],
+            movers=summary["movers"],
+            performance_summary={
+                "period_days": summary["performance_summary"]["period_days"],
+                "data_points": summary["performance_summary"]["data_points"],
+                "data": perf_data
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting unified summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unified summary")

@@ -1,78 +1,27 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useHoldings } from '@/hooks/usePortfolio';
-import { useRealtimePrices } from '@/hooks/useRealtimePrices';
+import { Badge } from '@/components/ui/badge';
+import { useUnifiedMovers } from '@/hooks/usePortfolio';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { useMemo } from 'react';
 
 /**
- * Render a card showing the top daily gainers and losers from the user's holdings.
+ * Render a card showing the top daily gainers and losers from both traditional and crypto holdings.
  *
- * Computes current value, unrealized gain, today's total position change, and today's percentage change using holdings and real-time price data, then displays the top three gainers and top three losers. Provides loading, no-holdings, and no-movers fallback UIs.
+ * Displays top 5 gainers and losers combined from both asset types.
+ * Provides loading, no-holdings, and no-movers fallback UIs.
  *
- * @returns A React element displaying today's movers (top gainers and top losers) with current value and today's change.
+ * @returns A React element displaying today's movers (top gainers and top losers)
  */
 export function TodaysMovers() {
-  const { data: holdings, isLoading } = useHoldings();
-  const symbols = holdings?.map(h => h.ticker) || [];
-  const { realtimePrices } = useRealtimePrices(symbols);
+  const { data: moversData, isLoading } = useUnifiedMovers();
 
-  // Merge holdings with real-time data for consistency
-  const holdingsWithRealtimeData = useMemo(() => {
-    if (!holdings) return [];
+  const gainers = useMemo(() => moversData?.gainers || [], [moversData]);
+  const losers = useMemo(() => moversData?.losers || [], [moversData]);
 
-    return holdings.map((holding) => {
-      const realtimePrice = realtimePrices.get(holding.ticker);
-
-      if (realtimePrice) {
-        // Calculate updated values with real-time price
-        const currentValue = holding.quantity * realtimePrice.current_price;
-        const costBasis = holding.cost_basis || 0;
-        const unrealizedGain = currentValue - costBasis;
-        const returnPercentage = costBasis > 0
-          ? unrealizedGain / costBasis
-          : 0;
-
-        // Calculate change values if not provided
-        const hasPrevClose = typeof realtimePrice.previous_close === 'number';
-        const changeAmount = realtimePrice.change_amount ??
-          (hasPrevClose ? (realtimePrice.current_price - realtimePrice.previous_close) : 0);
-        const changePercent = realtimePrice.change_percent ??
-        (realtimePrice.previous_close && realtimePrice.previous_close > 0 ?
-            ((realtimePrice.current_price - realtimePrice.previous_close) / realtimePrice.previous_close) * 100 : 0);
-
-        return {
-          ...holding,
-          current_price: realtimePrice.current_price,
-          current_value: currentValue,
-          unrealized_gain: unrealizedGain,
-          return_percentage: returnPercentage,
-          // Total position change (not per-share)
-          today_change: changeAmount * holding.quantity,
-          today_change_percent: changePercent,
-        };
-      }
-
-      return holding;
-    });
-  }, [holdings, realtimePrices]);
-
-  // Filter holdings with today_change_percent and sort
-  const holdingsWithChange = useMemo(() => {
-    return holdingsWithRealtimeData
-      .filter((h) => h.today_change_percent !== null && h.today_change_percent !== undefined && h.today_change_percent !== 0)
-      .sort((a, b) => (b.today_change_percent || 0) - (a.today_change_percent || 0));
-  }, [holdingsWithRealtimeData]);
-
-  const gainers = useMemo(() => holdingsWithChange.filter(h => (h.today_change_percent || 0) > 0).slice(0, 3), [holdingsWithChange]);
-  const losers = useMemo(() => {
-    const filteredLosers = holdingsWithChange.filter(h => (h.today_change_percent || 0) < 0);
-    return [...filteredLosers].sort((a, b) => (a.today_change_percent || 0) - (b.today_change_percent || 0)).slice(0, 3);
-  }, [holdingsWithChange]);
-
-  // Handle loading and empty states
+  // Handle loading state
   if (isLoading) {
     return (
       <Card>
@@ -80,9 +29,9 @@ export function TodaysMovers() {
           <CardTitle>Today&apos;s Movers</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="animate-pulse space-y-4">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="h-12 bg-gray-200 rounded"></div>
+          <div className="space-y-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-12 bg-gray-200 rounded animate-pulse"></div>
             ))}
           </div>
         </CardContent>
@@ -90,123 +39,107 @@ export function TodaysMovers() {
     );
   }
 
-  if (!holdings || holdings.length === 0) {
+  // Handle no movers state
+  if (gainers.length === 0 && losers.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Today&apos;s Movers</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-12">
-            <p className="text-gray-500 mb-2">No holdings data available</p>
-            <p className="text-sm text-gray-400">
-              Import transactions to start tracking your portfolio
-            </p>
-          </div>
+          <p className="text-gray-500">No movers data available</p>
         </CardContent>
       </Card>
     );
   }
 
-  // If no holdings have today's change data
-  if (holdingsWithChange.length === 0) {
+  const getAssetTypeBadge = (type: string) => {
+    switch (type) {
+      case 'STOCK':
+        return <Badge variant="secondary" className="text-xs">Stock</Badge>;
+      case 'ETF':
+        return <Badge variant="secondary" className="text-xs">ETF</Badge>;
+      case 'CRYPTO':
+        return <Badge className="bg-orange-100 text-orange-800 text-xs">Crypto</Badge>;
+      default:
+        return <Badge variant="outline" className="text-xs">{type}</Badge>;
+    }
+  };
+
+  const MoverRow = ({ mover, isGainer }: { mover: typeof gainers[0]; isGainer: boolean }) => {
+    const changeColor = isGainer ? 'text-success' : 'text-danger';
+    const Icon = isGainer ? TrendingUp : TrendingDown;
+
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Today&apos;s Movers</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-12">
-            <p className="text-gray-500 mb-2">No movers data available yet</p>
-            <p className="text-sm text-gray-400">
-              Data will appear after we have multiple days of price history
+      <div className="flex items-center justify-between py-3 border-b last:border-b-0">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-medium text-sm">{mover.ticker}</span>
+            {getAssetTypeBadge(mover.type)}
+          </div>
+          {mover.portfolio_name && (
+            <p className="text-xs text-gray-500">{mover.portfolio_name}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className="font-mono text-sm">{formatCurrency(mover.current_value, mover.currency)}</p>
+            <p className={`font-mono text-xs ${changeColor}`}>
+              {formatCurrency(mover.today_change, mover.currency)}
             </p>
           </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Today&apos;s Movers</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <h3 className="text-sm font-semibold text-success mb-3 flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
-              Top Gainers
-            </h3>
-            <div className="space-y-3">
-              {gainers.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-4">No gainers</p>
-              ) : (
-                gainers.map((holding) => (
-                  <div
-                    key={holding.ticker}
-                    className="flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="font-medium">{holding.ticker}</p>
-                      <p className="text-sm text-gray-600">
-                        {formatCurrency(holding.current_value, holding.currency)}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium text-success">
-                        {holding.today_change_percent !== null && holding.today_change_percent !== undefined
-                          ? formatPercentage(holding.today_change_percent)
-                          : '—'}
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        {formatCurrency(holding.today_change, holding.currency)}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-sm font-semibold text-danger mb-3 flex items-center gap-2">
-              <TrendingDown className="h-4 w-4" />
-              Top Losers
-            </h3>
-            <div className="space-y-3">
-              {losers.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-4">No losers</p>
-              ) : (
-                losers.map((holding) => (
-                  <div
-                    key={holding.ticker}
-                    className="flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="font-medium">{holding.ticker}</p>
-                      <p className="text-sm text-gray-600">
-                        {formatCurrency(holding.current_value, holding.currency)}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium text-danger">
-                        {holding.today_change_percent !== null && holding.today_change_percent !== undefined
-                          ? formatPercentage(holding.today_change_percent)
-                          : '—'}
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        {formatCurrency(holding.today_change, holding.currency)}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+          <div className={`flex items-center gap-1 ${changeColor} min-w-max`}>
+            <Icon className="h-4 w-4" />
+            <span className="font-mono text-sm">{formatPercentage(mover.today_change_percent)}</span>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    );
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Gainers */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-success">
+            <TrendingUp className="h-5 w-5" />
+            Top Gainers
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {gainers.length === 0 ? (
+            <p className="text-gray-500 text-sm">No gainers today</p>
+          ) : (
+            <div className="space-y-0">
+              {gainers.slice(0, 5).map((mover, idx) => (
+                <MoverRow key={`${mover.type}-${mover.ticker}-${idx}`} mover={mover} isGainer={true} />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Losers */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-danger">
+            <TrendingDown className="h-5 w-5" />
+            Top Losers
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {losers.length === 0 ? (
+            <p className="text-gray-500 text-sm">No losers today</p>
+          ) : (
+            <div className="space-y-0">
+              {losers.slice(0, 5).map((mover, idx) => (
+                <MoverRow key={`${mover.type}-${mover.ticker}-${idx}`} mover={mover} isGainer={false} />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

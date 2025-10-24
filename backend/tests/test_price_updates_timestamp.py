@@ -294,19 +294,23 @@ class TestSystemStateManagerAsync:
             await async_db.commit()
 
         # Create state
-        await SystemStateManager.set_state_async(async_db, key, value1)
+        success1 = await SystemStateManager.set_state_async(async_db, key, value1)
+        assert success1
         result = await async_db.execute(
             select(SystemState).where(SystemState.key == key)
         )
         state1 = result.scalar_one_or_none()
+        assert state1 is not None
         assert state1.value == value1
 
         # Update state
-        await SystemStateManager.set_state_async(async_db, key, value2)
+        success2 = await SystemStateManager.set_state_async(async_db, key, value2)
+        assert success2
         result = await async_db.execute(
             select(SystemState).where(SystemState.key == key)
         )
         state2 = result.scalar_one_or_none()
+        assert state2 is not None
         assert state2.value == value2
 
         # Clean up
@@ -325,6 +329,17 @@ class TestSystemStateManagerAsync:
     @pytest.mark.asyncio
     async def test_update_price_last_update_async(self, async_db: AsyncSession):
         """Test updating price last update timestamp asynchronously."""
+        # Clean up any existing state first
+        existing = await async_db.execute(
+            select(SystemState).where(
+                SystemState.key == SystemStateManager.PRICE_LAST_UPDATE
+            )
+        )
+        existing_state = existing.scalar_one_or_none()
+        if existing_state:
+            await async_db.delete(existing_state)
+            await async_db.commit()
+
         before = datetime.utcnow()
 
         success = await SystemStateManager.update_price_last_update_async(async_db)

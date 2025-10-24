@@ -245,7 +245,7 @@ class PositionManager:
 
         # Recalculate ticker-based positions (where ISIN is NULL)
         for ticker in tickers_without_isin:
-            position = await PositionManager.recalculate_position(db, ticker=ticker)
+            position = await PositionManager.recalculate_position(db, isin=None, ticker=ticker)
             if position:
                 count += 1
 

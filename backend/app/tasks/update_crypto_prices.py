@@ -5,16 +5,14 @@ Fetches latest crypto prices from Yahoo Finance API for all active crypto positi
 Runs every 5 minutes to keep crypto prices current.
 """
 from celery import shared_task
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 import logging
 import time
-import json
 
-from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import PriceHistory, CryptoTransaction, CryptoTransactionType, CryptoPortfolio
 from app.services.price_fetcher import PriceFetcher
@@ -34,9 +32,9 @@ logger = logging.getLogger(__name__)
 def update_crypto_prices(self):
     """
     Fetch and store the latest EUR prices for all crypto assets referenced in transactions.
-    
+
     This task is idempotent for a given date: it will not create duplicate PriceHistory entries for the same ticker and date. For each active crypto symbol it fetches a real-time USD price, converts it to EUR (using a dynamic USD→EUR rate with a fallback), and inserts a PriceHistory record. Records created use the same value for open/high/low/close and volume 0; symbols that already have a price for the target date are skipped.
-    
+
     Returns:
         dict: Summary of the operation with keys:
             - status (str): "success" on normal completion.
@@ -69,7 +67,7 @@ def update_crypto_prices(self):
         # Get unique base currencies from active crypto portfolios
         currencies_result = db.execute(
             select(func.distinct(CryptoPortfolio.base_currency))
-            .where(CryptoPortfolio.is_active == True)
+            .where(CryptoPortfolio.is_active.is_(True))
         )
         base_currencies = [row[0] for row in currencies_result.all()]
 
@@ -159,7 +157,7 @@ def update_crypto_prices(self):
                     )
                     updated += 1
 
-                except IntegrityError as e:
+                except IntegrityError:
                     # Race condition: another process already inserted this price
                     db.rollback()
                     currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
@@ -213,15 +211,15 @@ def update_crypto_prices(self):
 def update_crypto_price_for_symbol(self, symbol: str, price_date: Optional[str] = None):
     """
     Update and store the price for a single cryptocurrency symbol for a given date.
-    
+
     If a PriceHistory entry for the symbol and date already exists, the operation is skipped.
     Otherwise the function fetches the current price (USD), converts it to EUR using a fallback rate,
     creates a PriceHistory record, and returns a result describing the outcome.
-    
+
     Parameters:
         symbol (str): Crypto symbol (e.g., "BTC", "ETH").
         price_date (str | None): ISO date string "YYYY-MM-DD". If None, uses today's date.
-    
+
     Returns:
         dict: Result payload with keys:
             - status (str): "success", "skipped", or "failed".
@@ -333,21 +331,24 @@ def update_crypto_price_for_symbol(self, symbol: str, price_date: Optional[str] 
     autoretry_for=(Exception,),
     retry_kwargs={'max_retries': 2, 'countdown': 60}
 )
-def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optional[str] = None):
+def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optional[str] = None, currency: str = "USD"):
     """
-    Backfill historical EUR-denominated prices for a crypto symbol over a date range.
-    
-    Fetches historical USD prices for `symbol` from Yahoo Finance, converts close prices to EUR using a fallback rate, and creates or updates PriceHistory records for each date in the range.
-    
+    Backfill historical prices for a crypto symbol over a date range in a specific currency.
+
+    Fetches historical prices directly from Yahoo Finance in the target currency (e.g., BTC-USD, BTC-EUR)
+    and creates or updates PriceHistory records for each date in the range with currency-specific ticker format.
+
     Parameters:
         symbol (str): Crypto symbol (e.g., "BTC") to backfill.
         start_date (str): Inclusive start date in "YYYY-MM-DD" format.
         end_date (str, optional): Inclusive end date in "YYYY-MM-DD" format; if None, uses today's date.
-    
+        currency (str): Target currency for prices ("USD", "EUR", etc.). Default: "USD".
+
     Returns:
         dict: Summary of the backfill operation containing:
             - status (str): "success" or "no_data".
             - symbol (str): The input symbol.
+            - currency (str): The target currency used.
             - start_date (str): Start date used.
             - end_date (str): End date used.
             - prices_added (int): Number of new records created.
@@ -355,7 +356,7 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
             - prices_skipped (int): Number of records skipped (unchanged or due to race conditions).
             - total_fetched (int): Number of price points fetched from the provider.
     """
-    logger.info(f"Starting crypto price backfill for {symbol}")
+    logger.info(f"Starting crypto price backfill for {symbol} in {currency}")
 
     db = SyncSessionLocal()
 
@@ -364,22 +365,25 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
         start = date.fromisoformat(start_date)
         end = date.fromisoformat(end_date) if end_date else date.today()
 
-        logger.info(f"Backfilling crypto prices for {symbol} from {start} to {end}")
+        logger.info(f"Backfilling crypto prices for {symbol} from {start} to {end} in {currency}")
 
-        # Fetch historical prices from Yahoo Finance
+        # Fetch historical prices from Yahoo Finance in the target currency
         price_fetcher = PriceFetcher()
-        yahoo_symbol = f"{symbol}-USD"
+        ticker_key = f"{symbol}-{currency.upper()}"
+        logger.info(f"Fetching historical prices for {ticker_key}")
+
         historical_prices = price_fetcher.fetch_historical_prices_sync(
-            ticker=yahoo_symbol,
+            ticker=ticker_key,
             start_date=start,
             end_date=end
         )
 
         if not historical_prices:
-            logger.warning("No historical crypto data for %s", symbol)
+            logger.warning("No historical crypto data for %s in %s", symbol, currency)
             return {
                 "status": "no_data",
                 "symbol": symbol,
+                "currency": currency,
                 "start_date": str(start),
                 "end_date": str(end),
                 "prices_added": 0,
@@ -387,13 +391,6 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
                 "prices_skipped": 0,
                 "total_fetched": 0
             }
-        # Fetch USD→EUR rate once for all historical prices
-        try:
-            usd_to_eur_rate = get_exchange_rate("USD", "EUR")
-            logger.info(f"Using dynamic USD→EUR rate: {usd_to_eur_rate}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch USD→EUR rate for backfill: {e}. Using fallback rate.")
-            usd_to_eur_rate = Decimal("0.92")
 
         # Save prices to database
         prices_added = 0
@@ -402,39 +399,38 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
 
         for price_data in historical_prices:
             try:
-                # Convert to EUR if needed (Yahoo returns USD)
-                price_usd = price_data["close"]
-                price_eur = price_usd * usd_to_eur_rate
+                # Use price directly (no conversion needed)
+                price = price_data["close"]
 
-                # Check if price already exists
+                # Check if price already exists using currency-specific ticker
                 existing = db.execute(
                     select(PriceHistory).where(
-                        PriceHistory.ticker == symbol,
+                        PriceHistory.ticker == ticker_key,
                         PriceHistory.date == price_data["date"]
                     )
                 ).scalar_one_or_none()
 
                 if existing:
                     # Update existing price if values differ
-                    if existing.close != price_eur:
-                        existing.open = price_eur
-                        existing.high = price_eur
-                        existing.low = price_eur
-                        existing.close = price_eur
+                    if existing.close != price:
+                        existing.open = price
+                        existing.high = price
+                        existing.low = price
+                        existing.close = price
                         existing.volume = 0  # Yahoo Finance historical data doesn't include volume in this endpoint
                         existing.source = "yahoo"
                         prices_updated += 1
                     else:
                         prices_skipped += 1
                 else:
-                    # Add new price record
+                    # Add new price record with currency-specific ticker
                     price_record = PriceHistory(
-                        ticker=symbol,
+                        ticker=ticker_key,
                         date=price_data["date"],
-                        open=price_eur,
-                        high=price_eur,
-                        low=price_eur,
-                        close=price_eur,
+                        open=price,
+                        high=price,
+                        low=price,
+                        close=price,
                         volume=0,  # Yahoo Finance historical data doesn't include volume in this endpoint
                         source="yahoo"
                     )
@@ -453,6 +449,7 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
         summary = {
             "status": "success",
             "symbol": symbol,
+            "currency": currency,
             "start_date": str(start),
             "end_date": str(end),
             "prices_added": prices_added,
@@ -462,7 +459,7 @@ def backfill_crypto_prices(self, symbol: str, start_date: str, end_date: Optiona
         }
 
         logger.info(
-            f"Crypto price backfill complete for {symbol}: "
+            f"Crypto price backfill complete for {symbol} in {currency}: "
             f"{prices_added} added, {prices_updated} updated, {prices_skipped} skipped"
         )
 
