@@ -12,6 +12,7 @@ from datetime import datetime
 import logging
 import asyncio
 import requests.exceptions
+import yfinance as yf
 
 from app.database import get_db
 from app.models import Transaction, TransactionType

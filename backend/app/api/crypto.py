@@ -523,7 +523,8 @@ the persisted CryptoTransaction with database-populated fields.
 
     Parameters:
         portfolio_id (int): ID of the portfolio to which the transaction will be added.
-        transaction_data (CryptoTransactionCreate): Transaction payload containing symbol, quantity, price, timestamp, and optional fields.
+        transaction_data (CryptoTransactionCreate): Transaction payload containing
+            symbol, quantity, price, timestamp, and optional fields.
 
     Returns:
         CryptoTransaction: The created and refreshed transaction instance with persisted fields populated.
@@ -1455,4 +1456,3 @@ async def crypto_health_check():
             "error": str(e),
             "timestamp": datetime.utcnow()
         }
-
