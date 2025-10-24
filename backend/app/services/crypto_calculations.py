@@ -36,7 +36,7 @@ class CryptoCalculationService:
     def __init__(self, db: AsyncSession):
         """
         Create a CryptoCalculationService bound to a database session.
-        
+
         Parameters:
             db (AsyncSession): Async SQLAlchemy session used for database queries and mutations by the service.
         """
@@ -45,14 +45,14 @@ class CryptoCalculationService:
     async def calculate_portfolio_metrics(self, portfolio_id: int) -> Optional[CryptoPortfolioMetrics]:
         """
         Compute comprehensive metrics for a crypto portfolio identified by portfolio_id.
-        
+
         Calculates current holdings using FIFO, fetches current prices, computes total value, cost basis,
         realized and unrealized gains/losses, deposits and withdrawals, asset allocation, currency breakdown,
         and internal rate of return. Returns None if the portfolio does not exist or if an error occurs during calculation.
-        
+
         Parameters:
             portfolio_id (int): Database identifier of the crypto portfolio to analyze.
-        
+
         Returns:
             CryptoPortfolioMetrics or None: Aggregated portfolio metrics when successful, or `None` if the portfolio
             is not found or a processing error occurred.
@@ -473,10 +473,10 @@ class CryptoCalculationService:
     async def _calculate_holdings(self, transactions: List[CryptoTransaction]) -> Dict[str, Dict]:
         """
         Build current holdings per symbol by applying FIFO to the provided transactions.
-        
+
         Parameters:
             transactions: Ordered list of portfolio crypto transactions (chronological) used to derive remaining lots.
-        
+
         Returns:
             Dict mapping symbol (str) to a holding dict containing:
                 - quantity (Decimal): total remaining quantity for the symbol.
@@ -543,11 +543,11 @@ class CryptoCalculationService:
     async def _get_current_prices(self, symbols: List[str], currency: str) -> Dict[str, Dict]:
         """
         Fetch current market prices for the provided crypto symbols and return per-symbol price metadata converted to the requested currency.
-        
+
         Parameters:
             symbols (List[str]): Crypto symbols to query (e.g., "BTC", "ETH").
             currency (str): Target currency code for returned prices (e.g., "EUR" or "USD").
-        
+
         Returns:
             Dict[str, Dict]: Mapping from symbol to a metadata dictionary containing:
                 - `symbol`: the queried symbol
@@ -556,7 +556,7 @@ class CryptoCalculationService:
                 - `price_usd`: source price in USD as returned by the provider
                 - `timestamp`: UTC timestamp when the price was recorded
                 - `source`: price data source identifier
-        
+
         Notes:
             Symbols for which no price could be obtained are omitted from the returned dictionary.
         """
@@ -660,9 +660,9 @@ class CryptoCalculationService:
     async def _get_usd_to_eur_rate(self) -> Optional[Decimal]:
         """
         Retrieve the USD to EUR conversion rate from Yahoo Finance.
-        
+
         Attempts to fetch the FX rate and returns it; if no rate is available or an error occurs, returns a fallback Decimal("0.92").
-        
+
         Returns:
             Decimal: USD→EUR conversion rate, or Decimal("0.92") as a fallback when the fetched rate is unavailable or an error occurs.
         """
@@ -683,13 +683,13 @@ class CryptoCalculationService:
     async def _calculate_irr(self, transactions: List[CryptoTransaction], current_value: Decimal) -> Optional[float]:
         """
         Compute the portfolio's internal rate of return (IRR) from transaction cash flows and current value.
-        
+
         Builds cash flows from transactions (treats BUY as cash outflow, SELL as cash inflow, skips transfers), appends the provided current_value as the final cash inflow dated today, and computes the IRR on the resulting ordered cash flows.
-        
+
         Parameters:
             transactions (List[CryptoTransaction]): Chronological list of portfolio transactions used to build cash flows.
             current_value (Decimal): Current total portfolio value included as the final cash inflow.
-        
+
         Returns:
             Optional[float]: IRR expressed as a percentage (e.g., 12.5 for 12.5%), or `None` if there are no cash flows or the IRR cannot be computed.
         """
@@ -737,7 +737,7 @@ class CryptoCalculationService:
     async def calculate_portfolio_summary(self, portfolio_id: int) -> Dict[str, Any]:
         """
         Produce a consolidated view of a crypto portfolio including its metadata, computed metrics, current holdings, and the most recent transactions.
-        
+
         Returns:
             A dictionary with keys:
               - 'portfolio': the CryptoPortfolio instance for the requested ID.

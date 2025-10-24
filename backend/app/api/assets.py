@@ -128,7 +128,7 @@ async def search_assets(
         # Filter common assets by query (fast, in-memory)
         for item in COMMON_ASSETS:
             if (query_lower in item["ticker"].lower() or
-                query_lower in item["name"].lower()):
+                    query_lower in item["name"].lower()):
                 search_results.append(item)
 
         # If we have fewer than 5 results, try to fetch additional info from yfinance

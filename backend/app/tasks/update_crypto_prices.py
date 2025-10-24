@@ -5,16 +5,14 @@ Fetches latest crypto prices from Yahoo Finance API for all active crypto positi
 Runs every 5 minutes to keep crypto prices current.
 """
 from celery import shared_task
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 import logging
 import time
-import json
 
-from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import PriceHistory, CryptoTransaction, CryptoTransactionType, CryptoPortfolio
 from app.services.price_fetcher import PriceFetcher
@@ -34,9 +32,9 @@ logger = logging.getLogger(__name__)
 def update_crypto_prices(self):
     """
     Fetch and store the latest EUR prices for all crypto assets referenced in transactions.
-    
+
     This task is idempotent for a given date: it will not create duplicate PriceHistory entries for the same ticker and date. For each active crypto symbol it fetches a real-time USD price, converts it to EUR (using a dynamic USD→EUR rate with a fallback), and inserts a PriceHistory record. Records created use the same value for open/high/low/close and volume 0; symbols that already have a price for the target date are skipped.
-    
+
     Returns:
         dict: Summary of the operation with keys:
             - status (str): "success" on normal completion.
@@ -69,7 +67,7 @@ def update_crypto_prices(self):
         # Get unique base currencies from active crypto portfolios
         currencies_result = db.execute(
             select(func.distinct(CryptoPortfolio.base_currency))
-            .where(CryptoPortfolio.is_active == True)
+            .where(CryptoPortfolio.is_active.is_(True))
         )
         base_currencies = [row[0] for row in currencies_result.all()]
 
@@ -159,7 +157,7 @@ def update_crypto_prices(self):
                     )
                     updated += 1
 
-                except IntegrityError as e:
+                except IntegrityError:
                     # Race condition: another process already inserted this price
                     db.rollback()
                     currency_upper = base_currency.upper() if isinstance(base_currency, str) else base_currency.value.upper()
@@ -213,15 +211,15 @@ def update_crypto_prices(self):
 def update_crypto_price_for_symbol(self, symbol: str, price_date: Optional[str] = None):
     """
     Update and store the price for a single cryptocurrency symbol for a given date.
-    
+
     If a PriceHistory entry for the symbol and date already exists, the operation is skipped.
     Otherwise the function fetches the current price (USD), converts it to EUR using a fallback rate,
     creates a PriceHistory record, and returns a result describing the outcome.
-    
+
     Parameters:
         symbol (str): Crypto symbol (e.g., "BTC", "ETH").
         price_date (str | None): ISO date string "YYYY-MM-DD". If None, uses today's date.
-    
+
     Returns:
         dict: Result payload with keys:
             - status (str): "success", "skipped", or "failed".

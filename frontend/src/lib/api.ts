@@ -170,7 +170,6 @@ export async function getPerformanceData(range: string): Promise<PerformanceData
       ...(benchmarkMap.has(point.date) && { benchmark: benchmarkMap.get(point.date) })
     };
   });
-  }));
 }
 
 // Asset Detail
@@ -449,8 +448,8 @@ export async function getCryptoPortfolioMetrics(
 }
 
 // Crypto Search
-export async function searchCryptoAssets(query: string): Promise<CryptoSearchResult[]> {
-  return apiRequest<CryptoSearchResult[]>({
+export async function searchCryptoAssets(query: string): Promise<TickerSearchResult[]> {
+  return apiRequest<TickerSearchResult[]>({
     method: 'GET',
     url: '/crypto/search',
     params: { q: query },

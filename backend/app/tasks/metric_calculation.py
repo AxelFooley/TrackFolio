@@ -7,10 +7,8 @@ from celery import shared_task
 from datetime import datetime, timedelta, date
 from decimal import Decimal
 from sqlalchemy import select, update, delete
-from sqlalchemy.exc import IntegrityError
 import logging
 
-from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import Position, Transaction, PriceHistory, CachedMetrics, TransactionType
 from app.services.calculations import FinancialCalculations

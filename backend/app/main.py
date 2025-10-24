@@ -36,9 +36,11 @@ def _get_cache_key() -> str:
     """Generate cache key for health check."""
     return f"health:{settings.environment}"
 
+
 def _is_cache_valid(timestamp: float) -> bool:
     """Check if cache entry is still valid."""
     return time.time() - timestamp < _HEALTH_CACHE_TTL
+
 
 def _get_cached_health() -> Dict[str, Any] | None:
     """Get cached health data if valid."""
@@ -53,6 +55,7 @@ def _get_cached_health() -> Dict[str, Any] | None:
             del _health_cache[cache_key]
     return None
 
+
 def _cache_health_data(data: Dict[str, Any]) -> None:
     """Cache health check data with timestamp."""
     cache_key = _get_cache_key()
@@ -61,6 +64,7 @@ def _cache_health_data(data: Dict[str, Any]) -> None:
         "timestamp": time.time()
     }
     logger.debug("Cached health check data")
+
 
 # Create FastAPI app
 app = FastAPI(

@@ -12,10 +12,9 @@ from app.models import Position, PortfolioSnapshot, PriceHistory, CachedMetrics,
 from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance, PerformanceDataPoint
 from app.schemas.position import PositionResponse
 from app.schemas.unified import (
-    UnifiedHolding, UnifiedOverview, UnifiedPerformance, UnifiedMovers,
+    UnifiedHolding, UnifiedOverview, UnifiedMovers,
     UnifiedSummary, UnifiedPerformanceDataPoint
 )
-from app.services.price_fetcher import PriceFetcher
 from app.services.portfolio_aggregator import PortfolioAggregator
 
 logger = logging.getLogger(__name__)
@@ -229,7 +228,7 @@ async def get_holdings(db: AsyncSession = Depends(get_db)):
             else None
         )
 
-      # Calculate today's change using helper function
+        # Calculate today's change using helper function
         today_change, today_change_percent = calculate_today_change(
             position.quantity,
             price_history

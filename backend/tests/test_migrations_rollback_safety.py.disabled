@@ -74,11 +74,28 @@ class TestMigrationUpgrade:
         assert isin_column['nullable'] is False, "Before migration: ISIN should be NOT NULL"
 
         # Simulate upgrade: make ISIN nullable
+        # SQLite doesn't support ALTER TABLE to modify column constraints,
+        # so we'll create a new table and copy the data (simulating migration)
         with engine.connect() as conn:
             conn.execute(text("""
-                ALTER TABLE transactions
-                MODIFY COLUMN isin VARCHAR(12) NULL
+                CREATE TABLE transactions_new (
+                    id INTEGER PRIMARY KEY,
+                    isin VARCHAR(12),
+                    ticker VARCHAR(20) NOT NULL,
+                    quantity DECIMAL NOT NULL,
+                    price DECIMAL NOT NULL,
+                    operation_date TIMESTAMP NOT NULL,
+                    value_date TIMESTAMP NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             """))
+            conn.execute(text("""
+                INSERT INTO transactions_new (id, isin, ticker, quantity, price, operation_date, value_date, created_at)
+                SELECT id, isin, ticker, quantity, price, operation_date, value_date, created_at
+                FROM transactions
+            """))
+            conn.execute(text("DROP TABLE transactions"))
+            conn.execute(text("ALTER TABLE transactions_new RENAME TO transactions"))
             conn.commit()
 
         # Verify ISIN is now nullable after migration
@@ -121,7 +138,7 @@ class TestMigrationUpgrade:
         with engine.connect() as conn:
             conn.execute(text("""
                 ALTER TABLE positions
-                MODIFY COLUMN isin VARCHAR(12) NULL
+                isin VARCHAR(12)
             """))
             conn.commit()
 
@@ -164,7 +181,7 @@ class TestMigrationUpgrade:
         with engine.connect() as conn:
             conn.execute(text("""
                 ALTER TABLE transactions
-                MODIFY COLUMN isin VARCHAR(12) NULL
+                isin VARCHAR(12)
             """))
             conn.commit()
 
@@ -319,7 +336,7 @@ class TestMigrationDowngradeWithNullValues:
             try:
                 conn.execute(text("""
                     ALTER TABLE transactions
-                    MODIFY COLUMN isin VARCHAR(12) NOT NULL
+                    isin VARCHAR(12) NOT NULL
                 """))
                 conn.commit()
                 # If we get here, downgrade succeeded
@@ -410,7 +427,7 @@ class TestMigrationDataConsistency:
         with engine.connect() as conn:
             conn.execute(text("""
                 ALTER TABLE transactions
-                MODIFY COLUMN isin VARCHAR(12) NULL
+                isin VARCHAR(12)
             """))
             conn.commit()
 
@@ -452,7 +469,7 @@ class TestMigrationDataConsistency:
         with engine.connect() as conn:
             conn.execute(text("""
                 ALTER TABLE transactions
-                MODIFY COLUMN isin VARCHAR(12) NULL
+                isin VARCHAR(12)
             """))
             conn.commit()
 
@@ -491,7 +508,7 @@ class TestMigrationDataConsistency:
         with engine.connect() as conn:
             conn.execute(text("""
                 ALTER TABLE transactions
-                MODIFY COLUMN isin VARCHAR(12) NULL
+                isin VARCHAR(12)
             """))
             conn.commit()
 
@@ -538,7 +555,7 @@ class TestMigrationIdempotency:
             try:
                 conn.execute(text("""
                     ALTER TABLE transactions
-                    MODIFY COLUMN isin VARCHAR(12) NULL
+                    isin VARCHAR(12)
                 """))
                 conn.commit()
                 first_run_success = True
@@ -554,7 +571,7 @@ class TestMigrationIdempotency:
                 # The key is the migration handles it gracefully
                 conn.execute(text("""
                     ALTER TABLE transactions
-                    MODIFY COLUMN isin VARCHAR(12) NULL
+                    isin VARCHAR(12)
                 """))
                 conn.commit()
                 second_run_safe = True
@@ -675,7 +692,7 @@ class TestMigrationRollbackScenarios:
             try:
                 conn.execute(text("""
                     ALTER TABLE transactions
-                    MODIFY COLUMN isin VARCHAR(12) NOT NULL
+                    isin VARCHAR(12) NOT NULL
                 """))
                 conn.commit()
                 assert True, "Downgrade should succeed after fixing NULL values"

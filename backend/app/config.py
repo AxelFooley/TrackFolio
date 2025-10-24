@@ -27,7 +27,6 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    
     # Timezone
     timezone: str = "Europe/Rome"
 

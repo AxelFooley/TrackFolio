@@ -38,15 +38,15 @@ class CryptoWalletService:
     ) -> Dict[str, Any]:
         """
         Configure a Bitcoin wallet address for a crypto portfolio.
-        
+
         Validates the portfolio exists and the wallet address format, persists the trimmed
         address and updated timestamp, clears deduplication cache for the portfolio, and
         returns a summary of the operation.
-        
+
         Parameters:
             portfolio_id (int): ID of the crypto portfolio to configure.
             wallet_address (str): Bitcoin wallet address to associate with the portfolio.
-        
+
         Returns:
             result (dict): Operation outcome. Typical keys:
                 - success (bool): `True` on success, `False` on failure.
@@ -110,10 +110,10 @@ class CryptoWalletService:
     async def get_wallet_status(self, portfolio_id: int) -> Dict[str, Any]:
         """
         Retrieve status and aggregated statistics for a portfolio's Bitcoin wallet.
-        
+
         Parameters:
             portfolio_id (int): ID of the crypto portfolio to inspect.
-        
+
         Returns:
             dict: A status payload containing:
                 - success (bool): `True` on success, `False` on error.
@@ -244,11 +244,11 @@ class CryptoWalletService:
     ) -> Dict[str, Any]:
         """
         Return the wallet's running balance history and current balance for a portfolio over a lookback period.
-        
+
         Parameters:
             portfolio_id (int): ID of the crypto portfolio to query.
             days_back (int): Number of days to include in the history (default 30).
-        
+
         Returns:
             dict: On success, a dictionary containing:
                 - `success` (bool): True.
@@ -347,14 +347,14 @@ class CryptoWalletService:
     ) -> Dict[str, Any]:
         """
         Trigger a manual synchronization of blockchain transactions for a portfolio's configured Bitcoin wallet.
-        
+
         Fetches transactions from the blockchain for the portfolio's wallet address, filters duplicates, inserts new CryptoTransaction records, and commits the results.
-        
+
         Parameters:
             portfolio_id (int): ID of the crypto portfolio to sync.
             max_transactions (int): Maximum number of transactions to fetch from the blockchain (default 50).
             days_back (int): Number of days to look back when fetching transactions (default 7).
-        
+
         Returns:
             dict: Summary of the synchronization containing:
                 - success (bool): `true` if the sync completed without a top-level failure, `false` otherwise.
@@ -444,7 +444,7 @@ class CryptoWalletService:
 
             return {
                 "success": True,
-                "message": f"Wallet sync completed",
+                "message": "Wallet sync completed",
                 "portfolio_id": portfolio_id,
                 "wallet_address": portfolio.wallet_address,
                 "transactions_imported": imported_count,
@@ -466,10 +466,10 @@ class CryptoWalletService:
     async def remove_wallet_configuration(self, portfolio_id: int) -> Dict[str, Any]:
         """
         Remove the configured wallet address from the specified portfolio and clear related deduplication cache.
-        
+
         Parameters:
             portfolio_id (int): ID of the crypto portfolio to update.
-        
+
         Returns:
             dict: Result object with:
                 - `success` (bool): `True` if the configuration was removed, `False` otherwise.
@@ -527,12 +527,12 @@ class CryptoWalletService:
     def _validate_bitcoin_address(self, address: str) -> bool:
         """
         Perform basic format validation of a Bitcoin address.
-        
+
         Validates common Bitcoin address formats: Bech32 addresses starting with "bc1" (checks length and Bech32 character set) and Base58 addresses starting with "1" or "3" (checks length and Base58 character set). This is a syntactic check only; it does not verify checksums or consult external services.
-        
+
         Parameters:
             address (str): Bitcoin address to validate.
-        
+
         Returns:
             bool: `True` if the address appears to be a valid Bitcoin address format, `False` otherwise.
         """

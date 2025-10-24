@@ -22,18 +22,19 @@ from app.models import (
     Transaction, Position, PriceHistory, PortfolioSnapshot,
     Benchmark, StockSplit, CachedMetrics
 )
+from sqlalchemy import select
 from app.models.crypto import (
-    CryptoPortfolio, CryptoTransaction, CryptoPosition,
+    CryptoPortfolio, CryptoTransaction,
     CryptoCurrency, CryptoTransactionType
 )
 from app.services.calculations import FinancialCalculations
 from app.services.position_manager import PositionManager
 from app.services.price_history_manager import PriceHistoryManager
 from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance
-from app.api.portfolio import get_portfolio_overview, get_holdings, get_performance_data
+from app.api.portfolio import get_portfolio_overview, get_holdings, get_performance
 from app.api.crypto import (
-    create_crypto_portfolio, get_crypto_holdings,
-    create_crypto_transaction, get_crypto_performance_data
+    create_crypto_portfolio, get_crypto_portfolio_holdings,
+    create_crypto_transaction, get_crypto_portfolio_performance
 )
 from app.config import settings
 
@@ -53,6 +54,7 @@ class TestUnifiedPortfolioAggregation:
         return [
             {
                 'operation_date': datetime(2023, 1, 15).date(),
+                'value_date': datetime(2023, 1, 15).date(),
                 'transaction_type': 'BUY',
                 'ticker': 'AAPL',
                 'isin': 'US0378331005',
@@ -60,13 +62,15 @@ class TestUnifiedPortfolioAggregation:
                 'quantity': Decimal('10'),
                 'price_per_share': Decimal('150.00'),
                 'amount_eur': Decimal('1500.00'),
+                'amount_currency': Decimal('1500.00'),
                 'currency': 'USD',
                 'fees': Decimal('5.00'),
-                'transaction_hash': 'aapl_buy_001',
-                'broker': 'Test Broker'
+                'order_reference': 'ORD001',
+                'transaction_hash': 'aapl_buy_001'
             },
             {
                 'operation_date': datetime(2023, 2, 20).date(),
+                'value_date': datetime(2023, 2, 20).date(),
                 'transaction_type': 'BUY',
                 'ticker': 'GOOGL',
                 'isin': 'US38259A1078',
@@ -74,13 +78,15 @@ class TestUnifiedPortfolioAggregation:
                 'quantity': Decimal('5'),
                 'price_per_share': Decimal('100.00'),
                 'amount_eur': Decimal('500.00'),
+                'amount_currency': Decimal('500.00'),
                 'currency': 'USD',
                 'fees': Decimal('3.00'),
-                'transaction_hash': 'googl_buy_001',
-                'broker': 'Test Broker'
+                'order_reference': 'ORD002',
+                'transaction_hash': 'googl_buy_001'
             },
             {
                 'operation_date': datetime(2023, 3, 10).date(),
+                'value_date': datetime(2023, 3, 10).date(),
                 'transaction_type': 'SELL',
                 'ticker': 'AAPL',
                 'isin': 'US0378331005',
@@ -88,10 +94,11 @@ class TestUnifiedPortfolioAggregation:
                 'quantity': Decimal('2'),
                 'price_per_share': Decimal('160.00'),
                 'amount_eur': Decimal('320.00'),
+                'amount_currency': Decimal('320.00'),
                 'currency': 'USD',
                 'fees': Decimal('2.00'),
-                'transaction_hash': 'aapl_sell_001',
-                'broker': 'Test Broker'
+                'order_reference': 'ORD003',
+                'transaction_hash': 'aapl_sell_001'
             }
         ]
 
@@ -104,7 +111,9 @@ class TestUnifiedPortfolioAggregation:
                 'transaction_type': 'BUY',
                 'quantity': Decimal('0.1'),
                 'price_at_execution': Decimal('50000.00'),
+                'total_amount': Decimal('5000.00'),
                 'fee': Decimal('10.00'),
+                'fee_currency': 'USD',
                 'currency': 'USD',
                 'timestamp': datetime(2023, 2, 1),
                 'exchange': 'Binance',
@@ -115,7 +124,9 @@ class TestUnifiedPortfolioAggregation:
                 'transaction_type': 'BUY',
                 'quantity': Decimal('2.0'),
                 'price_at_execution': Decimal('3000.00'),
+                'total_amount': Decimal('6000.00'),
                 'fee': Decimal('5.00'),
+                'fee_currency': 'USD',
                 'currency': 'USD',
                 'timestamp': datetime(2023, 2, 15),
                 'exchange': 'Coinbase',
@@ -126,7 +137,9 @@ class TestUnifiedPortfolioAggregation:
                 'transaction_type': 'SELL',
                 'quantity': Decimal('0.05'),
                 'price_at_execution': Decimal('51000.00'),
+                'total_amount': Decimal('2550.00'),
                 'fee': Decimal('8.00'),
+                'fee_currency': 'USD',
                 'currency': 'USD',
                 'timestamp': datetime(2023, 3, 1),
                 'exchange': 'Binance',
@@ -144,8 +157,9 @@ class TestUnifiedPortfolioAggregation:
         db_session.commit()
 
         # Calculate positions
-        position_manager = PositionManager()
-        positions = position_manager.calculate_positions(db_session)
+        await PositionManager.recalculate_all_positions(db_session)
+        positions = await db_session.execute(select(Position))
+        positions = positions.scalars().all()
 
         # Verify positions were calculated correctly
         assert len(positions) >= 1  # Should have at least one position (AAPL)
@@ -178,7 +192,7 @@ class TestUnifiedPortfolioAggregation:
         db_session.commit()
 
         # Calculate crypto holdings
-        holdings = get_crypto_holdings(crypto_portfolio.id)
+        holdings = get_crypto_portfolio_holdings(crypto_portfolio.id)
         assert holdings is not None
         assert len(holdings) >= 1  # Should have at least BTC position
 
@@ -214,7 +228,7 @@ class TestUnifiedPortfolioAggregation:
         db_session.commit()
 
         # Test unified portfolio overview
-        overview = get_portfolio_overview()
+        overview = await get_portfolio_overview(db_session)
         assert overview is not None
         assert overview.current_value >= 0
         assert overview.total_cost_basis >= 0
@@ -222,7 +236,7 @@ class TestUnifiedPortfolioAggregation:
         assert overview.currency in ['USD', 'EUR']
 
         # Test unified holdings
-        holdings = get_holdings()
+        holdings = await get_holdings(db_session)
         assert holdings is not None
         assert len(holdings) >= 1  # Should have positions from both portfolio types
 
@@ -279,7 +293,7 @@ class TestUnifiedPortfolioAggregation:
         db_session.commit()
 
         # Test performance data calculation
-        performance = get_performance_data('3M')
+        performance = await get_performance(db_session, '3M')
         assert performance is not None
         assert len(performance.portfolio_data) >= 1
         assert performance.portfolio_start_value is not None
@@ -415,7 +429,7 @@ class TestMultiPortfolioManagement:
         # Test performance calculation for each portfolio
         performances = []
         for portfolio in created_portfolios:
-            performance = get_crypto_performance_data(portfolio.id, '1M')
+            performance = await get_crypto_portfolio_performance(portfolio.id, '1M')
             assert performance is not None
             assert len(performance) >= 1
             performances.append(performance)
@@ -475,8 +489,8 @@ class TestMultiPortfolioManagement:
         db_session.commit()
 
         # Test individual portfolio holdings
-        holdings1 = get_crypto_holdings(portfolio1.id)
-        holdings2 = get_crypto_holdings(portfolio2.id)
+        holdings1 = get_crypto_portfolio_holdings(portfolio1.id)
+        holdings2 = get_crypto_portfolio_holdings(portfolio2.id)
 
         assert len(holdings1) == 1
         assert len(holdings2) == 1
@@ -601,8 +615,8 @@ class TestTransactionSynchronization:
         db_session.commit()
 
         # Both transactions should exist in their respective portfolios
-        holdings1 = get_crypto_holdings(portfolio1.id)
-        holdings2 = get_crypto_holdings(portfolio2.id)
+        holdings1 = get_crypto_portfolio_holdings(portfolio1.id)
+        holdings2 = get_crypto_portfolio_holdings(portfolio2.id)
 
         assert len(holdings1) == 1
         assert len(holdings2) == 1
@@ -740,7 +754,7 @@ class TestAPIEndpointIntegration:
     @pytest.mark.asyncio
     async def test_performance_endpoint(self, async_db_session):
         """Test performance API endpoint."""
-        performance = await get_performance_data(async_db_session, '3M')
+        performance = await get_performance(async_db_session, '3M')
         assert performance is not None
         assert isinstance(performance, PortfolioPerformance)
         assert len(performance.portfolio_data) >= 0
@@ -752,7 +766,7 @@ class TestAPIEndpointIntegration:
         """Test error handling in API endpoints."""
         # Test with invalid time range
         with pytest.raises(Exception):  # Should raise appropriate exception
-            await get_performance_data(async_db_session, 'INVALID_RANGE')
+            await get_performance(async_db_session, 'INVALID_RANGE')
 
         # Test database connection errors (mocked)
         with patch('app.database.get_db') as mock_get_db:

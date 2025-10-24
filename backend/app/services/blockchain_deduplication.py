@@ -7,13 +7,12 @@ for transaction matching and deduplication.
 """
 import hashlib
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set, Tuple
 import logging
 import redis
 
 from app.config import settings
 from app.database import SyncSessionLocal
-from app.models.crypto import CryptoTransaction
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
@@ -38,8 +37,9 @@ class BlockchainDeduplicationService:
     def __init__(self):
         """
         Initialize the deduplication service and attempt to establish a Redis connection.
-        
-        Sets up in-memory caches for portfolio transaction hashes and their timestamps. If a Redis connection cannot be established, falls back to in-memory caching and logs the failure.
+
+        Sets up in-memory caches for portfolio transaction hashes and their timestamps.
+        If a Redis connection cannot be established, falls back to in-memory caching and logs the failure.
         """
         self._redis_client = None
         self._memory_cache: Dict[str, Set[str]] = {}  # portfolio_id -> set of hashes
@@ -63,7 +63,8 @@ class BlockchainDeduplicationService:
         Retrieve all non-null transaction hashes for the given portfolio from the database.
 
         Returns:
-            Set[str]: A set of transaction hash strings for the portfolio. Returns an empty set if no hashes are found or if a database error occurs.
+            Set[str]: A set of transaction hash strings for the portfolio. Returns an empty set if no
+                    hashes are found or if a database error occurs.
         """
         db = SyncSessionLocal()
         try:
@@ -84,7 +85,7 @@ class BlockchainDeduplicationService:
     def get_portfolio_transaction_hashes(self, portfolio_id: int) -> Set[str]:
         """
         Retrieve the set of known transaction hashes for a portfolio, checking caches before querying the database.
-        
+
         Returns:
             A set of transaction hash strings belonging to the specified portfolio.
         """
@@ -149,7 +150,7 @@ class BlockchainDeduplicationService:
     def _cleanup_memory_cache(self) -> None:
         """
         Remove oldest portfolio entries from the in-memory cache when it grows beyond the configured BULK_CACHE_SIZE.
-        
+
         When the number of cached portfolios exceeds BULK_CACHE_SIZE, this method retains only the most recently updated half of the entries and discards older ones. It updates both _memory_cache and _cache_timestamps and logs the resulting cache size.
         """
         if len(self._memory_cache) <= self.BULK_CACHE_SIZE:
@@ -179,11 +180,11 @@ class BlockchainDeduplicationService:
     def is_duplicate_transaction(self, portfolio_id: int, transaction_hash: str) -> bool:
         """
         Determine whether a transaction hash already exists for the given portfolio.
-        
+
         Parameters:
             portfolio_id (int): Identifier of the portfolio to check.
             transaction_hash (str): Transaction hash to look up.
-        
+
         Returns:
             True if the transaction hash already exists for the portfolio, False otherwise.
         """
@@ -196,7 +197,7 @@ class BlockchainDeduplicationService:
     def add_transaction_hash(self, portfolio_id: int, transaction_hash: str) -> None:
         """
         Add a transaction hash to the portfolio's deduplication registry.
-        
+
         If `transaction_hash` is falsy or already present for the portfolio, the method does nothing; otherwise it updates the service caches for the portfolio.
         """
         if not transaction_hash:
@@ -249,11 +250,11 @@ class BlockchainDeduplicationService:
     ) -> Tuple[List[Dict[str, any]], List[str]]:
         """
         Filter out transactions that appear to already exist for a given portfolio.
-        
+
         Parameters:
             portfolio_id (int): Identifier of the portfolio whose existing transactions are used for deduplication.
             transactions (List[Dict[str, any]]): List of transaction dictionaries; each may include a 'transaction_hash' key used to identify duplicates.
-        
+
         Returns:
             Tuple[List[Dict[str, any]], List[str]]: A tuple where the first element is the list of transactions that are not duplicates, and the second element is the list of transaction hashes that were identified as duplicates.
         """
@@ -281,13 +282,13 @@ class BlockchainDeduplicationService:
     ) -> str:
         """
         Create a deterministic fingerprint for a transaction using key identifying fields.
-        
+
         Parameters:
             tx_data (Dict[str, any]): Transaction dictionary; expected keys include
                 'symbol', 'timestamp', 'quantity', 'transaction_type',
                 'exchange', and 'transaction_hash'. Missing keys are treated as empty.
             portfolio_id (int): Portfolio identifier included in the fingerprint to scope it.
-        
+
         Returns:
             fingerprint (str): SHA-256 hex digest of the concatenated identifying fields.
         """
@@ -313,14 +314,14 @@ class BlockchainDeduplicationService:
     ) -> List[Tuple[Dict[str, any], Dict[str, any]]]:
         """
         Find transactions that are likely duplicates by comparing input transactions against the portfolio's recent transactions.
-        
+
         Compares each provided transaction to recent transactions for the given portfolio (last 30 days) and returns pairs whose similarity meets or exceeds the similarity_threshold.
-        
+
         Parameters:
             portfolio_id (int): Portfolio identifier whose recent transactions are used for comparison.
             transactions (List[Dict[str, any]]): Transactions to check for potential duplicates.
             similarity_threshold (float): Minimum similarity score between 0.0 and 1.0 required to consider a pair a potential duplicate.
-        
+
         Returns:
             List[Tuple[Dict[str, any], Dict[str, any]]]: List of pairs (input_transaction, existing_transaction) that meet or exceed the similarity_threshold.
         """
@@ -375,14 +376,14 @@ class BlockchainDeduplicationService:
     ) -> float:
         """
         Compute a normalized similarity score between two transactions.
-        
+
         Both inputs may be a mapping with keys `symbol`, `timestamp`, `quantity`, `transaction_type`, `exchange`, and `transaction_hash`,
         or a tuple with that exact ordering: (symbol, timestamp, quantity, transaction_type, exchange, transaction_hash).
-        
+
         Parameters:
             tx1: First transaction as a dict or tuple (see accepted shapes above).
             tx2: Second transaction as a dict or tuple (see accepted shapes above).
-        
+
         Returns:
             A float between 0.0 and 1.0 where higher values indicate greater similarity.
         """
@@ -466,7 +467,7 @@ class BlockchainDeduplicationService:
     def clear_portfolio_cache(self, portfolio_id: int) -> None:
         """
         Clear both Redis and in-memory deduplication caches for the given portfolio.
-        
+
         Removes the Redis key for the portfolio if a Redis client is available, and deletes any in-memory cache entries and their timestamps.
         """
         # Clear Redis cache
@@ -488,7 +489,7 @@ class BlockchainDeduplicationService:
     def get_cache_stats(self) -> Dict[str, any]:
         """
         Return runtime statistics about in-memory and Redis-backed deduplication caches.
-        
+
         Returns:
             dict: A mapping with these keys:
                 - memory_cache_size (int): Number of portfolios stored in the in-memory cache.

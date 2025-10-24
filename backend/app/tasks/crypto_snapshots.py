@@ -11,9 +11,7 @@ from sqlalchemy.exc import IntegrityError
 import logging
 import json
 
-from app.celery_app import celery_app
 from app.database import SyncSessionLocal
-from app.models import CachedMetrics
 from app.models.crypto import CryptoPortfolio, CryptoTransaction, CryptoTransactionType
 from app.models.crypto_portfolio_snapshot import CryptoPortfolioSnapshot
 from app.models.price_history import PriceHistory
@@ -33,9 +31,9 @@ logger = logging.getLogger(__name__)
 def create_daily_crypto_snapshots(self):
     """
     Create or update daily snapshots for all active crypto portfolios for today's date.
-    
+
     Also deletes snapshots older than approximately two years. The task iterates active portfolios, computes snapshot data, updates an existing snapshot if present or creates a new one, and tolerates race conditions that result in an existing snapshot.
-    
+
     Returns:
         dict: Summary of the operation with keys:
             - status (str): Operation status, e.g., "success".
@@ -54,7 +52,7 @@ def create_daily_crypto_snapshots(self):
         # Get all active crypto portfolios
         result = db.execute(
             select(CryptoPortfolio)
-            .where(CryptoPortfolio.is_active == True)
+            .where(CryptoPortfolio.is_active.is_(True))
             .order_by(CryptoPortfolio.name)
         )
         active_portfolios = result.scalars().all()
@@ -130,7 +128,7 @@ def create_daily_crypto_snapshots(self):
                     logger.info(f"Created crypto snapshot for portfolio {portfolio.name} on {snapshot_date}")
                     created += 1
 
-            except IntegrityError as e:
+            except IntegrityError:
                 # Race condition: another process already created this snapshot
                 db.rollback()
                 logger.debug(f"Snapshot already exists for portfolio {portfolio.name} on {snapshot_date} (race condition)")
@@ -200,10 +198,10 @@ def create_daily_crypto_snapshots(self):
 def create_crypto_snapshot_for_portfolio(self, portfolio_id: int, snapshot_date: str = None):
     """
     Create or update a daily crypto portfolio snapshot for a single portfolio and date.
-    
+
     Parameters:
         snapshot_date (str | None): Date in `YYYY-MM-DD` format; if None, uses today's date.
-    
+
     Returns:
         dict: Result payload with a `status` key (`"success"`, `"skipped"`, or `"failed"`) plus:
             - `portfolio_id` (int): The target portfolio ID.
@@ -316,9 +314,9 @@ def create_crypto_snapshot_for_portfolio(self, portfolio_id: int, snapshot_date:
 def calculate_crypto_snapshot_data(db, portfolio_id: int, snapshot_date: date) -> dict:
     """
     Compute portfolio snapshot values and holdings breakdown for a given date.
-    
+
     Retrieves transactions for the portfolio up to the end of snapshot_date, derives current holdings and cost basis, resolves prices (PriceHistory or realtime fallback) and FX rates as available, and produces aggregated values and a per-symbol holdings breakdown. Returns None if the portfolio does not exist.
-    
+
     Returns:
         dict or None: Snapshot data dict when portfolio exists, otherwise `None`. The dict contains:
             - total_value_eur (Decimal): Total portfolio market value in EUR as of snapshot_date.

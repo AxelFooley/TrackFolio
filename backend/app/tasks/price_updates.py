@@ -5,13 +5,11 @@ Fetches latest prices from Yahoo Finance for all active positions.
 """
 from celery import shared_task
 from datetime import date, timedelta
-from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 import logging
 import time
 
-from app.celery_app import celery_app
 from app.database import SyncSessionLocal
 from app.models import Position, PriceHistory
 from app.services.price_fetcher import PriceFetcher
@@ -133,7 +131,7 @@ def update_daily_prices(self):
                 )
                 updated += 1
 
-            except IntegrityError as e:
+            except IntegrityError:
                 # Race condition: another process already inserted this price
                 db.rollback()
                 logger.debug(f"Price already exists for {ticker} (race condition)")
@@ -192,14 +190,14 @@ def update_daily_prices(self):
 def update_price_for_ticker(self, ticker: str, price_date: str = None):
     """
     Update the historical price for a single ticker on the specified date.
-    
+
     If a price record for the target date already exists the task returns a skipped status.
     On success a new PriceHistory record is created and the returned dict includes the recorded price.
-    
+
     Parameters:
         ticker (str): Ticker symbol to update.
         price_date (str, optional): Date string in `YYYY-MM-DD` format. If omitted, defaults to yesterday.
-    
+
     Returns:
         dict: Result object with keys:
             - `status`: `"success"`, `"skipped"`, or `"failed"`.
@@ -306,13 +304,13 @@ def update_price_for_ticker(self, ticker: str, price_date: str = None):
 def fetch_prices_for_ticker(self, ticker: str, isin: str = None, start_date: str = None, end_date: str = None):
     """
     Fetches historical daily prices for a ticker, upserts them into PriceHistory, and returns a summary of changes.
-    
+
     Parameters:
         ticker (str): Ticker symbol to fetch.
         isin (str, optional): ISIN code to assist fetching when available.
         start_date (str, optional): Inclusive start date in YYYY-MM-DD format. Defaults to 365 days before today.
         end_date (str, optional): Inclusive end date in YYYY-MM-DD format. Defaults to today.
-    
+
     Returns:
         dict: Summary with keys:
             - "status": "success" or "no_data".
@@ -323,7 +321,7 @@ def fetch_prices_for_ticker(self, ticker: str, isin: str = None, start_date: str
             - "prices_updated": number of existing records updated when values differed.
             - "prices_skipped": number of records skipped (identical or due to race condition).
             - "total_fetched": number of price entries retrieved from the fetcher.
-    
+
     Raises:
         Exception: Rolls back the transaction and re-raises on any unexpected error during fetch or persistence.
     """

@@ -104,13 +104,13 @@ class CryptoPortfolio(Base):
     def validate_wallet_address(self, key, wallet_address):
         """
         Validate a Bitcoin wallet address and return it if it conforms to common address formats.
-        
+
         Parameters:
             wallet_address (str | None): Bitcoin address string to validate; may be None or empty.
-        
+
         Returns:
             str | None: The original address string when valid, or `None` if the input is `None` or empty.
-        
+
         Raises:
             ValueError: If the address is non-empty and does not match legacy (P2PKH), P2SH, or Bech32 Bitcoin address formats.
         """
@@ -131,8 +131,9 @@ class CryptoPortfolio(Base):
         bech32_pattern = r'^bc1[023456789acdefghjklmnpqrstuvwxyzqpzry9x8gf2tvdw0s3jn54khce6mua7l]{39,59}$'
 
         if (re.match(legacy_p2pkh_pattern, wallet_address) or
-            re.match(p2sh_pattern, wallet_address) or
-            re.match(bech32_pattern, wallet_address)):
+                re.match(p2sh_pattern, wallet_address) or
+                re.match(bech32_pattern, wallet_address)):
+
             return wallet_address
 
         raise ValueError(
@@ -143,9 +144,10 @@ class CryptoPortfolio(Base):
     def __repr__(self) -> str:
         """
         Provide a developer-friendly string representation of the CryptoPortfolio.
-        
+
         Returns:
-            A string containing the portfolio's `id`, `name`, base currency value (`base_currency.value`), `is_active` flag, and `wallet_address`.
+            A string containing the portfolio's `id`, `name`, base currency value (`base_currency.value`),
+            `is_active` flag, and `wallet_address`.
         """
         return (
             f"CryptoPortfolio(id={self.id!r}, "
@@ -286,9 +288,10 @@ class CryptoTransaction(Base):
     def __repr__(self) -> str:
         """
         Return a concise developer-friendly representation of the CryptoTransaction instance.
-        
+
         Returns:
-            A string containing the instance's `id`, `portfolio_id`, `symbol`, `transaction_type` value, `quantity`, and `timestamp`.
+            A string containing the instance's `id`, `portfolio_id`, `symbol`, `transaction_type` value,
+            `quantity`, and `timestamp`.
         """
         return (
             f"CryptoTransaction(id={self.id!r}, "

@@ -502,7 +502,7 @@ class TestCacheConcurrentAccess:
 
         # Run 20 concurrent read operations
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            results = list(executor.map(get_value, range(10) * 2))
+            results = list(executor.map(get_value, list(range(10)) * 2))
 
         # Each read should have succeeded
         for i, result in enumerate(results):

@@ -64,9 +64,9 @@ def get_syncing_status(portfolio_id: int) -> Optional[dict]:
 def get_usd_to_eur_rate() -> Optional[Decimal]:
     """
     Retrieve the USD-to-EUR exchange rate using Yahoo Finance FX data.
-    
+
     Fetches the EUR/USD rate and returns its reciprocal so the result represents how many EUR equal 1 USD.
-    
+
     Returns:
         Decimal: Amount of EUR per 1 USD (e.g., Decimal('0.92')), or `None` if the rate could not be obtained.
     """
@@ -102,9 +102,9 @@ def get_usd_to_eur_rate() -> Optional[Decimal]:
 def sync_all_wallets(self):
     """
     Orchestrates a full synchronization for all configured Bitcoin wallets and returns a summary of the global results.
-    
+
     Runs synchronization across every portfolio that has a Bitcoin wallet address and aggregates per-wallet outcomes into a single result.
-    
+
     Returns:
         dict: Summary containing overall status, counts (added/skipped/failed/fetched), and per-wallet result details.
     """
@@ -118,9 +118,9 @@ sync_bitcoin_wallets = sync_all_wallets
 def _sync_bitcoin_wallets_impl():
     """
     Synchronizes all active Bitcoin wallets' transactions into the database.
-    
+
     Finds active portfolios with wallet addresses, runs per-wallet synchronization (adds new transactions, skips duplicates, records failures), and returns an aggregated summary of the run. If blockchain synchronization is disabled in settings, returns a disabled status without performing work.
-    
+
     Returns:
         dict: Summary of the synchronization run. Common keys:
             - status (str): "success" when run completed, or "disabled" if sync is turned off.
@@ -565,14 +565,14 @@ def get_historical_price_at_time(
 ) -> Optional[Decimal]:
     """
     Retrieve the price of a cryptocurrency closest to a given timestamp in the requested currency.
-    
+
     Attempts to obtain a historical price near the provided timestamp and falls back to a current price when historical data is unavailable. Returned value is expressed in the requested base currency; if a conversion from USD to EUR is required but unavailable, the function may return the USD value or None when no price can be determined.
-    
+
     Parameters:
         symbol (str): Cryptocurrency symbol (e.g., 'BTC').
         timestamp (datetime): Target point in time for the price lookup.
         base_currency (str): Desired currency for the returned price (case-insensitive, typically 'EUR' or 'USD').
-    
+
     Returns:
         Decimal or None: Price of the cryptocurrency in the requested base currency, or `None` if no price data could be obtained.
     """

@@ -115,7 +115,7 @@ async def search_tickers(
         query_lower = q.lower()
         for item in common_benchmarks:
             if (query_lower in item["ticker"].lower() or
-                query_lower in item["name"].lower()):
+                    query_lower in item["name"].lower()):
                 search_results.append(item)
 
         # If we have fewer than 5 results, try to fetch additional info from yfinance

@@ -12,13 +12,11 @@ from datetime import datetime
 import logging
 import asyncio
 import requests.exceptions
-from sqlalchemy import and_
 
 from app.database import get_db
 from app.models import Transaction, TransactionType
 from app.schemas.transaction import (
     TransactionResponse,
-    TransactionCreate,
     ManualTransactionCreate,
     TransactionUpdate,
     TransactionImportSummary
@@ -26,11 +24,7 @@ from app.schemas.transaction import (
 from app.services.csv_parser import DirectaCSVParser
 from app.services.deduplication import DeduplicationService
 from app.services.position_manager import PositionManager
-from app.services.price_fetcher import PriceFetcher
-from app.services.calculations import FinancialCalculations
 from app.services.currency_converter import get_exchange_rate
-import yfinance as yf
-from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -235,13 +229,18 @@ async def create_transaction(
                     )
 
                 amount_eur = amount_currency * fx_rate
-                logger.info(f"Converted {amount_currency} {transaction_data.currency} to {amount_eur} EUR using rate {fx_rate}")
+                logger.info(
+                    f"Converted {amount_currency} {transaction_data.currency} to "
+                    f"{amount_eur} EUR using rate {fx_rate}"
+                )
 
             except HTTPException:
                 # Re-raise HTTP exceptions as-is
                 raise
             except Exception as e:
-                logger.exception(f"Error converting {transaction_data.currency} to EUR: {str(e)}")
+                logger.exception(
+                    f"Error converting {transaction_data.currency} to EUR: {str(e)}"
+                )
                 raise HTTPException(
                     status_code=500,
                     detail=f"Failed to convert {transaction_data.currency} to EUR. Please try again later."
@@ -268,7 +267,8 @@ async def create_transaction(
         if is_dup:
             raise HTTPException(
                 status_code=409,
-                detail="Duplicate transaction detected. A transaction with the same date, ticker, quantity, price, and order reference already exists."
+                detail="Duplicate transaction detected. A transaction with the same date, ticker, "
+                      "quantity, price, and order reference already exists."
             )
 
         # 10. Create Transaction model
@@ -465,7 +465,10 @@ async def update_transaction(
                     )
 
                 transaction.amount_eur = amount_currency * fx_rate
-                logger.info(f"Converted {amount_currency} {transaction.currency} to {transaction.amount_eur} EUR using rate {fx_rate}")
+                logger.info(
+                    f"Converted {amount_currency} {transaction.currency} to "
+                    f"{transaction.amount_eur} EUR using rate {fx_rate}"
+                )
 
             except HTTPException:
                 raise
@@ -493,7 +496,8 @@ async def update_transaction(
         if is_dup:
             raise HTTPException(
                 status_code=409,
-                detail="Updating this transaction would create a duplicate. A transaction with the same date, ticker, quantity, and price already exists."
+                detail="Updating this transaction would create a duplicate. A transaction with the same "
+                      "date, ticker, quantity, and price already exists."
             )
 
         transaction.transaction_hash = new_transaction_hash
