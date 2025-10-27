@@ -271,6 +271,8 @@ def test_unified_performance_response_schema():
 
 def test_unified_movers_response_schema():
     """Test that UnifiedMovers schema validates top gainers/losers for /unified-movers endpoint."""
+    from decimal import Decimal
+
     gainers = [
         UnifiedMover(
             ticker="BTC",
