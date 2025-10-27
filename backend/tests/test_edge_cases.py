@@ -9,7 +9,7 @@ Tests critical edge cases:
 """
 import pytest
 from decimal import Decimal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.portfolio_aggregator import PortfolioAggregator
@@ -28,7 +28,7 @@ class TestEmptyPortfolioEdgeCases:
         aggregator = PortfolioAggregator(mock_db)
 
         # Mock empty position results
-        mock_result = AsyncMock()
+        mock_result = Mock()
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute.return_value = mock_result
 
@@ -46,7 +46,7 @@ class TestEmptyPortfolioEdgeCases:
         aggregator = PortfolioAggregator(mock_db)
 
         # Mock empty results
-        mock_result = AsyncMock()
+        mock_result = Mock()
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute.return_value = mock_result
 
