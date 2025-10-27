@@ -16,6 +16,7 @@ from app.schemas.unified import (
     UnifiedSummary, UnifiedPerformanceDataPoint
 )
 from app.services.portfolio_aggregator import PortfolioAggregator
+from app.services.rate_limiter import rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -504,6 +505,7 @@ async def get_position(
 
 # Unified Portfolio Endpoints (combining traditional and crypto)
 
+@rate_limit(requests=100, window_seconds=60)
 @router.get("/unified-holdings", response_model=List[UnifiedHolding])
 async def get_unified_holdings(
     skip: int = Query(0, ge=0, description="Number of holdings to skip"),
@@ -538,6 +540,7 @@ async def get_unified_holdings(
         raise HTTPException(status_code=500, detail="Failed to retrieve unified holdings")
 
 
+@rate_limit(requests=50, window_seconds=60)
 @router.get("/unified-overview", response_model=UnifiedOverview)
 async def get_unified_overview(db: AsyncSession = Depends(get_db)):
     """
@@ -562,6 +565,7 @@ async def get_unified_overview(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to retrieve unified overview")
 
 
+@rate_limit(requests=20, window_seconds=60)
 @router.get("/unified-performance")
 async def get_unified_performance(
     range: Optional[str] = Query(None, description="Time range (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)"),
@@ -721,6 +725,7 @@ async def get_unified_movers(
         raise HTTPException(status_code=500, detail="Failed to retrieve unified movers")
 
 
+@rate_limit(requests=30, window_seconds=60)
 @router.get("/unified-summary", response_model=UnifiedSummary)
 async def get_unified_summary(
     holdings_limit: int = Query(20, ge=1, le=100, description="Max holdings to return"),
