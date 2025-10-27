@@ -19,6 +19,7 @@ from app.api import (
     crypto_router,
     blockchain_router
 )
+from app.utils.rate_limiter import rate_limit_middleware
 
 # Configure logging
 logging.basicConfig(
@@ -75,6 +76,9 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json"
 )
+
+# Rate limiting middleware (before CORS to ensure headers are applied)
+app.middleware("http")(rate_limit_middleware)
 
 # CORS middleware
 app.add_middleware(

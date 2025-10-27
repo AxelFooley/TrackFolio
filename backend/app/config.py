@@ -154,6 +154,43 @@ class Settings(BaseSettings):
         description="Number of top gainers and losers to return"
     )
 
+    # Rate limiting for unified endpoints
+    rate_limit_unified_overview: PositiveInt = Field(
+        100,
+        env="RATE_LIMIT_UNIFIED_OVERVIEW",
+        description="Rate limit for /unified-overview endpoint (requests per minute)"
+    )
+    rate_limit_unified_holdings: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_HOLDINGS",
+        description="Rate limit for /unified-holdings endpoint (requests per minute)"
+    )
+    rate_limit_unified_performance: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_PERFORMANCE",
+        description="Rate limit for /unified-performance endpoint (requests per minute)"
+    )
+    rate_limit_unified_summary: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_SUMMARY",
+        description="Rate limit for /unified-summary endpoint (requests per minute)"
+    )
+    rate_limit_unified_movers: PositiveInt = Field(
+        100,
+        env="RATE_LIMIT_UNIFIED_MOVERS",
+        description="Rate limit for /unified-movers endpoint (requests per minute)"
+    )
+    rate_limit_window_seconds: PositiveInt = Field(
+        60,
+        env="RATE_LIMIT_WINDOW_SECONDS",
+        description="Time window for rate limiting in seconds"
+    )
+    rate_limit_enabled: bool = Field(
+        True,
+        env="RATE_LIMIT_ENABLED",
+        description="Enable or disable rate limiting globally"
+    )
+
 
 # Global settings instance
 settings = Settings()

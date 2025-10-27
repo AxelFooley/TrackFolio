@@ -1,5 +1,5 @@
 """Portfolio API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from decimal import Decimal
@@ -16,6 +16,8 @@ from app.schemas.unified import (
     UnifiedSummary, UnifiedPerformanceDataPoint
 )
 from app.services.portfolio_aggregator import PortfolioAggregator
+from app.config import settings
+from app.utils.rate_limiter import rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -505,7 +507,13 @@ async def get_position(
 # Unified Portfolio Endpoints (combining traditional and crypto)
 
 @router.get("/unified-holdings", response_model=List[UnifiedHolding])
+@rate_limit(
+    endpoint="unified-holdings",
+    requests=settings.rate_limit_unified_holdings,
+    window_seconds=settings.rate_limit_window_seconds
+)
 async def get_unified_holdings(
+    request: Request,
     skip: int = Query(0, ge=0, description="Number of holdings to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Max holdings to return"),
     db: AsyncSession = Depends(get_db)
@@ -519,6 +527,7 @@ async def get_unified_holdings(
     Each holding includes current price, value, and performance metrics.
 
     Args:
+        request: FastAPI request object (used for rate limiting)
         skip: Number of holdings to skip (pagination offset)
         limit: Maximum number of holdings to return (1-1000)
 
@@ -539,7 +548,15 @@ async def get_unified_holdings(
 
 
 @router.get("/unified-overview", response_model=UnifiedOverview)
-async def get_unified_overview(db: AsyncSession = Depends(get_db)):
+@rate_limit(
+    endpoint="unified-overview",
+    requests=settings.rate_limit_unified_overview,
+    window_seconds=settings.rate_limit_window_seconds
+)
+async def get_unified_overview(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
     """
     Get aggregated portfolio overview combining traditional and crypto.
 
@@ -549,6 +566,9 @@ async def get_unified_overview(db: AsyncSession = Depends(get_db)):
     - total_profit, total_profit_pct: combined P&L
     - traditional_profit, crypto_profit: breakdown by portfolio type
     - today_change, today_change_pct
+
+    Args:
+        request: FastAPI request object (used for rate limiting)
 
     Returns:
         Unified overview metrics
@@ -563,7 +583,13 @@ async def get_unified_overview(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/unified-performance")
+@rate_limit(
+    endpoint="unified-performance",
+    requests=settings.rate_limit_unified_performance,
+    window_seconds=settings.rate_limit_window_seconds
+)
 async def get_unified_performance(
+    request: Request,
     range: Optional[str] = Query(None, description="Time range (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)"),
     days: Optional[int] = Query(None, ge=1, le=3650, description="Number of days of history (alternative to range)"),
     db: AsyncSession = Depends(get_db)
@@ -575,6 +601,7 @@ async def get_unified_performance(
     Returns data matching frontend expectations with portfolio_data and benchmark_data.
 
     Args:
+        request: FastAPI request object (used for rate limiting)
         range: Time range string (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL). Takes precedence over days.
         days: Number of days of history (1-3650, default 365) - used if range not provided
 
@@ -696,7 +723,13 @@ async def get_unified_performance(
 
 
 @router.get("/unified-movers", response_model=UnifiedMovers)
+@rate_limit(
+    endpoint="unified-movers",
+    requests=settings.rate_limit_unified_movers,
+    window_seconds=settings.rate_limit_window_seconds
+)
 async def get_unified_movers(
+    request: Request,
     top_n: int = Query(5, ge=1, le=50, description="Number of top gainers/losers"),
     db: AsyncSession = Depends(get_db)
 ):
@@ -707,6 +740,7 @@ async def get_unified_movers(
     and top N losers across all holdings, sorted by change percentage.
 
     Args:
+        request: FastAPI request object (used for rate limiting)
         top_n: Number of gainers and losers to return (1-50, default 5)
 
     Returns:
@@ -722,7 +756,13 @@ async def get_unified_movers(
 
 
 @router.get("/unified-summary", response_model=UnifiedSummary)
+@rate_limit(
+    endpoint="unified-summary",
+    requests=settings.rate_limit_unified_summary,
+    window_seconds=settings.rate_limit_window_seconds
+)
 async def get_unified_summary(
+    request: Request,
     holdings_limit: int = Query(20, ge=1, le=100, description="Max holdings to return"),
     performance_days: int = Query(365, ge=1, le=3650, description="Days of performance history"),
     db: AsyncSession = Depends(get_db)
@@ -734,6 +774,7 @@ async def get_unified_summary(
     movers, and performance data in a single response to reduce API round trips.
 
     Args:
+        request: FastAPI request object (used for rate limiting)
         holdings_limit: Maximum number of holdings to return (1-100, default 20)
         performance_days: Days of performance history (1-3650, default 365)
 
