@@ -9,7 +9,8 @@ import pytest
 from app.services.portfolio_aggregator import PortfolioAggregator
 from app.schemas.unified import (
     UnifiedHolding, UnifiedOverview, UnifiedPerformance, UnifiedMovers,
-    UnifiedSummary, UnifiedPerformanceDataPoint, UnifiedMover, PerformanceSummary
+    UnifiedSummary, UnifiedPerformanceDataPoint, UnifiedMover, PerformanceSummary,
+    PaginatedUnifiedHolding
 )
 
 
@@ -167,14 +168,14 @@ def test_unified_summary_schema():
 
     summary = UnifiedSummary(
         overview=overview,
-        holdings=[],
+        holdings=PaginatedUnifiedHolding(items=[], total=0, skip=0, limit=20, has_more=False),
         holdings_total=0,
         movers=UnifiedMovers(gainers=[], losers=[]),
         performance_summary=perf_summary
     )
     assert summary.overview is not None
-    assert summary.holdings == []
-    assert summary.holdings_total == 0
+    assert summary.holdings.items == []
+    assert summary.holdings.total == 0
 
 
 # Integration tests validating unified endpoint response schemas
@@ -358,7 +359,7 @@ def test_unified_summary_response_schema_complete():
 
     summary = UnifiedSummary(
         overview=overview,
-        holdings=holdings,
+        holdings=PaginatedUnifiedHolding(items=holdings, total=1, skip=0, limit=20, has_more=False),
         holdings_total=1,
         movers=movers,
         performance_summary=perf_summary
