@@ -175,3 +175,211 @@ def test_unified_summary_schema():
     assert summary.overview is not None
     assert summary.holdings == []
     assert summary.holdings_total == 0
+
+
+def test_benchmark_data_point_schema():
+    """Test BenchmarkDataPoint schema creation."""
+    from decimal import Decimal
+    from datetime import date
+    from app.schemas.unified import BenchmarkDataPoint
+
+    data_point = BenchmarkDataPoint(
+        date="2025-01-01",
+        value=Decimal("5000.00")
+    )
+    assert data_point.date == date(2025, 1, 1)
+    assert data_point.value == Decimal("5000.00")
+
+
+def test_benchmark_metrics_schema():
+    """Test BenchmarkMetrics schema creation."""
+    from decimal import Decimal
+    from app.schemas.unified import BenchmarkMetrics
+
+    metrics = BenchmarkMetrics(
+        start_price=Decimal("4500.00"),
+        end_price=Decimal("5000.00"),
+        change_amount=Decimal("500.00"),
+        change_pct=11.11
+    )
+    assert metrics.start_price == Decimal("4500.00")
+    assert metrics.end_price == Decimal("5000.00")
+    assert metrics.change_amount == Decimal("500.00")
+    assert metrics.change_pct == 11.11
+
+
+def test_unified_performance_with_benchmark():
+    """Test UnifiedPerformance schema with benchmark data."""
+    from decimal import Decimal
+    from datetime import date
+    from app.schemas.unified import (
+        BenchmarkDataPoint, BenchmarkMetrics
+    )
+
+    perf_data = UnifiedPerformanceDataPoint(
+        date_point="2025-01-01",
+        value=Decimal("50000.00"),
+        traditional_value=Decimal("30000.00"),
+        crypto_value=Decimal("20000.00")
+    )
+
+    benchmark_data = [
+        BenchmarkDataPoint(date="2025-01-01", value=Decimal("5000.00"))
+    ]
+
+    benchmark_metrics = BenchmarkMetrics(
+        start_price=Decimal("5000.00"),
+        end_price=Decimal("5000.00"),
+        change_amount=Decimal("0.00"),
+        change_pct=0.0
+    )
+
+    performance = UnifiedPerformance(
+        data=[perf_data],
+        benchmark_data=benchmark_data,
+        benchmark_metrics=benchmark_metrics
+    )
+    assert len(performance.data) == 1
+    assert len(performance.benchmark_data) == 1
+    assert performance.benchmark_metrics is not None
+    assert performance.benchmark_metrics.change_pct == 0.0
+
+
+def test_unified_performance_without_benchmark():
+    """Test UnifiedPerformance schema without benchmark data."""
+    from decimal import Decimal
+
+    perf_data = UnifiedPerformanceDataPoint(
+        date_point="2025-01-01",
+        value=Decimal("50000.00"),
+        traditional_value=Decimal("30000.00"),
+        crypto_value=Decimal("20000.00")
+    )
+
+    performance = UnifiedPerformance(
+        data=[perf_data],
+        benchmark_data=[],
+        benchmark_metrics=None
+    )
+    assert len(performance.data) == 1
+    assert len(performance.benchmark_data) == 0
+    assert performance.benchmark_metrics is None
+
+
+def test_performance_summary_with_benchmark():
+    """Test PerformanceSummary schema with benchmark data."""
+    from decimal import Decimal
+    from app.schemas.unified import BenchmarkDataPoint, BenchmarkMetrics
+
+    perf_data = UnifiedPerformanceDataPoint(
+        date_point="2025-01-01",
+        value=Decimal("50000.00"),
+        traditional_value=Decimal("30000.00"),
+        crypto_value=Decimal("20000.00")
+    )
+
+    benchmark_data = [
+        BenchmarkDataPoint(date="2025-01-01", value=Decimal("5000.00"))
+    ]
+
+    benchmark_metrics = BenchmarkMetrics(
+        start_price=Decimal("4500.00"),
+        end_price=Decimal("5000.00"),
+        change_amount=Decimal("500.00"),
+        change_pct=11.11
+    )
+
+    summary = PerformanceSummary(
+        period_days=365,
+        data_points=1,
+        data=[perf_data],
+        benchmark_data=benchmark_data,
+        benchmark_metrics=benchmark_metrics
+    )
+    assert summary.period_days == 365
+    assert len(summary.data) == 1
+    assert len(summary.benchmark_data) == 1
+    assert summary.benchmark_metrics is not None
+    assert summary.benchmark_metrics.change_pct == 11.11
+
+
+def test_benchmark_metrics_calculation():
+    """Test benchmark metrics calculation logic."""
+    from decimal import Decimal
+
+    # Test percentage calculation
+    change = Decimal("500")
+    start = Decimal("4500")
+    result = PortfolioAggregator._safe_percentage(change, start)
+    expected = float(change / start * 100)
+    assert result == pytest.approx(expected, rel=1e-6)
+
+    # Test with zero start price
+    result = PortfolioAggregator._safe_percentage(Decimal("100"), Decimal("0"))
+    assert result is None
+
+    # Test with negative values
+    result = PortfolioAggregator._safe_percentage(Decimal("-500"), Decimal("5000"))
+    assert result == pytest.approx(-10.0, rel=1e-6)
+
+
+def test_unified_summary_includes_benchmark_metrics():
+    """Test that UnifiedSummary properly includes benchmark data in performance_summary."""
+    from decimal import Decimal
+    from app.schemas.unified import BenchmarkDataPoint, BenchmarkMetrics
+
+    overview = UnifiedOverview(
+        total_value=Decimal("50000.00"),
+        traditional_value=Decimal("30000.00"),
+        crypto_value=Decimal("20000.00"),
+        total_cost=Decimal("45000.00"),
+        total_profit=Decimal("5000.00"),
+        total_profit_pct=11.11,
+        traditional_profit=Decimal("3000.00"),
+        traditional_profit_pct=10.0,
+        crypto_profit=Decimal("2000.00"),
+        crypto_profit_pct=11.11,
+        today_change=Decimal("250.00"),
+        today_change_pct=0.5,
+        currency="EUR"
+    )
+
+    perf_data = UnifiedPerformanceDataPoint(
+        date_point="2025-01-01",
+        value=Decimal("50000.00"),
+        traditional_value=Decimal("30000.00"),
+        crypto_value=Decimal("20000.00")
+    )
+
+    benchmark_data = [
+        BenchmarkDataPoint(date="2025-01-01", value=Decimal("5000.00"))
+    ]
+
+    benchmark_metrics = BenchmarkMetrics(
+        start_price=Decimal("5000.00"),
+        end_price=Decimal("5000.00"),
+        change_amount=Decimal("0.00"),
+        change_pct=0.0
+    )
+
+    perf_summary = PerformanceSummary(
+        period_days=365,
+        data_points=1,
+        data=[perf_data],
+        benchmark_data=benchmark_data,
+        benchmark_metrics=benchmark_metrics
+    )
+
+    summary = UnifiedSummary(
+        overview=overview,
+        holdings=[],
+        holdings_total=0,
+        movers=UnifiedMovers(gainers=[], losers=[]),
+        performance_summary=perf_summary
+    )
+
+    # Verify benchmark data is included in the summary
+    assert summary.performance_summary.benchmark_data is not None
+    assert len(summary.performance_summary.benchmark_data) == 1
+    assert summary.performance_summary.benchmark_metrics is not None
+    assert summary.performance_summary.benchmark_metrics.change_pct == 0.0

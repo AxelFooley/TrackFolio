@@ -108,10 +108,48 @@ class UnifiedPerformanceDataPoint(BaseModel):
         }
 
 
+class BenchmarkDataPoint(BaseModel):
+    """Single benchmark data point."""
+
+    date: date
+    value: Decimal
+
+    class Config:
+        """Pydantic configuration."""
+        json_schema_extra = {
+            "example": {
+                "date": "2025-01-01",
+                "value": "5000.00"
+            }
+        }
+
+
+class BenchmarkMetrics(BaseModel):
+    """Benchmark performance metrics."""
+
+    start_price: Optional[Decimal] = None
+    end_price: Optional[Decimal] = None
+    change_amount: Optional[Decimal] = None
+    change_pct: Optional[float] = None
+
+    class Config:
+        """Pydantic configuration."""
+        json_schema_extra = {
+            "example": {
+                "start_price": "4500.00",
+                "end_price": "5000.00",
+                "change_amount": "500.00",
+                "change_pct": 11.11
+            }
+        }
+
+
 class UnifiedPerformance(BaseModel):
     """Schema for unified performance data."""
 
     data: List[UnifiedPerformanceDataPoint]
+    benchmark_data: List[BenchmarkDataPoint] = []
+    benchmark_metrics: Optional[BenchmarkMetrics] = None
 
     class Config:
         """Pydantic configuration."""
@@ -124,7 +162,19 @@ class UnifiedPerformance(BaseModel):
                         "crypto_value": "20000.00",
                         "traditional_value": "25000.00"
                     }
-                ]
+                ],
+                "benchmark_data": [
+                    {
+                        "date": "2025-01-01",
+                        "value": "5000.00"
+                    }
+                ],
+                "benchmark_metrics": {
+                    "start_price": "4500.00",
+                    "end_price": "5000.00",
+                    "change_amount": "500.00",
+                    "change_pct": 11.11
+                }
             }
         }
 
@@ -189,6 +239,8 @@ class PerformanceSummary(BaseModel):
     period_days: int
     data_points: int
     data: List[UnifiedPerformanceDataPoint]
+    benchmark_data: List[BenchmarkDataPoint] = []
+    benchmark_metrics: Optional[BenchmarkMetrics] = None
 
     class Config:
         """Pydantic configuration."""
@@ -196,7 +248,9 @@ class PerformanceSummary(BaseModel):
             "example": {
                 "period_days": 365,
                 "data_points": 250,
-                "data": []
+                "data": [],
+                "benchmark_data": [],
+                "benchmark_metrics": None
             }
         }
 

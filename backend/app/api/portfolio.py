@@ -13,7 +13,8 @@ from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance, Perfo
 from app.schemas.position import PositionResponse
 from app.schemas.unified import (
     UnifiedHolding, UnifiedOverview, UnifiedMovers,
-    UnifiedSummary, UnifiedPerformanceDataPoint
+    UnifiedSummary, UnifiedPerformanceDataPoint, UnifiedPerformance,
+    PerformanceSummary, BenchmarkDataPoint, BenchmarkMetrics
 )
 from app.services.portfolio_aggregator import PortfolioAggregator
 
@@ -530,7 +531,7 @@ async def get_unified_holdings(
         all_holdings = await aggregator.get_unified_holdings()
 
         # Apply pagination
-        paginated_holdings = all_holdings[skip : skip + limit]
+        paginated_holdings = all_holdings[skip:skip + limit]
 
         return paginated_holdings
     except Exception as e:
@@ -562,7 +563,7 @@ async def get_unified_overview(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to retrieve unified overview")
 
 
-@router.get("/unified-performance")
+@router.get("/unified-performance", response_model=UnifiedPerformance)
 async def get_unified_performance(
     range: Optional[str] = Query(None, description="Time range (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)"),
     days: Optional[int] = Query(None, ge=1, le=3650, description="Number of days of history (alternative to range)"),
@@ -572,14 +573,15 @@ async def get_unified_performance(
     Get unified performance data combining traditional and crypto portfolios.
 
     Merges daily snapshots from both portfolio systems into a single time-series.
-    Returns data matching frontend expectations with portfolio_data and benchmark_data.
+    Returns data matching frontend expectations with portfolio_data, benchmark_data,
+    and benchmark_metrics for performance comparison.
 
     Args:
         range: Time range string (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL). Takes precedence over days.
         days: Number of days of history (1-3650, default 365) - used if range not provided
 
     Returns:
-        JSON object with portfolio_data and benchmark_data arrays
+        UnifiedPerformance object with portfolio and benchmark data
     """
     try:
         # Use range parameter if provided, otherwise use days (default 365)
@@ -618,7 +620,7 @@ async def get_unified_performance(
         for snapshot in traditional_snapshots:
             if snapshot.snapshot_date not in snapshot_map:
                 snapshot_map[snapshot.snapshot_date] = {
-                    "date": str(snapshot.snapshot_date),
+                    "date": snapshot.snapshot_date,
                     "total": Decimal("0"),
                     "traditional": Decimal("0"),
                     "crypto": Decimal("0")
@@ -633,7 +635,7 @@ async def get_unified_performance(
         for snapshot in crypto_snapshots:
             if snapshot.snapshot_date not in snapshot_map:
                 snapshot_map[snapshot.snapshot_date] = {
-                    "date": str(snapshot.snapshot_date),
+                    "date": snapshot.snapshot_date,
                     "total": Decimal("0"),
                     "traditional": Decimal("0"),
                     "crypto": Decimal("0")
@@ -651,45 +653,46 @@ async def get_unified_performance(
                 snapshot_map[snapshot.snapshot_date]["total"] + crypto_val
             )
 
-        # Convert to sorted list
+        # Convert to sorted list with proper schema
+        sorted_snapshots = sorted(snapshot_map.values(), key=lambda x: x["date"])
         portfolio_data = [
-            {
-                "date": p["date"],
-                "total": str(p["total"]),
-                "traditional": str(p["traditional"]),
-                "crypto": str(p["crypto"])
-            }
-            for p in sorted(snapshot_map.values(), key=lambda x: x["date"])
+            UnifiedPerformanceDataPoint(
+                date_point=p["date"],
+                value=p["total"],
+                traditional_value=p["traditional"],
+                crypto_value=p["crypto"]
+            )
+            for p in sorted_snapshots
         ]
 
-        # Get benchmark data if configured (aligned with merged snapshot dates)
-        benchmark_data = []
-        benchmark_result = await db.execute(select(Benchmark).limit(1))
-        benchmark = benchmark_result.scalar_one_or_none()
+        # Get benchmark data using aggregator service
+        aggregator = PortfolioAggregator(db)
+        snapshot_dates = [p["date"] for p in sorted_snapshots]
+        benchmark_data_list, bench_start, bench_end, bench_change_amt, bench_change_pct = (
+            await aggregator._get_benchmark_data(snapshot_dates)
+        )
 
-        if benchmark:
-            snapshot_dates = [date.fromisoformat(p["date"]) for p in portfolio_data]
-            if snapshot_dates:
-                benchmark_query = select(PriceHistory).where(
-                    PriceHistory.ticker == benchmark.ticker,
-                    PriceHistory.date.in_(snapshot_dates)
-                ).order_by(PriceHistory.date)
+        # Transform benchmark data to proper schema
+        benchmark_data = [
+            BenchmarkDataPoint(date=date.fromisoformat(b["date"]), value=Decimal(b["value"]))
+            for b in benchmark_data_list
+        ]
 
-                benchmark_prices_result = await db.execute(benchmark_query)
-                benchmark_prices = benchmark_prices_result.scalars().all()
+        # Create benchmark metrics if we have benchmark data
+        benchmark_metrics = None
+        if benchmark_data_list:
+            benchmark_metrics = BenchmarkMetrics(
+                start_price=bench_start,
+                end_price=bench_end,
+                change_amount=bench_change_amt,
+                change_pct=bench_change_pct
+            )
 
-                benchmark_data = [
-                    {
-                        "date": str(p.date),
-                        "value": str(p.close)
-                    }
-                    for p in benchmark_prices
-                ]
-
-        return {
-            "portfolio_data": portfolio_data,
-            "benchmark_data": benchmark_data
-        }
+        return UnifiedPerformance(
+            data=portfolio_data,
+            benchmark_data=benchmark_data,
+            benchmark_metrics=benchmark_metrics
+        )
     except Exception as e:
         logger.error(f"Error getting unified performance: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve unified performance")
@@ -732,13 +735,14 @@ async def get_unified_summary(
 
     This is a convenience endpoint that returns overview, holdings (paginated),
     movers, and performance data in a single response to reduce API round trips.
+    Includes benchmark data and metrics if a benchmark is configured.
 
     Args:
         holdings_limit: Maximum number of holdings to return (1-100, default 20)
         performance_days: Days of performance history (1-3650, default 365)
 
     Returns:
-        Complete unified portfolio summary
+        Complete unified portfolio summary with benchmark support
     """
     try:
         aggregator = PortfolioAggregator(db)
@@ -758,16 +762,40 @@ async def get_unified_summary(
             for p in summary["performance_summary"]["data"]
         ]
 
+        # Get benchmark data aligned with performance snapshot dates
+        snapshot_dates = [p["date"] for p in summary["performance_summary"]["data"]]
+        benchmark_data_list, bench_start, bench_end, bench_change_amt, bench_change_pct = (
+            await aggregator._get_benchmark_data(snapshot_dates)
+        )
+
+        # Transform benchmark data to proper schema
+        benchmark_data = [
+            BenchmarkDataPoint(date=date.fromisoformat(b["date"]), value=Decimal(b["value"]))
+            for b in benchmark_data_list
+        ]
+
+        # Create benchmark metrics if we have benchmark data
+        benchmark_metrics = None
+        if benchmark_data_list:
+            benchmark_metrics = BenchmarkMetrics(
+                start_price=bench_start,
+                end_price=bench_end,
+                change_amount=bench_change_amt,
+                change_pct=bench_change_pct
+            )
+
         return UnifiedSummary(
             overview=summary["overview"],
             holdings=summary["holdings"],
             holdings_total=summary["holdings_total"],
             movers=summary["movers"],
-            performance_summary={
-                "period_days": summary["performance_summary"]["period_days"],
-                "data_points": summary["performance_summary"]["data_points"],
-                "data": perf_data
-            }
+            performance_summary=PerformanceSummary(
+                period_days=summary["performance_summary"]["period_days"],
+                data_points=summary["performance_summary"]["data_points"],
+                data=perf_data,
+                benchmark_data=benchmark_data,
+                benchmark_metrics=benchmark_metrics
+            )
         )
     except Exception as e:
         logger.error(f"Error getting unified summary: {e}")
