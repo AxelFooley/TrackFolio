@@ -22,18 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.sql import text as sql_text
 
-try:
-    import redis
-    redis_available = True
-except ImportError:
-    redis_available = False
-
 from app.models import (
     Position, PortfolioSnapshot, PriceHistory, CryptoPortfolio,
     CryptoPortfolioSnapshot
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
+from app.services.redis_client import get_redis_client
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -74,20 +69,11 @@ class PortfolioAggregator:
         self.db = db
         self.price_fetcher = PriceFetcher()
         self.crypto_calc = CryptoCalculationService(db)
-        self._redis_client = None
-        self._redis_initialized = False
 
     @property
     def redis_client(self):
-        """Lazy initialize Redis client for caching."""
-        if redis_available and not self._redis_initialized:
-            try:
-                self._redis_client = redis.from_url(settings.redis_url, decode_responses=True)
-                self._redis_initialized = True
-            except Exception as e:
-                logger.warning(f"Failed to initialize Redis client: {e}")
-                self._redis_initialized = True  # Mark as attempted
-        return self._redis_client
+        """Get shared Redis client for caching."""
+        return get_redis_client()
 
     async def _get_cache(self, key: str) -> Optional[Dict[str, Any]]:
         """Get cached value from Redis with graceful fallback."""

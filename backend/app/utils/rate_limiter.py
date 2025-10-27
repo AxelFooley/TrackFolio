@@ -11,53 +11,11 @@ import logging
 import time
 from typing import Callable, Optional, Any, Awaitable
 from fastapi import HTTPException, Request
-from starlette.responses import Response
-from datetime import datetime, timedelta
-
-try:
-    import redis
-    REDIS_AVAILABLE = True
-except ImportError:
-    REDIS_AVAILABLE = False
 
 from app.config import settings
+from app.services.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
-
-# Request context key for rate limit info
-RATE_LIMIT_INFO_KEY = "_rate_limit_info"
-
-# Module-level Redis client (initialized lazily)
-_redis_client: Optional[redis.Redis] = None
-
-
-def _get_redis_client() -> Optional[redis.Redis]:
-    """
-    Get or initialize Redis client.
-
-    Returns:
-        Redis client instance or None if Redis is unavailable
-
-    Note:
-        TODO: This Redis initialization duplicates logic from portfolio_aggregator.py.
-        Consider refactoring into a shared utility module in a future PR to avoid duplication.
-    """
-    global _redis_client
-
-    if not REDIS_AVAILABLE:
-        return None
-
-    if _redis_client is None:
-        try:
-            _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
-            # Test connection
-            _redis_client.ping()
-            logger.debug("Redis rate limiter client initialized")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Redis client for rate limiting: {e}")
-            _redis_client = None
-
-    return _redis_client
 
 
 class RateLimitExceeded(HTTPException):
@@ -136,7 +94,7 @@ async def check_rate_limit(
     # Get user ID from request (using client IP as fallback)
     user_id = request.client.host if request.client else "anonymous"
 
-    redis_client = _get_redis_client()
+    redis_client = get_redis_client()
 
     # If Redis is unavailable, allow request but log warning
     if redis_client is None:
@@ -162,11 +120,12 @@ async def check_rate_limit(
         # Initialize or check reset
         if current_count is None or reset_time is None:
             # First request in window or window expired
+            # Use atomic INCR to avoid race condition where multiple requests
+            # both see None and both initialize to 1
             reset_time_unix = current_time + window_seconds
-            pipe = redis_client.pipeline()
-            pipe.setex(rate_limit_key, window_seconds, "1")
-            pipe.setex(reset_time_key, window_seconds, str(reset_time_unix))
-            pipe.execute()
+            redis_client.incr(rate_limit_key)
+            redis_client.expire(rate_limit_key, window_seconds)
+            redis_client.setex(reset_time_key, window_seconds, str(reset_time_unix))
             remaining = requests_limit - 1
             limit = requests_limit
             return (remaining, limit, reset_time_unix)
@@ -175,12 +134,11 @@ async def check_rate_limit(
 
         # Check if window has expired
         if current_time >= reset_time_unix:
-            # Window expired, reset counter
+            # Window expired, reset counter using atomic INCR
             reset_time_unix = current_time + window_seconds
-            pipe = redis_client.pipeline()
-            pipe.setex(rate_limit_key, window_seconds, "1")
-            pipe.setex(reset_time_key, window_seconds, str(reset_time_unix))
-            pipe.execute()
+            redis_client.incr(rate_limit_key)
+            redis_client.expire(rate_limit_key, window_seconds)
+            redis_client.setex(reset_time_key, window_seconds, str(reset_time_unix))
             remaining = requests_limit - 1
             limit = requests_limit
             return (remaining, limit, reset_time_unix)
@@ -237,7 +195,8 @@ def rate_limit(
 
     Note:
         The decorated function must have a 'request: Request' parameter.
-        Rate limit info is stored in request.state for access by middleware.
+        Rate limit info is stored in request.state for middleware to add headers.
+        Header injection is handled by the rate_limit_middleware for all responses.
     """
     def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
         @functools.wraps(func)
@@ -261,7 +220,7 @@ def rate_limit(
                 request.state.rate_limit_reset = reset_time
 
             except RateLimitExceeded as e:
-                # Return 429 response with proper headers
+                # Return 429 response with proper headers for rate limit exceeded
                 from fastapi.responses import JSONResponse
 
                 return JSONResponse(
@@ -282,13 +241,6 @@ def rate_limit(
 
             # Call the original function
             response = await func(request, *args, **kwargs)
-
-            # Try to add rate limit headers to response object
-            from fastapi.responses import Response
-            if isinstance(response, Response):
-                response.headers["X-RateLimit-Limit"] = str(limit)
-                response.headers["X-RateLimit-Remaining"] = str(remaining)
-                response.headers["X-RateLimit-Reset"] = str(reset_time)
 
             return response
 
@@ -333,7 +285,7 @@ def get_rate_limit_info(endpoint: str, user_id: str = None) -> dict:
     if user_id is None:
         user_id = "anonymous"
 
-    redis_client = _get_redis_client()
+    redis_client = get_redis_client()
 
     if redis_client is None:
         return {
