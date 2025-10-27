@@ -201,11 +201,33 @@ class PerformanceSummary(BaseModel):
         }
 
 
+class PaginatedUnifiedHolding(BaseModel):
+    """Paginated response for unified holdings."""
+
+    items: List[UnifiedHolding]
+    total: int
+    skip: int
+    limit: int
+    has_more: bool
+
+    class Config:
+        """Pydantic configuration."""
+        json_schema_extra = {
+            "example": {
+                "items": [],
+                "total": 15,
+                "skip": 0,
+                "limit": 20,
+                "has_more": False
+            }
+        }
+
+
 class UnifiedSummary(BaseModel):
     """Complete unified portfolio summary."""
 
     overview: UnifiedOverview
-    holdings: List[UnifiedHolding]
+    holdings: PaginatedUnifiedHolding
     holdings_total: int
     movers: UnifiedMovers
     performance_summary: PerformanceSummary

@@ -13,7 +13,7 @@ from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance, Perfo
 from app.schemas.position import PositionResponse
 from app.schemas.unified import (
     UnifiedHolding, UnifiedOverview, UnifiedMovers,
-    UnifiedSummary, UnifiedPerformanceDataPoint
+    UnifiedSummary, UnifiedPerformanceDataPoint, PaginatedUnifiedHolding
 )
 from app.services.portfolio_aggregator import PortfolioAggregator
 
@@ -760,7 +760,13 @@ async def get_unified_summary(
 
         return UnifiedSummary(
             overview=summary["overview"],
-            holdings=summary["holdings"],
+            holdings=PaginatedUnifiedHolding(
+                items=summary["holdings"],
+                total=summary["holdings_total"],
+                skip=0,
+                limit=holdings_limit,
+                has_more=len(summary["holdings"]) < summary["holdings_total"]
+            ),
             holdings_total=summary["holdings_total"],
             movers=summary["movers"],
             performance_summary={
