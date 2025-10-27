@@ -1,5 +1,5 @@
 """Portfolio API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from decimal import Decimal
@@ -13,9 +13,12 @@ from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance, Perfo
 from app.schemas.position import PositionResponse
 from app.schemas.unified import (
     UnifiedHolding, UnifiedOverview, UnifiedMovers,
-    UnifiedSummary, UnifiedPerformanceDataPoint
+    UnifiedSummary, UnifiedPerformanceDataPoint, PaginatedUnifiedHolding
 )
 from app.services.portfolio_aggregator import PortfolioAggregator
+from app.services.rate_limiter import rate_limit
+from app.config import settings
+from app.utils.time_utils import parse_time_range, get_last_n_days
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -55,46 +58,6 @@ def calculate_today_change(
         today_change_percent = None
 
     return today_change, today_change_percent
-
-
-def parse_time_range(range_str: str) -> tuple[Optional[date], Optional[date]]:
-    """
-    Convert time range string to start_date and end_date.
-
-    Args:
-        range_str: Time range string (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)
-
-    Returns:
-        Tuple of (start_date, end_date). Returns (None, None) for ALL.
-
-    Raises:
-        HTTPException: If range_str is invalid
-    """
-    today = date.today()
-    end_date = today
-
-    range_mapping = {
-        "1D": timedelta(days=1),
-        "1W": timedelta(days=7),
-        "1M": timedelta(days=30),
-        "3M": timedelta(days=90),
-        "6M": timedelta(days=180),
-        "1Y": timedelta(days=365),
-    }
-
-    if range_str == "ALL":
-        return None, None
-    elif range_str == "YTD":
-        start_date = date(today.year, 1, 1)
-        return start_date, end_date
-    elif range_str in range_mapping:
-        start_date = today - range_mapping[range_str]
-        return start_date, end_date
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid range parameter. Must be one of: 1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL. Got: {range_str}"
-        )
 
 
 @router.get("/overview", response_model=PortfolioOverview)
@@ -504,14 +467,20 @@ async def get_position(
 
 # Unified Portfolio Endpoints (combining traditional and crypto)
 
-@router.get("/unified-holdings", response_model=List[UnifiedHolding])
+@router.get("/unified-holdings", response_model=PaginatedUnifiedHolding)
+@rate_limit(
+    requests=settings.rate_limit_unified_holdings,
+    window_seconds=settings.rate_limit_window,
+    endpoint_name="get_unified_holdings"
+)
 async def get_unified_holdings(
+    request: Request,
     skip: int = Query(0, ge=0, description="Number of holdings to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Max holdings to return"),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get unified list of all holdings (traditional and crypto).
+    Get paginated unified list of all holdings (traditional and crypto).
 
     Returns combined positions from traditional portfolio (Position model)
     and all crypto portfolios (CryptoPortfolio/CryptoTransaction).
@@ -523,23 +492,43 @@ async def get_unified_holdings(
         limit: Maximum number of holdings to return (1-1000)
 
     Returns:
-        List of unified holdings with standardized schema
+        PaginatedUnifiedHolding with items, total count, and pagination metadata
     """
     try:
         aggregator = PortfolioAggregator(db)
         all_holdings = await aggregator.get_unified_holdings()
 
+        # Count total holdings
+        total = len(all_holdings)
+
         # Apply pagination
         paginated_holdings = all_holdings[skip : skip + limit]
 
-        return paginated_holdings
+        # Calculate has_more flag
+        has_more = (skip + limit) < total
+
+        return PaginatedUnifiedHolding(
+            items=paginated_holdings,
+            total=total,
+            skip=skip,
+            limit=limit,
+            has_more=has_more
+        )
     except Exception as e:
         logger.error(f"Error getting unified holdings: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve unified holdings")
 
 
 @router.get("/unified-overview", response_model=UnifiedOverview)
-async def get_unified_overview(db: AsyncSession = Depends(get_db)):
+@rate_limit(
+    requests=settings.rate_limit_unified_overview,
+    window_seconds=settings.rate_limit_window,
+    endpoint_name="get_unified_overview"
+)
+async def get_unified_overview(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
     """
     Get aggregated portfolio overview combining traditional and crypto.
 
@@ -563,7 +552,13 @@ async def get_unified_overview(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/unified-performance")
+@rate_limit(
+    requests=settings.rate_limit_unified_performance,
+    window_seconds=settings.rate_limit_window,
+    endpoint_name="get_unified_performance"
+)
 async def get_unified_performance(
+    request: Request,
     range: Optional[str] = Query(None, description="Time range (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)"),
     days: Optional[int] = Query(None, ge=1, le=3650, description="Number of days of history (alternative to range)"),
     db: AsyncSession = Depends(get_db)
@@ -588,8 +583,7 @@ async def get_unified_performance(
         else:
             # Use days parameter or default to 365
             days_to_fetch = days or 365
-            end_date = date.today()
-            start_date = end_date - timedelta(days=days_to_fetch)
+            start_date, end_date = get_last_n_days(days_to_fetch)
 
         # Get traditional portfolio snapshots
         query = select(PortfolioSnapshot).order_by(PortfolioSnapshot.snapshot_date)
@@ -722,7 +716,13 @@ async def get_unified_movers(
 
 
 @router.get("/unified-summary", response_model=UnifiedSummary)
+@rate_limit(
+    requests=settings.rate_limit_unified_summary,
+    window_seconds=settings.rate_limit_window,
+    endpoint_name="get_unified_summary"
+)
 async def get_unified_summary(
+    request: Request,
     holdings_limit: int = Query(20, ge=1, le=100, description="Max holdings to return"),
     performance_days: int = Query(365, ge=1, le=3650, description="Days of performance history"),
     db: AsyncSession = Depends(get_db)
@@ -733,12 +733,23 @@ async def get_unified_summary(
     This is a convenience endpoint that returns overview, holdings (paginated),
     movers, and performance data in a single response to reduce API round trips.
 
+    The performance_summary includes:
+    - period_days: Number of days in the historical period
+    - data_points: Number of data points available
+    - data: Array of daily portfolio values (last 30 days for frontend)
+    - benchmark: Optional benchmark metrics (included if benchmark is configured)
+      - start_price: Benchmark price at start of period
+      - end_price: Benchmark price at end of period
+      - change: Price change over period
+      - pct_change: Percentage change over period
+      - last_update: Last date with benchmark data
+
     Args:
         holdings_limit: Maximum number of holdings to return (1-100, default 20)
         performance_days: Days of performance history (1-3650, default 365)
 
     Returns:
-        Complete unified portfolio summary
+        Complete unified portfolio summary with optional benchmark comparison data
     """
     try:
         aggregator = PortfolioAggregator(db)
@@ -758,15 +769,30 @@ async def get_unified_summary(
             for p in summary["performance_summary"]["data"]
         ]
 
+        # Build benchmark data if available
+        benchmark_data = None
+        if summary["performance_summary"].get("benchmark"):
+            benchmark_data = summary["performance_summary"]["benchmark"]
+
+        # Convert holdings to paginated response
+        holdings_data = summary["holdings"]
+        paginated_holdings = PaginatedUnifiedHolding(
+            items=holdings_data,
+            total=summary["holdings_total"],
+            skip=0,
+            limit=len(holdings_data),
+            has_more=len(holdings_data) < summary["holdings_total"]
+        )
+
         return UnifiedSummary(
             overview=summary["overview"],
-            holdings=summary["holdings"],
-            holdings_total=summary["holdings_total"],
+            holdings=paginated_holdings,
             movers=summary["movers"],
             performance_summary={
                 "period_days": summary["performance_summary"]["period_days"],
                 "data_points": summary["performance_summary"]["data_points"],
-                "data": perf_data
+                "data": perf_data,
+                "benchmark": benchmark_data
             }
         )
     except Exception as e:

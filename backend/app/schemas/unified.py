@@ -183,12 +183,35 @@ class UnifiedMovers(BaseModel):
         }
 
 
+class BenchmarkData(BaseModel):
+    """Benchmark performance data for portfolio comparison."""
+
+    start_price: Optional[Decimal] = None
+    end_price: Optional[Decimal] = None
+    change: Optional[Decimal] = None
+    pct_change: Optional[float] = None
+    last_update: Optional[date] = None
+
+    class Config:
+        """Pydantic configuration."""
+        json_schema_extra = {
+            "example": {
+                "start_price": "400.00",
+                "end_price": "450.00",
+                "change": "50.00",
+                "pct_change": 12.5,
+                "last_update": "2025-01-20"
+            }
+        }
+
+
 class PerformanceSummary(BaseModel):
     """Summary of performance data."""
 
     period_days: int
     data_points: int
     data: List[UnifiedPerformanceDataPoint]
+    benchmark: Optional[BenchmarkData] = None
 
     class Config:
         """Pydantic configuration."""
@@ -196,7 +219,53 @@ class PerformanceSummary(BaseModel):
             "example": {
                 "period_days": 365,
                 "data_points": 250,
-                "data": []
+                "data": [],
+                "benchmark": {
+                    "start_price": "400.00",
+                    "end_price": "450.00",
+                    "change": "50.00",
+                    "pct_change": 12.5,
+                    "last_update": "2025-01-20"
+                }
+            }
+        }
+
+
+class PaginatedUnifiedHolding(BaseModel):
+    """Paginated response for unified holdings."""
+
+    items: List[UnifiedHolding]
+    total: int
+    skip: int
+    limit: int
+    has_more: bool
+
+    class Config:
+        """Pydantic configuration."""
+        json_schema_extra = {
+            "example": {
+                "items": [
+                    {
+                        "id": "trad_1",
+                        "type": "STOCK",
+                        "ticker": "AAPL",
+                        "isin": "US0378691033",
+                        "quantity": 10.5,
+                        "current_price": "150.25",
+                        "current_value": "1577.625",
+                        "average_cost": "140.00",
+                        "total_cost": "1470.00",
+                        "profit_loss": "107.625",
+                        "profit_loss_pct": 7.32,
+                        "currency": "EUR",
+                        "portfolio_id": None,
+                        "portfolio_name": "Main Portfolio"
+                    }
+                ],
+                "total": 42,
+                "skip": 0,
+                "limit": 20,
+                "has_more": True
             }
         }
 
@@ -205,8 +274,7 @@ class UnifiedSummary(BaseModel):
     """Complete unified portfolio summary."""
 
     overview: UnifiedOverview
-    holdings: List[UnifiedHolding]
-    holdings_total: int
+    holdings: PaginatedUnifiedHolding
     movers: UnifiedMovers
     performance_summary: PerformanceSummary
 
