@@ -5,6 +5,7 @@ Tests the PortfolioAggregator service and unified API endpoints.
 Integration tests that verify the aggregation endpoints work with the running backend.
 """
 import pytest
+from decimal import Decimal
 
 from app.services.portfolio_aggregator import PortfolioAggregator
 from app.schemas.unified import (
