@@ -30,10 +30,6 @@ class Settings(BaseSettings):
     # Timezone
     timezone: str = "Europe/Rome"
 
-    # Rate limiting
-    rate_limit_requests: int = 100  # requests per minute
-    rate_limit_window: int = 60  # seconds
-
     # Celery
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/0"
@@ -152,6 +148,13 @@ class Settings(BaseSettings):
         5,
         env="PORTFOLIO_AGGREGATOR_TOP_MOVERS",
         description="Number of top gainers and losers to return"
+    )
+
+    # Rate limiting key prefix (prevents collisions in shared Redis)
+    rate_limit_key_prefix: str = Field(
+        "rate_limit",
+        env="RATE_LIMIT_KEY_PREFIX",
+        description="Redis key prefix for rate limiting (prevents key collisions)"
     )
 
     # Rate limiting for unified endpoints

@@ -55,6 +55,15 @@ services:
       RUN_MIGRATIONS: "true"
       MIGRATION_TIMEOUT: "300"
       AUTO_ROLLBACK_ON_FAILURE: "false"
+      # Rate limiting configuration
+      RATE_LIMIT_KEY_PREFIX: "rate_limit"  # Redis key prefix for rate limiting (prevents key collisions)
+      RATE_LIMIT_UNIFIED_OVERVIEW: "100"   # Rate limit for unified-overview endpoint (requests per minute)
+      RATE_LIMIT_UNIFIED_HOLDINGS: "50"    # Rate limit for unified-holdings endpoint (requests per minute)
+      RATE_LIMIT_UNIFIED_PERFORMANCE: "50" # Rate limit for unified-performance endpoint (requests per minute)
+      RATE_LIMIT_UNIFIED_SUMMARY: "50"     # Rate limit for unified-summary endpoint (requests per minute)
+      RATE_LIMIT_UNIFIED_MOVERS: "100"     # Rate limit for unified-movers endpoint (requests per minute)
+      RATE_LIMIT_WINDOW_SECONDS: "60"      # Time window for rate limiting in seconds
+      RATE_LIMIT_ENABLED: "true"           # Enable or disable rate limiting globally
     depends_on:
       postgres:
         condition: service_healthy

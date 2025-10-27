@@ -9,7 +9,7 @@ Rate limit info is stored per request in state for use by middleware or inline h
 import functools
 import logging
 import time
-from typing import Callable, Optional
+from typing import Callable, Optional, Any, Awaitable
 from fastapi import HTTPException, Request
 from starlette.responses import Response
 from datetime import datetime, timedelta
@@ -37,6 +37,10 @@ def _get_redis_client() -> Optional[redis.Redis]:
 
     Returns:
         Redis client instance or None if Redis is unavailable
+
+    Note:
+        TODO: This Redis initialization duplicates logic from portfolio_aggregator.py.
+        Consider refactoring into a shared utility module in a future PR to avoid duplication.
     """
     global _redis_client
 
@@ -84,7 +88,8 @@ def _get_rate_limit_key(user_id: str, endpoint: str) -> str:
     Returns:
         Redis key string
     """
-    return f"rate_limit:{endpoint}:{user_id}"
+    prefix = settings.rate_limit_key_prefix
+    return f"{prefix}:{endpoint}:{user_id}"
 
 
 def _get_reset_time_key(endpoint: str, user_id: str) -> str:
@@ -98,7 +103,8 @@ def _get_reset_time_key(endpoint: str, user_id: str) -> str:
     Returns:
         Redis key string
     """
-    return f"rate_limit_reset:{endpoint}:{user_id}"
+    prefix = settings.rate_limit_key_prefix
+    return f"{prefix}_reset:{endpoint}:{user_id}"
 
 
 async def check_rate_limit(
@@ -122,6 +128,11 @@ async def check_rate_limit(
     Raises:
         RateLimitExceeded: If rate limit is exceeded
     """
+    # Check if rate limiting is enabled globally
+    if not settings.rate_limit_enabled:
+        reset_time = int(time.time()) + window_seconds
+        return (requests_limit, requests_limit, reset_time)
+
     # Get user ID from request (using client IP as fallback)
     user_id = request.client.host if request.client else "anonymous"
 
@@ -138,9 +149,13 @@ async def check_rate_limit(
         rate_limit_key = _get_rate_limit_key(user_id, endpoint)
         reset_time_key = _get_reset_time_key(endpoint, user_id)
 
-        # Get current count and reset time
-        current_count = redis_client.get(rate_limit_key)
-        reset_time = redis_client.get(reset_time_key)
+        # Use Redis pipeline to fetch both keys in one call (optimization)
+        pipe = redis_client.pipeline()
+        pipe.get(rate_limit_key)
+        pipe.get(reset_time_key)
+        results = pipe.execute()
+        current_count = results[0]
+        reset_time = results[1]
 
         current_time = int(time.time())
 
@@ -148,8 +163,10 @@ async def check_rate_limit(
         if current_count is None or reset_time is None:
             # First request in window or window expired
             reset_time_unix = current_time + window_seconds
-            redis_client.setex(rate_limit_key, window_seconds, "1")
-            redis_client.setex(reset_time_key, window_seconds, str(reset_time_unix))
+            pipe = redis_client.pipeline()
+            pipe.setex(rate_limit_key, window_seconds, "1")
+            pipe.setex(reset_time_key, window_seconds, str(reset_time_unix))
+            pipe.execute()
             remaining = requests_limit - 1
             limit = requests_limit
             return (remaining, limit, reset_time_unix)
@@ -160,8 +177,10 @@ async def check_rate_limit(
         if current_time >= reset_time_unix:
             # Window expired, reset counter
             reset_time_unix = current_time + window_seconds
-            redis_client.setex(rate_limit_key, window_seconds, "1")
-            redis_client.setex(reset_time_key, window_seconds, str(reset_time_unix))
+            pipe = redis_client.pipeline()
+            pipe.setex(rate_limit_key, window_seconds, "1")
+            pipe.setex(reset_time_key, window_seconds, str(reset_time_unix))
+            pipe.execute()
             remaining = requests_limit - 1
             limit = requests_limit
             return (remaining, limit, reset_time_unix)
@@ -198,7 +217,7 @@ def rate_limit(
     endpoint: str,
     requests: int = 100,
     window_seconds: int = 60
-) -> Callable:
+) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
     """
     Decorator to apply rate limiting to a FastAPI endpoint.
 
@@ -220,7 +239,7 @@ def rate_limit(
         The decorated function must have a 'request: Request' parameter.
         Rate limit info is stored in request.state for access by middleware.
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
         @functools.wraps(func)
         async def async_wrapper(request: Request, *args, **kwargs):
             # Check rate limit
