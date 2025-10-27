@@ -750,7 +750,7 @@ async def get_unified_summary(
         # Transform performance data to proper schema
         perf_data = [
             UnifiedPerformanceDataPoint(
-                date_point=p["date"],
+                date=p["date"],
                 value=p["value"],
                 crypto_value=p["crypto_value"],
                 traditional_value=p["traditional_value"]

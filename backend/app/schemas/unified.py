@@ -91,7 +91,7 @@ class UnifiedOverview(BaseModel):
 class UnifiedPerformanceDataPoint(BaseModel):
     """Single data point in performance time series."""
 
-    date_point: date
+    date: date
     value: Decimal
     crypto_value: Decimal
     traditional_value: Decimal
