@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useUnifiedOverview } from '@/hooks/usePortfolio';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
-import { TrendingUp, TrendingDown, DollarSign, Activity, PieChart } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, PieChart, RefreshCw } from 'lucide-react';
 
 /**
  * Renders a unified portfolio overview panel showing current value, total profit, and today's change.
@@ -16,7 +16,7 @@ import { TrendingUp, TrendingDown, DollarSign, Activity, PieChart } from 'lucide
  * @returns The React element containing the portfolio overview UI.
  */
 export function PortfolioOverview() {
-  const { data: overview, isLoading, error } = useUnifiedOverview();
+  const { data: overview, isLoading, isFetching, error } = useUnifiedOverview();
 
   // Calculate allocation percentages
   const allocation = useMemo(() => {
@@ -98,7 +98,18 @@ export function PortfolioOverview() {
         {metrics.map((metric) => {
           const Icon = metric.icon;
           return (
-            <Card key={metric.title}>
+            <Card
+              key={metric.title}
+              className={`relative transition-all ${
+                isFetching && !isLoading ? 'border-blue-300 border-2' : ''
+              }`}
+            >
+              {/* Subtle loading indicator when refetching cached data */}
+              {isFetching && !isLoading && (
+                <div className="absolute top-2 right-2 text-blue-400 animate-spin">
+                  <RefreshCw className="h-4 w-4" />
+                </div>
+              )}
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
                   {metric.title}
