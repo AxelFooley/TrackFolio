@@ -211,17 +211,23 @@ cd /app
 # Get current revision (will be empty if no migrations have been run)
 CURRENT_REVISION=$(PGPASSFILE="$PGPASS_FILE" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_DATABASE" -t -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | xargs || echo "")
 
-# Get latest revision from alembic and validate there's only one head
-LATEST_REVISIONS=$($ALEMBIC_COMMAND $ALEMBIC_HEADS_CMD 2>/dev/null | grep "Rev:" | awk '{print $2}' || echo "")
-LATEST_REVISION_COUNT=$(echo "$LATEST_REVISIONS" | wc -w)
+# Get latest revision from alembic using Python API (reliable method)
+# This replaces the fragile shell parsing that was causing false positives
+ALEMBIC_CHECK_OUTPUT=$(python3 /app/scripts/check_alembic_heads.py 2>&1)
+ALEMBIC_CHECK_RESULT=$?
 
-if [[ $LATEST_REVISION_COUNT -gt 1 ]]; then
-    print_error "Multiple alembic heads detected: $LATEST_REVISION_COUNT"
+if [[ $ALEMBIC_CHECK_RESULT -eq 1 ]]; then
+    print_error "$(echo "$ALEMBIC_CHECK_OUTPUT" | grep "^ERROR:")"
     print_error "This indicates a branched migration history that must be resolved manually."
+    exit 1
+elif [[ $ALEMBIC_CHECK_RESULT -eq 2 ]]; then
+    print_error "Failed to check Alembic configuration: $(echo "$ALEMBIC_CHECK_OUTPUT" | grep "^ERROR:")"
     exit 1
 fi
 
-LATEST_REVISION=$(echo "$LATEST_REVISIONS" | head -1)
+# Extract values from Python script output
+LATEST_REVISION_COUNT=$(echo "$ALEMBIC_CHECK_OUTPUT" | grep "^HEADS_COUNT=" | cut -d'=' -f2)
+LATEST_REVISION=$(echo "$ALEMBIC_CHECK_OUTPUT" | grep "^LATEST_REVISION=" | cut -d'=' -f2)
 
 print_status "Current revision: ${CURRENT_REVISION:-'None'}"
 print_status "Latest revision: ${LATEST_REVISION:-'None'}"
