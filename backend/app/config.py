@@ -154,6 +154,18 @@ class Settings(BaseSettings):
         description="Number of top gainers and losers to return"
     )
 
+    # FX Rate settings
+    fx_cache_ttl_hours: PositiveInt = Field(
+        1,
+        env="FX_CACHE_TTL_HOURS",
+        description="Cache TTL for FX rates in hours"
+    )
+    fx_rate_source: str = Field(
+        "yahoo",
+        env="FX_RATE_SOURCE",
+        description="Primary source for FX rates (yahoo or ecb)"
+    )
+
 
 # Global settings instance
 settings = Settings()

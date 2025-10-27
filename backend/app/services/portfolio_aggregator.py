@@ -12,9 +12,9 @@ Key responsibilities:
 - Calculate top gainers/losers across all holdings
 - Handle currency conversions (crypto USD to EUR)
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 import logging
 import json
 
@@ -34,6 +34,7 @@ from app.models import (
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
+from app.services.fx_rate_service import get_fx_service
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -74,8 +75,10 @@ class PortfolioAggregator:
         self.db = db
         self.price_fetcher = PriceFetcher()
         self.crypto_calc = CryptoCalculationService(db)
+        self.fx_service = get_fx_service()
         self._redis_client = None
         self._redis_initialized = False
+        self._fx_rates_cache: Dict[str, Tuple[Decimal, datetime]] = {}
 
     @property
     def redis_client(self):
@@ -239,6 +242,7 @@ class PortfolioAggregator:
         - portfolio_snapshots (traditional)
         - crypto_portfolio_snapshots (per crypto portfolio)
 
+        Converts all crypto portfolio values to EUR before aggregation.
         Returns data for the last N days, aggregating across all portfolios.
 
         Args:
@@ -247,9 +251,9 @@ class PortfolioAggregator:
         Returns:
             List of daily performance points with:
             - date
-            - value: combined total
-            - crypto_value: crypto total
-            - traditional_value: traditional total
+            - value: combined total (in EUR)
+            - crypto_value: crypto total (in EUR)
+            - traditional_value: traditional total (in EUR)
         """
         cutoff_date = date.today() - timedelta(days=days)
 
@@ -290,8 +294,13 @@ class PortfolioAggregator:
                 }
             # Use helper function to get the correct value field
             crypto_value = get_snapshot_value_by_currency(snapshot, snapshot.base_currency)
+
+            # Convert to EUR if needed
+            portfolio_currency = snapshot.base_currency
+            crypto_value_eur = await self._convert_to_eur(crypto_value, portfolio_currency)
+
             # Sum crypto values for this date (multiple portfolios)
-            performance_by_date[snapshot.snapshot_date]["crypto_value"] += crypto_value
+            performance_by_date[snapshot.snapshot_date]["crypto_value"] += crypto_value_eur
 
         # Sort by date and build response
         result = []
@@ -579,6 +588,9 @@ class PortfolioAggregator:
         """
         Get all crypto holdings from all portfolios formatted for unified response.
 
+        Note: Holdings are returned in their original portfolio currency for clarity.
+        The aggregated overview values are all normalized to EUR.
+
         Wrapped in error handling to ensure crypto calculation failures don't prevent
         returning partial results (e.g., if one portfolio calculation fails, others
         are still included).
@@ -682,9 +694,41 @@ class PortfolioAggregator:
             "today_gain_loss": today_gain_loss
         }
 
+    async def _convert_to_eur(
+        self,
+        amount: Decimal,
+        from_currency: str
+    ) -> Decimal:
+        """
+        Convert amount from source currency to EUR.
+
+        Args:
+            amount: Amount to convert
+            from_currency: Source currency code
+
+        Returns:
+            Amount converted to EUR
+        """
+        if from_currency == "EUR":
+            return amount
+
+        try:
+            rate = await self.fx_service.get_current_rate(from_currency, "EUR", use_fallback=True)
+            converted = amount * rate
+            logger.debug(f"Converted {amount} {from_currency} to EUR: {converted} (rate: {rate})")
+            return converted
+        except Exception as e:
+            logger.error(f"Currency conversion failed for {from_currency} to EUR: {e}")
+            # Use fallback with safe default
+            logger.warning(f"Using fallback conversion for {from_currency} to EUR")
+            return amount
+
     async def _get_crypto_overview(self) -> Dict[str, Any]:
         """
         Get aggregated crypto overview from all portfolios.
+
+        Converts all crypto portfolio values to EUR before aggregation to ensure
+        proper handling of mixed-currency portfolios.
 
         Wrapped in error handling to ensure crypto calculation failures don't prevent
         returning partial results (e.g., if one portfolio calculation fails, others
@@ -703,8 +747,17 @@ class PortfolioAggregator:
             try:
                 metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
                 if metrics:
-                    total_value += metrics.total_value or Decimal("0")
-                    total_cost_basis += metrics.total_cost_basis
+                    # Get values in the portfolio's base currency
+                    portfolio_currency = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
+                    portfolio_value = metrics.total_value or Decimal("0")
+                    portfolio_cost = metrics.total_cost_basis
+
+                    # Convert to EUR if needed
+                    value_eur = await self._convert_to_eur(portfolio_value, portfolio_currency)
+                    cost_eur = await self._convert_to_eur(portfolio_cost, portfolio_currency)
+
+                    total_value += value_eur
+                    total_cost_basis += cost_eur
                     # Note: crypto today change would require intraday snapshots
                     # For now, we estimate from EOD snapshots
             except Exception as e:
