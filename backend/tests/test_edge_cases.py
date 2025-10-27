@@ -97,21 +97,23 @@ class TestEmptyPortfolioEdgeCases:
 
 
 class TestCacheConstant:
-    """Test that cache TTL constant is used correctly."""
+    """Test that cache TTL configuration is used correctly."""
 
-    def test_cache_ttl_constant_exists(self):
-        """Verify CACHE_TTL_SECONDS constant is defined."""
-        assert hasattr(PortfolioAggregator, 'CACHE_TTL_SECONDS')
-        assert PortfolioAggregator.CACHE_TTL_SECONDS == 60
+    def test_cache_ttl_config_exists(self):
+        """Verify portfolio_aggregator_cache_ttl config is defined."""
+        from app.config import settings
+        assert hasattr(settings, 'portfolio_aggregator_cache_ttl')
+        assert settings.portfolio_aggregator_cache_ttl == 60
 
     @pytest.mark.asyncio
-    async def test_cache_ttl_constant_value(self):
-        """Verify constant has expected value."""
+    async def test_cache_ttl_config_value(self):
+        """Verify config has expected value."""
+        from app.config import settings
         mock_db = AsyncMock(spec=AsyncSession)
         aggregator = PortfolioAggregator(mock_db)
 
-        # Check the constant through instance
-        assert aggregator.CACHE_TTL_SECONDS == 60
+        # Check the config value is accessible
+        assert settings.portfolio_aggregator_cache_ttl == 60
 
 
 class TestDataValidation:

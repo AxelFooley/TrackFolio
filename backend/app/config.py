@@ -132,6 +132,28 @@ class Settings(BaseSettings):
         description="Cache TTL for blockchain transaction deduplication (seconds)"
     )
 
+    # Portfolio Aggregator settings
+    portfolio_aggregator_cache_ttl: PositiveInt = Field(
+        60,
+        env="PORTFOLIO_AGGREGATOR_CACHE_TTL",
+        description="Cache TTL for unified portfolio aggregator endpoints (seconds)"
+    )
+    portfolio_aggregator_holdings_limit: PositiveInt = Field(
+        20,
+        env="PORTFOLIO_AGGREGATOR_HOLDINGS_LIMIT",
+        description="Default limit for paginated holdings in unified summary"
+    )
+    portfolio_aggregator_performance_days: PositiveInt = Field(
+        365,
+        env="PORTFOLIO_AGGREGATOR_PERFORMANCE_DAYS",
+        description="Default number of days of performance history to include"
+    )
+    portfolio_aggregator_top_movers: PositiveInt = Field(
+        5,
+        env="PORTFOLIO_AGGREGATOR_TOP_MOVERS",
+        description="Number of top gainers and losers to return"
+    )
+
 
 # Global settings instance
 settings = Settings()

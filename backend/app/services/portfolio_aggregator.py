@@ -19,7 +19,8 @@ import logging
 import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
+from sqlalchemy.sql import text as sql_text
 
 try:
     import redis
@@ -38,7 +39,9 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def get_snapshot_value_by_currency(snapshot, base_currency: str):
+def get_snapshot_value_by_currency(
+    snapshot: "CryptoPortfolioSnapshot", base_currency: str
+) -> Decimal:
     """
     Extract the appropriate snapshot value based on the base currency.
 
@@ -60,16 +63,6 @@ def get_snapshot_value_by_currency(snapshot, base_currency: str):
 
 class PortfolioAggregator:
     """Service for aggregating traditional and crypto portfolio data."""
-
-    # Cache configuration constant
-    CACHE_TTL_SECONDS = 60
-    """TTL for cached portfolio data (seconds).
-
-    Set to 60 seconds to balance:
-    - Dashboard responsiveness (update frequently)
-    - Database load reduction (avoid hammering on rapid refreshes)
-    - User expectations (near real-time without excessive DB queries)
-    """
 
     def __init__(self, db: AsyncSession):
         """
@@ -121,8 +114,8 @@ class PortfolioAggregator:
         """
         Batch load the latest 2 prices for multiple tickers (eliminates N+1 queries).
 
-        Fetches all prices for the given tickers in a single query, then groups them
-        by ticker. This is much more efficient than querying per ticker in a loop.
+        Uses database-level window functions (ROW_NUMBER) to efficiently filter prices
+        server-side instead of loading all prices and filtering in Python.
 
         Args:
             tickers: List of ticker symbols to fetch prices for
@@ -133,26 +126,40 @@ class PortfolioAggregator:
         if not tickers:
             return {}
 
-        # Single optimized query for all tickers at once
+        # Use window function at database level for efficiency
+        # ROW_NUMBER() assigns a number to each price within its ticker group
+        # We filter to keep only rows 1-2 (latest 2 prices per ticker)
+        from sqlalchemy.orm import aliased
+        from sqlalchemy import CTE
+
+        # Create a CTE with row numbers
+        rn_cte = select(
+            PriceHistory,
+            func.row_number().over(
+                partition_by=PriceHistory.ticker,
+                order_by=PriceHistory.date.desc()
+            ).label('rn')
+        ).where(
+            PriceHistory.ticker.in_(tickers)
+        ).cte()
+
+        # Select only rows where rn <= 2
         result = await self.db.execute(
-            select(PriceHistory)
-            .where(PriceHistory.ticker.in_(tickers))
-            .order_by(PriceHistory.ticker, PriceHistory.date.desc())
+            select(rn_cte).where(rn_cte.c.rn <= 2)
         )
-        prices = result.scalars().all()
+        rows = result.all()
 
-        # Group by ticker, keeping only latest 2 for each
+        # Group results by ticker
         prices_by_ticker: Dict[str, List[PriceHistory]] = {}
-        ticker_count: Dict[str, int] = {}
+        for row in rows:
+            # Extract PriceHistory object from the row tuple
+            price_obj = row[0]
+            ticker = price_obj.ticker
 
-        for price in prices:
-            if price.ticker not in ticker_count:
-                ticker_count[price.ticker] = 0
-                prices_by_ticker[price.ticker] = []
+            if ticker not in prices_by_ticker:
+                prices_by_ticker[ticker] = []
 
-            if ticker_count[price.ticker] < 2:
-                prices_by_ticker[price.ticker].append(price)
-                ticker_count[price.ticker] += 1
+            prices_by_ticker[ticker].append(price_obj)
 
         return prices_by_ticker
 
@@ -219,8 +226,8 @@ class PortfolioAggregator:
         # Aggregate the metrics
         result = await self._aggregate_portfolio_metrics(trad_overview, crypto_overview)
 
-        # Cache the result for 60 seconds
-        await self._set_cache(cache_key, result, ttl_seconds=self.CACHE_TTL_SECONDS)
+        # Cache the result
+        await self._set_cache(cache_key, result, ttl_seconds=settings.portfolio_aggregator_cache_ttl)
 
         return result
 
@@ -299,12 +306,12 @@ class PortfolioAggregator:
 
         return result
 
-    async def get_unified_movers(self, top_n: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+    async def get_unified_movers(self, top_n: int | None = None) -> Dict[str, List[Dict[str, Any]]]:
         """
         Get top gainers and losers from both traditional and crypto portfolios.
 
         Calculates return percentage for each holding and returns top N gainers
-        and top N losers across all holdings. Results are cached for 60 seconds.
+        and top N losers across all holdings. Results are cached.
 
         Args:
             top_n: Number of gainers and losers to return (default 5)
@@ -313,6 +320,10 @@ class PortfolioAggregator:
             Dictionary with keys "gainers" and "losers", each containing list of:
             - ticker, type, price, change_pct, portfolio_name
         """
+        # Use config default if not provided
+        if top_n is None:
+            top_n = settings.portfolio_aggregator_top_movers
+
         # Check cache first
         cache_key = f"unified:movers:{top_n}"
         cached = await self._get_cache(cache_key)
@@ -378,15 +389,15 @@ class PortfolioAggregator:
             "losers": losers[:top_n]
         }
 
-        # Cache the result for 60 seconds
-        await self._set_cache(cache_key, result, ttl_seconds=self.CACHE_TTL_SECONDS)
+        # Cache the result
+        await self._set_cache(cache_key, result, ttl_seconds=settings.portfolio_aggregator_cache_ttl)
 
         return result
 
     async def get_unified_summary(
         self,
-        holdings_limit: int = 20,
-        performance_days: int = 365
+        holdings_limit: int | None = None,
+        performance_days: int | None = None
     ) -> Dict[str, Any]:
         """
         Get complete unified summary combining all aggregated data.
@@ -401,10 +412,18 @@ class PortfolioAggregator:
         Returns:
             Dictionary with keys: overview, holdings, movers, performance_summary
         """
+        # Use config defaults if not provided
+        if holdings_limit is None:
+            holdings_limit = settings.portfolio_aggregator_holdings_limit
+        if performance_days is None:
+            performance_days = settings.portfolio_aggregator_performance_days
+
         # Get all components in parallel where possible
         overview = await self.get_unified_overview()
         all_holdings = await self.get_unified_holdings()
-        movers = await self.get_unified_movers(top_n=5)
+        movers = await self.get_unified_movers(
+            top_n=settings.portfolio_aggregator_top_movers
+        )
         performance = await self.get_unified_performance(days=performance_days)
 
         # Paginate holdings

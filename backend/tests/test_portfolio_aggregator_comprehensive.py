@@ -228,8 +228,9 @@ class TestCacheBehavior:
         assert "Cache get failed" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_cache_unavailable_uses_ttl_constant(self):
-        """Test that cache operations use CACHE_TTL_SECONDS constant."""
+    async def test_cache_unavailable_uses_ttl_config(self):
+        """Test that cache operations use portfolio_aggregator_cache_ttl config."""
+        from app.config import settings
         mock_db = AsyncMock(spec=AsyncSession)
         aggregator = PortfolioAggregator(mock_db)
 
@@ -237,10 +238,10 @@ class TestCacheBehavior:
         aggregator._redis_client = mock_redis
         aggregator._redis_initialized = True
 
-        await aggregator._set_cache("key", {"data": "test"}, ttl_seconds=aggregator.CACHE_TTL_SECONDS)
+        await aggregator._set_cache("key", {"data": "test"}, ttl_seconds=settings.portfolio_aggregator_cache_ttl)
 
         call_args = mock_redis.setex.call_args
-        assert call_args[0][1] == 60
+        assert call_args[0][1] == settings.portfolio_aggregator_cache_ttl
 
 
 class TestEmptyPortfolioScenarios:
@@ -328,16 +329,18 @@ class TestSafePercentage:
 
 
 class TestCacheTTLConstant:
-    """Tests verifying CACHE_TTL_SECONDS constant is used consistently."""
+    """Tests verifying portfolio_aggregator_cache_ttl config is used consistently."""
 
-    def test_cache_ttl_constant_exists(self):
-        """Test that CACHE_TTL_SECONDS constant is defined."""
-        assert hasattr(PortfolioAggregator, "CACHE_TTL_SECONDS")
-        assert PortfolioAggregator.CACHE_TTL_SECONDS == 60
+    def test_cache_ttl_config_exists(self):
+        """Test that portfolio_aggregator_cache_ttl config is defined."""
+        from app.config import settings
+        assert hasattr(settings, "portfolio_aggregator_cache_ttl")
+        assert settings.portfolio_aggregator_cache_ttl == 60
 
     @pytest.mark.asyncio
     async def test_cache_ttl_used_in_overview(self):
-        """Test that get_unified_overview uses CACHE_TTL_SECONDS."""
+        """Test that get_unified_overview uses portfolio_aggregator_cache_ttl config."""
+        from app.config import settings
         mock_db = AsyncMock(spec=AsyncSession)
         aggregator = PortfolioAggregator(mock_db)
 
@@ -362,7 +365,7 @@ class TestCacheTTLConstant:
 
         await aggregator.get_unified_overview()
 
-        # Verify _set_cache was called with the constant
+        # Verify _set_cache was called with config value
         aggregator._set_cache.assert_called_once()
         call_kwargs = aggregator._set_cache.call_args[1]
-        assert call_kwargs["ttl_seconds"] == aggregator.CACHE_TTL_SECONDS
+        assert call_kwargs["ttl_seconds"] == settings.portfolio_aggregator_cache_ttl
