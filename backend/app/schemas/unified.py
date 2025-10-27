@@ -183,6 +183,45 @@ class UnifiedMovers(BaseModel):
         }
 
 
+class PaginatedUnifiedHolding(BaseModel):
+    """Schema for paginated unified holdings response."""
+
+    items: List[UnifiedHolding]
+    total: int
+    skip: int = 0
+    limit: int = 100
+    has_more: bool
+
+    class Config:
+        """Pydantic configuration."""
+        json_schema_extra = {
+            "example": {
+                "items": [
+                    {
+                        "id": "trad_1",
+                        "type": "STOCK",
+                        "ticker": "AAPL",
+                        "isin": "US0378691033",
+                        "quantity": 10.5,
+                        "current_price": "150.25",
+                        "current_value": "1577.625",
+                        "average_cost": "140.00",
+                        "total_cost": "1470.00",
+                        "profit_loss": "107.625",
+                        "profit_loss_pct": 7.32,
+                        "currency": "EUR",
+                        "portfolio_id": None,
+                        "portfolio_name": "Main Portfolio"
+                    }
+                ],
+                "total": 15,
+                "skip": 0,
+                "limit": 100,
+                "has_more": False
+            }
+        }
+
+
 class PerformanceSummary(BaseModel):
     """Summary of performance data."""
 
