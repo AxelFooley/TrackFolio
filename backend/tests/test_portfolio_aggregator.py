@@ -9,7 +9,8 @@ import pytest
 from app.services.portfolio_aggregator import PortfolioAggregator
 from app.schemas.unified import (
     UnifiedHolding, UnifiedOverview, UnifiedPerformance, UnifiedMovers,
-    UnifiedSummary, UnifiedPerformanceDataPoint, UnifiedMover, PerformanceSummary
+    UnifiedSummary, UnifiedPerformanceDataPoint, UnifiedMover, PerformanceSummary,
+    PaginatedUnifiedHolding
 )
 
 
@@ -270,6 +271,8 @@ def test_unified_performance_response_schema():
 
 def test_unified_movers_response_schema():
     """Test that UnifiedMovers schema validates top gainers/losers for /unified-movers endpoint."""
+    from decimal import Decimal
+
     gainers = [
         UnifiedMover(
             ticker="BTC",
@@ -372,3 +375,228 @@ def test_unified_summary_response_schema_complete():
     assert summary.movers is not None
     assert summary.performance_summary is not None
     assert summary.performance_summary.period_days == 365
+
+
+# Pagination tests for unified holdings endpoint
+def test_paginated_holdings_response_structure():
+    """Test that PaginatedUnifiedHolding schema validates pagination structure."""
+    from decimal import Decimal
+
+    holdings = [
+        UnifiedHolding(
+            id="trad_1",
+            type="STOCK",
+            ticker="AAPL",
+            isin="US0378691033",
+            quantity=10.5,
+            current_price=Decimal("150.25"),
+            current_value=Decimal("1577.625"),
+            average_cost=Decimal("140.00"),
+            total_cost=Decimal("1470.00"),
+            profit_loss=Decimal("107.625"),
+            profit_loss_pct=7.32,
+            currency="EUR",
+            portfolio_id=None,
+            portfolio_name="Main Portfolio"
+        ),
+        UnifiedHolding(
+            id="crypto_1",
+            type="CRYPTO",
+            ticker="BTC",
+            quantity=0.5,
+            current_price=Decimal("45000.00"),
+            current_value=Decimal("22500.00"),
+            average_cost=Decimal("40000.00"),
+            total_cost=Decimal("20000.00"),
+            profit_loss=Decimal("2500.00"),
+            profit_loss_pct=12.5,
+            currency="USD",
+            portfolio_id="crypto-uuid-1",
+            portfolio_name="Crypto Portfolio 1"
+        )
+    ]
+
+    paginated = PaginatedUnifiedHolding(
+        items=holdings,
+        total=42,
+        skip=0,
+        limit=20,
+        has_more=True
+    )
+
+    # Validate pagination structure
+    assert paginated.items == holdings
+    assert len(paginated.items) == 2
+    assert paginated.total == 42
+    assert paginated.skip == 0
+    assert paginated.limit == 20
+    assert paginated.has_more is True
+
+
+def test_pagination_offset_and_limit():
+    """Test pagination calculation with offset and limit."""
+    from decimal import Decimal
+
+    # Create 5 sample holdings
+    holdings = [
+        UnifiedHolding(
+            id=f"holding_{i}",
+            type="STOCK",
+            ticker=f"TICK{i}",
+            quantity=float(i),
+            current_price=Decimal("100.00"),
+            current_value=Decimal(f"{100 * i}.00"),
+            average_cost=Decimal("100.00"),
+            total_cost=Decimal(f"{100 * i}.00"),
+            profit_loss=Decimal("0.00"),
+            profit_loss_pct=0.0,
+            currency="EUR",
+            portfolio_id=None,
+            portfolio_name="Main Portfolio"
+        )
+        for i in range(1, 6)
+    ]
+
+    # Test case 1: First page (skip=0, limit=2)
+    paginated_page1 = PaginatedUnifiedHolding(
+        items=holdings[0:2],
+        total=5,
+        skip=0,
+        limit=2,
+        has_more=True
+    )
+    assert paginated_page1.skip == 0
+    assert paginated_page1.limit == 2
+    assert len(paginated_page1.items) == 2
+    assert paginated_page1.has_more is True
+    assert paginated_page1.items[0].id == "holding_1"
+
+    # Test case 2: Second page (skip=2, limit=2)
+    paginated_page2 = PaginatedUnifiedHolding(
+        items=holdings[2:4],
+        total=5,
+        skip=2,
+        limit=2,
+        has_more=True
+    )
+    assert paginated_page2.skip == 2
+    assert paginated_page2.limit == 2
+    assert len(paginated_page2.items) == 2
+    assert paginated_page2.has_more is True
+    assert paginated_page2.items[0].id == "holding_3"
+
+    # Test case 3: Last page (skip=4, limit=2)
+    paginated_page3 = PaginatedUnifiedHolding(
+        items=holdings[4:],
+        total=5,
+        skip=4,
+        limit=2,
+        has_more=False
+    )
+    assert paginated_page3.skip == 4
+    assert paginated_page3.limit == 2
+    assert len(paginated_page3.items) == 1
+    assert paginated_page3.has_more is False
+    assert paginated_page3.items[0].id == "holding_5"
+
+
+def test_pagination_with_empty_holdings():
+    """Test pagination behavior with no holdings."""
+    paginated = PaginatedUnifiedHolding(
+        items=[],
+        total=0,
+        skip=0,
+        limit=20,
+        has_more=False
+    )
+
+    # Validate empty pagination
+    assert paginated.items == []
+    assert paginated.total == 0
+    assert paginated.skip == 0
+    assert paginated.limit == 20
+    assert paginated.has_more is False
+
+
+def test_pagination_beyond_total_count():
+    """Test pagination when skip exceeds total count."""
+    from decimal import Decimal
+
+    holdings = [
+        UnifiedHolding(
+            id=f"holding_{i}",
+            type="STOCK",
+            ticker=f"TICK{i}",
+            quantity=float(i),
+            current_price=Decimal("100.00"),
+            current_value=Decimal(f"{100 * i}.00"),
+            average_cost=Decimal("100.00"),
+            total_cost=Decimal(f"{100 * i}.00"),
+            profit_loss=Decimal("0.00"),
+            profit_loss_pct=0.0,
+            currency="EUR",
+            portfolio_id=None,
+            portfolio_name="Main Portfolio"
+        )
+        for i in range(1, 4)
+    ]
+
+    # Request page beyond available items (skip=10, limit=20 with only 3 total)
+    paginated = PaginatedUnifiedHolding(
+        items=[],  # No items because skip exceeds total
+        total=3,
+        skip=10,
+        limit=20,
+        has_more=False
+    )
+
+    assert paginated.items == []
+    assert paginated.total == 3
+    assert paginated.skip == 10
+    assert paginated.has_more is False
+
+
+def test_has_more_flag_calculation():
+    """Test the has_more flag calculation logic."""
+    from decimal import Decimal
+
+    # Create test holdings
+    holdings = [
+        UnifiedHolding(
+            id=f"holding_{i}",
+            type="STOCK",
+            ticker=f"TICK{i}",
+            quantity=float(i),
+            current_price=Decimal("100.00"),
+            current_value=Decimal(f"{100 * i}.00"),
+            average_cost=Decimal("100.00"),
+            total_cost=Decimal(f"{100 * i}.00"),
+            profit_loss=Decimal("0.00"),
+            profit_loss_pct=0.0,
+            currency="EUR",
+            portfolio_id=None,
+            portfolio_name="Main Portfolio"
+        )
+        for i in range(1, 101)  # 100 total holdings
+    ]
+
+    test_cases = [
+        # (skip, limit, expected_has_more)
+        (0, 20, True),    # 0 + 20 = 20, which is < 100
+        (20, 20, True),   # 20 + 20 = 40, which is < 100
+        (80, 20, False),  # 80 + 20 = 100, which is NOT < 100
+        (90, 20, False),  # 90 + 20 = 110, which is NOT < 100
+        (99, 1, False),   # 99 + 1 = 100, which is NOT < 100
+    ]
+
+    for skip, limit, expected_has_more in test_cases:
+        end_index = min(skip + limit, 100)
+        paginated = PaginatedUnifiedHolding(
+            items=holdings[skip:end_index],
+            total=100,
+            skip=skip,
+            limit=limit,
+            has_more=expected_has_more
+        )
+        assert paginated.has_more == expected_has_more, \
+            f"Failed for skip={skip}, limit={limit}: expected has_more={expected_has_more}, got {paginated.has_more}"

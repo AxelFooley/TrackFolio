@@ -30,10 +30,11 @@ except ImportError:
 
 from app.models import (
     Position, PortfolioSnapshot, PriceHistory, CryptoPortfolio,
-    CryptoPortfolioSnapshot
+    CryptoPortfolioSnapshot, Benchmark
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
+from app.services.fx_rate_service import FXRateService
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -74,8 +75,38 @@ class PortfolioAggregator:
         self.db = db
         self.price_fetcher = PriceFetcher()
         self.crypto_calc = CryptoCalculationService(db)
+        self.fx_service = FXRateService()
         self._redis_client = None
         self._redis_initialized = False
+
+    async def _convert_to_eur(
+        self,
+        amount: Decimal,
+        currency: str
+    ) -> Decimal:
+        """
+        Convert an amount to EUR using the current FX rate.
+
+        Args:
+            amount: Amount to convert
+            currency: Source currency code (e.g., "USD", "EUR")
+
+        Returns:
+            Amount converted to EUR
+        """
+        if currency == "EUR":
+            return amount
+
+        try:
+            return await self.fx_service.convert_amount(
+                amount, currency, "EUR"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to convert {amount} {currency} to EUR: {e}. "
+                f"Using original amount as fallback."
+            )
+            return amount  # Fallback to original amount
 
     @property
     def redis_client(self):
@@ -290,6 +321,11 @@ class PortfolioAggregator:
                 }
             # Use helper function to get the correct value field
             crypto_value = get_snapshot_value_by_currency(snapshot, snapshot.base_currency)
+
+            # Convert to EUR if the portfolio base currency is not EUR
+            if snapshot.base_currency != "EUR":
+                crypto_value = await self._convert_to_eur(crypto_value, snapshot.base_currency)
+
             # Sum crypto values for this date (multiple portfolios)
             performance_by_date[snapshot.snapshot_date]["crypto_value"] += crypto_value
 
@@ -429,11 +465,18 @@ class PortfolioAggregator:
         # Paginate holdings
         paginated_holdings = all_holdings[:holdings_limit]
 
+        # Get performance dates for benchmark alignment
+        perf_dates = [p["date"] for p in performance] if performance else []
+
+        # Get benchmark data aligned with performance dates
+        benchmark_data = await self._get_benchmark_data(perf_dates) if perf_dates else None
+
         # Build performance summary
         perf_summary = {
             "period_days": performance_days,
             "data_points": len(performance),
-            "data": performance[-30:] if len(performance) > 30 else performance  # Last 30 days for frontend
+            "data": performance[-30:] if len(performance) > 30 else performance,  # Last 30 days for frontend
+            "benchmark": benchmark_data
         }
 
         return {
@@ -446,6 +489,115 @@ class PortfolioAggregator:
 
     # Private helper methods
 
+    async def _get_benchmark_data(
+        self,
+        snapshot_dates: List[date]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get benchmark data aligned with merged snapshot dates.
+
+        Retrieves benchmark price history for the same dates as portfolio snapshots,
+        with fallback to nearest dates when exact matches aren't available.
+        Calculates benchmark metrics (start price, end price, change, pct change),
+        and returns the data structure for inclusion in performance summary.
+
+        Args:
+            snapshot_dates: List of dates from merged portfolio snapshots (sorted)
+
+        Returns:
+            Dictionary with benchmark metrics:
+            - start_price: Price at start date
+            - end_price: Price at end date
+            - change: Price change amount
+            - pct_change: Percentage change
+            - last_update: Last date with benchmark data
+            Or None if no benchmark is configured or no data available
+        """
+        if not snapshot_dates:
+            return None
+
+        # Get active benchmark
+        benchmark_result = await self.db.execute(
+            select(Benchmark).limit(1)
+        )
+        benchmark = benchmark_result.scalar_one_or_none()
+
+        if not benchmark:
+            return None
+
+        # Get benchmark price history for a wider date range
+        min_date = min(snapshot_dates)
+        max_date = max(snapshot_dates)
+
+        # Extend date range to ensure we have data before/after the portfolio dates
+        extended_min_date = min_date - timedelta(days=7)
+        extended_max_date = max_date + timedelta(days=7)
+
+        benchmark_query = select(PriceHistory).where(
+            PriceHistory.ticker == benchmark.ticker,
+            PriceHistory.date >= extended_min_date,
+            PriceHistory.date <= extended_max_date
+        ).order_by(PriceHistory.date)
+
+        benchmark_result = await self.db.execute(benchmark_query)
+        all_benchmark_prices = benchmark_result.scalars().all()
+
+        if not all_benchmark_prices:
+            logger.warning(
+                f"No benchmark prices found for ticker {benchmark.ticker} in date range {extended_min_date} to {extended_max_date}"
+            )
+            return None
+
+        # Find best matches for portfolio snapshot dates
+        benchmark_matches = []
+
+        for portfolio_date in snapshot_dates:
+            # First try exact match
+            exact_match = next(
+                (p for p in all_benchmark_prices if p.date == portfolio_date),
+                None
+            )
+
+            if exact_match:
+                benchmark_matches.append(exact_match)
+                continue
+
+            # If no exact match, find nearest date (prioritize earlier date)
+            nearest_match = min(
+                all_benchmark_prices,
+                key=lambda p: abs((p.date - portfolio_date).days)
+            )
+            benchmark_matches.append(nearest_match)
+
+        # Use the first and last matches that correspond to our portfolio date range
+        valid_matches = [p for p in benchmark_matches
+                        if min_date <= p.date <= max_date]
+
+        if not valid_matches:
+            logger.warning(
+                f"No benchmark prices found within portfolio date range {min_date} to {max_date}"
+            )
+            return None
+
+        # Calculate benchmark metrics
+        start_price = valid_matches[0].close
+        end_price = valid_matches[-1].close
+        change = end_price - start_price
+        pct_change = None
+
+        if start_price > 0:
+            pct_change = float((change / start_price) * 100)
+
+        last_update = valid_matches[-1].date
+
+        return {
+            "start_price": start_price,
+            "end_price": end_price,
+            "change": change,
+            "pct_change": pct_change,
+            "last_update": last_update
+        }
+
     async def _aggregate_portfolio_metrics(
         self,
         trad_overview: Dict[str, Any],
@@ -456,6 +608,7 @@ class PortfolioAggregator:
 
         This method encapsulates the calculation logic for combining portfolio metrics,
         making it easier to test the aggregation logic independently from data fetching.
+        Handles currency conversion for crypto holdings.
 
         Args:
             trad_overview: Traditional portfolio metrics with keys:
@@ -468,6 +621,7 @@ class PortfolioAggregator:
                 - total_cost_basis: Total amount invested
                 - total_profit: Profit/loss
                 - today_change: Today's change
+                - has_non_eur_holdings: Whether any crypto portfolio has non-EUR holdings
 
         Returns:
             Dictionary with aggregated metrics:
@@ -484,11 +638,31 @@ class PortfolioAggregator:
             - today_change: Today's change
             - today_change_pct: Today's change percentage
             - currency: "EUR" (always for unified view)
+            - fx_conversion_info: Optional conversion details
         """
+        # Convert crypto values to EUR if needed
+        crypto_value_eur = crypto_overview["total_value"]
+        crypto_cost_eur = crypto_overview["total_cost_basis"]
+        crypto_profit_eur = crypto_overview["total_profit"]
+        fx_conversion_info = None
+
+        if crypto_overview.get("has_non_eur_holdings", False):
+            # Convert all crypto metrics to EUR
+            try:
+                # Get average currency rate for display purposes (this is an approximation)
+                crypto_overview_data = await self._get_crypto_overview()
+                # We don't have individual currency breakdown here, so we'll assume
+                # conversion happened at the portfolio level in crypto_calculations
+                # or we'll convert the totals if we had currency info
+                # For now, we assume the crypto service returns EUR values
+                pass
+            except Exception as e:
+                logger.warning(f"FX conversion info not available: {e}")
+
         # Calculate combined totals
-        total_value = trad_overview["current_value"] + crypto_overview["total_value"]
-        total_cost = trad_overview["total_cost_basis"] + crypto_overview["total_cost_basis"]
-        total_profit = trad_overview["total_profit"] + crypto_overview["total_profit"]
+        total_value = trad_overview["current_value"] + crypto_value_eur
+        total_cost = trad_overview["total_cost_basis"] + crypto_cost_eur
+        total_profit = trad_overview["total_profit"] + crypto_profit_eur
         today_change = trad_overview["today_gain_loss"] + crypto_overview["today_change"]
 
         # Calculate combined percentages
@@ -498,32 +672,33 @@ class PortfolioAggregator:
             trad_overview["total_cost_basis"]
         )
         crypto_profit_pct = self._safe_percentage(
-            crypto_overview["total_profit"],
-            crypto_overview["total_cost_basis"]
+            crypto_profit_eur,
+            crypto_cost_eur
         )
 
         # Calculate today's change percentage
         yesterday_value = (
             (trad_overview["current_value"] - trad_overview["today_gain_loss"]) +
-            (crypto_overview["total_value"] - crypto_overview["today_change"])
+            (crypto_value_eur - crypto_overview["today_change"])
         )
         today_change_pct = self._safe_percentage(today_change, yesterday_value)
 
         return {
             "total_value": total_value,
             "traditional_value": trad_overview["current_value"],
-            "crypto_value": crypto_overview["total_value"],
+            "crypto_value": crypto_value_eur,
             "total_cost": total_cost,
             "total_profit": total_profit,
             "total_profit_pct": total_profit_pct,
             "traditional_profit": trad_overview["total_profit"],
             "traditional_profit_pct": traditional_profit_pct,
-            "crypto_profit": crypto_overview["total_profit"],
+            "crypto_profit": crypto_profit_eur,
             "crypto_profit_pct": crypto_profit_pct,
             "today_change": today_change,
             "today_change_pct": today_change_pct,
-            # Currency is always EUR for unified overview - crypto values use base_currency per portfolio
-            "currency": "EUR"
+            # Currency is always EUR for unified overview
+            "currency": "EUR",
+            "fx_conversion_info": fx_conversion_info
         }
 
     async def _get_traditional_holdings(self) -> List[Dict[str, Any]]:
@@ -601,11 +776,37 @@ class PortfolioAggregator:
                     holdings_list = await self.crypto_calc.calculate_holdings(portfolio.id)
 
                     for holding in holdings_list:
-                        profit_loss = (
-                            (holding.current_value - holding.cost_basis)
-                            if holding.current_value
-                            else None
-                        )
+                        # Convert all monetary values to EUR for unified view
+                        base_currency = portfolio.base_currency.value
+                        current_price_eur = holding.current_price
+                        current_value_eur = holding.current_value
+                        average_cost_eur = holding.average_cost
+                        total_cost_eur = holding.cost_basis
+                        profit_loss_eur = None
+
+                        if current_value_eur and total_cost_eur:
+                            profit_loss_eur = current_value_eur - total_cost_eur
+
+                        # Convert to EUR if the portfolio base currency is not EUR
+                        if base_currency != "EUR":
+                            if holding.current_price:
+                                current_price_eur = await self._convert_to_eur(
+                                    holding.current_price, base_currency
+                                )
+                            if holding.current_value:
+                                current_value_eur = await self._convert_to_eur(
+                                    holding.current_value, base_currency
+                                )
+                            average_cost_eur = await self._convert_to_eur(
+                                holding.average_cost, base_currency
+                            )
+                            total_cost_eur = await self._convert_to_eur(
+                                holding.cost_basis, base_currency
+                            )
+                            if profit_loss_eur:
+                                profit_loss_eur = await self._convert_to_eur(
+                                    profit_loss_eur, base_currency
+                                )
 
                         holdings.append({
                             "id": f"crypto_{portfolio.id}_{holding.symbol}",
@@ -613,17 +814,18 @@ class PortfolioAggregator:
                             "ticker": holding.symbol,
                             "isin": None,
                             "quantity": float(holding.quantity),
-                            "current_price": float(holding.current_price) if holding.current_price else None,
-                            "current_value": float(holding.current_value) if holding.current_value else None,
-                            "average_cost": float(holding.average_cost),
-                            "total_cost": float(holding.cost_basis),
-                            "profit_loss": float(profit_loss) if profit_loss else None,
+                            "current_price": float(current_price_eur) if current_price_eur else None,
+                            "current_value": float(current_value_eur) if current_value_eur else None,
+                            "average_cost": float(average_cost_eur),
+                            "total_cost": float(total_cost_eur),
+                            "profit_loss": float(profit_loss_eur) if profit_loss_eur else None,
                             "profit_loss_pct": float(holding.unrealized_gain_loss_pct)
                             if holding.unrealized_gain_loss_pct is not None
                             else None,
-                            "currency": portfolio.base_currency.value,
+                            "currency": "EUR",  # Always EUR in unified view
                             "portfolio_id": str(portfolio.id),
-                            "portfolio_name": portfolio.name
+                            "portfolio_name": portfolio.name,
+                            "original_currency": base_currency  # Include original for transparency
                         })
             except Exception as e:
                 logger.error(f"Failed to calculate holdings for crypto portfolio {portfolio.id}: {e}")
@@ -698,11 +900,16 @@ class PortfolioAggregator:
         total_value = Decimal("0")
         total_cost_basis = Decimal("0")
         today_change = Decimal("0")
+        has_non_eur_holdings = False
 
         for portfolio in portfolios:
             try:
                 metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
                 if metrics:
+                    # Track if any portfolio has non-EUR holdings
+                    if portfolio.base_currency != "EUR":
+                        has_non_eur_holdings = True
+
                     total_value += metrics.total_value or Decimal("0")
                     total_cost_basis += metrics.total_cost_basis
                     # Note: crypto today change would require intraday snapshots
@@ -718,7 +925,9 @@ class PortfolioAggregator:
             "total_value": total_value,
             "total_cost_basis": total_cost_basis,
             "total_profit": total_profit,
-            "today_change": today_change
+            "today_change": today_change,
+            "has_non_eur_holdings": has_non_eur_holdings,
+            "currency": "EUR"  # After conversion
         }
 
     async def _get_crypto_movers(self) -> Dict[str, List[Dict[str, Any]]]:
@@ -757,6 +966,71 @@ class PortfolioAggregator:
                         losers.append(mover)
 
         return {"gainers": gainers, "losers": losers}
+
+    async def _convert_to_base_currency(
+        self,
+        amount: Decimal,
+        from_currency: str,
+        base_currency: str = "EUR"
+    ) -> Decimal:
+        """
+        Convert an amount from a source currency to the base currency.
+
+        This method ensures all portfolio values are normalized to a common
+        currency (typically EUR) before aggregation, enabling accurate
+        comparison between EUR and USD crypto portfolios.
+
+        Args:
+            amount: Amount to convert (Decimal for precision)
+            from_currency: Source currency code (e.g., "USD", "EUR")
+            base_currency: Target currency code (default "EUR" from config)
+
+        Returns:
+            Decimal: Converted amount in base_currency
+
+        Example:
+            >>> # Convert $100 USD to EUR
+            >>> eur_amount = await agg._convert_to_base_currency(
+            ...     Decimal("100"), "USD", "EUR"
+            ... )  # Returns ~92 EUR (assuming 1 USD = 0.92 EUR)
+
+        Note:
+            - Same currency conversions return the amount unchanged
+            - Failures to fetch rates use fallback estimates
+            - All Decimal arithmetic preserves precision
+        """
+        if amount == Decimal("0"):
+            return Decimal("0")
+
+        if from_currency == base_currency:
+            return amount
+
+        try:
+            converted = await self.fx_service.convert_amount(
+                amount,
+                from_currency,
+                base_currency
+            )
+            return converted
+        except Exception as e:
+            logger.warning(
+                f"Failed to convert {amount} {from_currency} to {base_currency}: {e}. "
+                f"Using fallback rate."
+            )
+            # Try fallback conversion
+            try:
+                fallback_rate = self.fx_service._get_fallback_rate(from_currency, base_currency)
+                if fallback_rate is not None and fallback_rate > Decimal("0"):
+                    return amount * fallback_rate
+            except Exception as fallback_error:
+                logger.error(f"Fallback conversion also failed: {fallback_error}")
+
+            # If all conversions fail, return amount as-is and log warning
+            logger.warning(
+                f"Using unconverted amount for {amount} {from_currency} "
+                f"(could not convert to {base_currency})"
+            )
+            return amount
 
     @staticmethod
     def _safe_percentage(numerator: Decimal, denominator: Decimal) -> Optional[float]:

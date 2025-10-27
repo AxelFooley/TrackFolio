@@ -34,6 +34,28 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 100  # requests per minute
     rate_limit_window: int = 60  # seconds
 
+    # Unified endpoint rate limits
+    rate_limit_unified_overview: PositiveInt = Field(
+        100,
+        env="RATE_LIMIT_UNIFIED_OVERVIEW",
+        description="Rate limit for /unified-overview endpoint (requests per minute)"
+    )
+    rate_limit_unified_holdings: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_HOLDINGS",
+        description="Rate limit for /unified-holdings endpoint (requests per minute)"
+    )
+    rate_limit_unified_performance: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_PERFORMANCE",
+        description="Rate limit for /unified-performance endpoint (requests per minute)"
+    )
+    rate_limit_unified_summary: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_SUMMARY",
+        description="Rate limit for /unified-summary endpoint (requests per minute)"
+    )
+
     # Celery
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/0"
@@ -152,6 +174,23 @@ class Settings(BaseSettings):
         5,
         env="PORTFOLIO_AGGREGATOR_TOP_MOVERS",
         description="Number of top gainers and losers to return"
+    )
+
+    # FX Rate Service settings
+    fx_cache_ttl_hours: PositiveInt = Field(
+        1,
+        env="FX_CACHE_TTL_HOURS",
+        description="Cache TTL for FX rates in hours (default 1 hour)"
+    )
+    fx_rate_source: str = Field(
+        "yahoo",
+        env="FX_RATE_SOURCE",
+        description="Primary FX rate source: yahoo, ecb, or openexchangerates"
+    )
+    base_currency: str = Field(
+        "EUR",
+        env="BASE_CURRENCY",
+        description="Base currency for portfolio aggregation (default EUR)"
     )
 
 
