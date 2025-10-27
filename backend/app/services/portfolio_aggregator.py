@@ -12,14 +12,14 @@ Key responsibilities:
 - Calculate top gainers/losers across all holdings
 - Handle currency conversions (crypto USD to EUR)
 """
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Any
 import logging
 import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select
 
 try:
     import redis
@@ -28,8 +28,8 @@ except ImportError:
     redis_available = False
 
 from app.models import (
-    Position, PortfolioSnapshot, PriceHistory, CachedMetrics, CryptoPortfolio,
-    CryptoTransaction, CryptoTransactionType, CryptoPortfolioSnapshot
+    Position, PortfolioSnapshot, PriceHistory, CryptoPortfolio,
+    CryptoPortfolioSnapshot
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
@@ -61,6 +61,16 @@ def get_snapshot_value_by_currency(snapshot, base_currency: str):
 class PortfolioAggregator:
     """Service for aggregating traditional and crypto portfolio data."""
 
+    # Cache configuration constant
+    CACHE_TTL_SECONDS = 60
+    """TTL for cached portfolio data (seconds).
+
+    Set to 60 seconds to balance:
+    - Dashboard responsiveness (update frequently)
+    - Database load reduction (avoid hammering on rapid refreshes)
+    - User expectations (near real-time without excessive DB queries)
+    """
+
     def __init__(self, db: AsyncSession):
         """
         Initialize the portfolio aggregator.
@@ -72,17 +82,19 @@ class PortfolioAggregator:
         self.price_fetcher = PriceFetcher()
         self.crypto_calc = CryptoCalculationService(db)
         self._redis_client = None
+        self._redis_initialized = False
 
     @property
     def redis_client(self):
         """Lazy initialize Redis client for caching."""
-        if redis_available and self._redis_client is None:
+        if redis_available and not self._redis_initialized:
             try:
                 self._redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+                self._redis_initialized = True
             except Exception as e:
                 logger.warning(f"Failed to initialize Redis client: {e}")
-                self._redis_client = False  # Mark as unavailable
-        return self._redis_client if self._redis_client else None
+                self._redis_initialized = True  # Mark as attempted
+        return self._redis_client
 
     async def _get_cache(self, key: str) -> Optional[Dict[str, Any]]:
         """Get cached value from Redis with graceful fallback."""
@@ -204,38 +216,11 @@ class PortfolioAggregator:
         # Get crypto overview (all portfolios combined)
         crypto_overview = await self._get_crypto_overview()
 
-        # Combine them
-        result = {
-            "total_value": trad_overview["current_value"] + crypto_overview["total_value"],
-            "traditional_value": trad_overview["current_value"],
-            "crypto_value": crypto_overview["total_value"],
-            "total_cost": trad_overview["total_cost_basis"] + crypto_overview["total_cost_basis"],
-            "total_profit": trad_overview["total_profit"] + crypto_overview["total_profit"],
-            "total_profit_pct": self._safe_percentage(
-                trad_overview["total_profit"] + crypto_overview["total_profit"],
-                trad_overview["total_cost_basis"] + crypto_overview["total_cost_basis"]
-            ),
-            "traditional_profit": trad_overview["total_profit"],
-            "traditional_profit_pct": self._safe_percentage(
-                trad_overview["total_profit"],
-                trad_overview["total_cost_basis"]
-            ),
-            "crypto_profit": crypto_overview["total_profit"],
-            "crypto_profit_pct": self._safe_percentage(
-                crypto_overview["total_profit"],
-                crypto_overview["total_cost_basis"]
-            ),
-            "today_change": trad_overview["today_gain_loss"] + crypto_overview["today_change"],
-            "today_change_pct": self._safe_percentage(
-                trad_overview["today_gain_loss"] + crypto_overview["today_change"],
-                (trad_overview["current_value"] - trad_overview["today_gain_loss"]) +
-                (crypto_overview["total_value"] - crypto_overview["today_change"])
-            ),
-            "currency": "EUR"
-        }
+        # Aggregate the metrics
+        result = await self._aggregate_portfolio_metrics(trad_overview, crypto_overview)
 
         # Cache the result for 60 seconds
-        await self._set_cache(cache_key, result, ttl_seconds=60)
+        await self._set_cache(cache_key, result, ttl_seconds=self.CACHE_TTL_SECONDS)
 
         return result
 
@@ -370,6 +355,7 @@ class PortfolioAggregator:
                     "today_change": str(today_change),
                     "today_change_percent": change_pct,
                     "portfolio_name": "Main Portfolio",
+                    # Traditional holdings are always EUR - crypto movers use base_currency
                     "currency": "EUR"
                 }
 
@@ -393,7 +379,7 @@ class PortfolioAggregator:
         }
 
         # Cache the result for 60 seconds
-        await self._set_cache(cache_key, result, ttl_seconds=60)
+        await self._set_cache(cache_key, result, ttl_seconds=self.CACHE_TTL_SECONDS)
 
         return result
 
@@ -441,21 +427,108 @@ class PortfolioAggregator:
 
     # Private helper methods
 
+    async def _aggregate_portfolio_metrics(
+        self,
+        trad_overview: Dict[str, Any],
+        crypto_overview: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Aggregate traditional and crypto overview metrics into unified metrics.
+
+        This method encapsulates the calculation logic for combining portfolio metrics,
+        making it easier to test the aggregation logic independently from data fetching.
+
+        Args:
+            trad_overview: Traditional portfolio metrics with keys:
+                - current_value: Current portfolio value
+                - total_cost_basis: Total amount invested
+                - total_profit: Profit/loss
+                - today_gain_loss: Today's change
+            crypto_overview: Crypto portfolio metrics with keys:
+                - total_value: Current portfolio value
+                - total_cost_basis: Total amount invested
+                - total_profit: Profit/loss
+                - today_change: Today's change
+
+        Returns:
+            Dictionary with aggregated metrics:
+            - total_value: Combined current value
+            - traditional_value: Traditional portfolio value
+            - crypto_value: Crypto portfolio value
+            - total_cost: Combined cost basis
+            - total_profit: Combined profit/loss
+            - total_profit_pct: Combined return percentage
+            - traditional_profit: Traditional profit
+            - traditional_profit_pct: Traditional return percentage
+            - crypto_profit: Crypto profit
+            - crypto_profit_pct: Crypto return percentage
+            - today_change: Today's change
+            - today_change_pct: Today's change percentage
+            - currency: "EUR" (always for unified view)
+        """
+        # Calculate combined totals
+        total_value = trad_overview["current_value"] + crypto_overview["total_value"]
+        total_cost = trad_overview["total_cost_basis"] + crypto_overview["total_cost_basis"]
+        total_profit = trad_overview["total_profit"] + crypto_overview["total_profit"]
+        today_change = trad_overview["today_gain_loss"] + crypto_overview["today_change"]
+
+        # Calculate combined percentages
+        total_profit_pct = self._safe_percentage(total_profit, total_cost)
+        traditional_profit_pct = self._safe_percentage(
+            trad_overview["total_profit"],
+            trad_overview["total_cost_basis"]
+        )
+        crypto_profit_pct = self._safe_percentage(
+            crypto_overview["total_profit"],
+            crypto_overview["total_cost_basis"]
+        )
+
+        # Calculate today's change percentage
+        yesterday_value = (
+            (trad_overview["current_value"] - trad_overview["today_gain_loss"]) +
+            (crypto_overview["total_value"] - crypto_overview["today_change"])
+        )
+        today_change_pct = self._safe_percentage(today_change, yesterday_value)
+
+        return {
+            "total_value": total_value,
+            "traditional_value": trad_overview["current_value"],
+            "crypto_value": crypto_overview["total_value"],
+            "total_cost": total_cost,
+            "total_profit": total_profit,
+            "total_profit_pct": total_profit_pct,
+            "traditional_profit": trad_overview["total_profit"],
+            "traditional_profit_pct": traditional_profit_pct,
+            "crypto_profit": crypto_overview["total_profit"],
+            "crypto_profit_pct": crypto_profit_pct,
+            "today_change": today_change,
+            "today_change_pct": today_change_pct,
+            # Currency is always EUR for unified overview - crypto values use base_currency per portfolio
+            "currency": "EUR"
+        }
+
     async def _get_traditional_holdings(self) -> List[Dict[str, Any]]:
-        """Get all traditional holdings formatted for unified response."""
+        """
+        Get all traditional holdings formatted for unified response.
+
+        Uses batch loading to eliminate N+1 queries - fetches all prices in a single
+        query instead of looping and querying per position.
+        """
         result = await self.db.execute(select(Position))
         positions = result.scalars().all()
 
+        if not positions:
+            return []
+
+        # Batch load latest prices for all positions (eliminates N+1 queries)
+        tickers = [position.current_ticker for position in positions]
+        prices_by_ticker = await self._get_latest_prices_batch(tickers)
+
         holdings = []
         for position in positions:
-            # Get latest price
-            price_result = await self.db.execute(
-                select(PriceHistory)
-                .where(PriceHistory.ticker == position.current_ticker)
-                .order_by(PriceHistory.date.desc())
-                .limit(1)
-            )
-            price = price_result.scalar_one_or_none()
+            # Look up pre-loaded price from dictionary
+            price_records = prices_by_ticker.get(position.current_ticker, [])
+            price = price_records[0] if price_records else None
 
             current_price = price.close if price else None
             current_value = position.quantity * current_price if current_price else None
@@ -475,6 +548,7 @@ class PortfolioAggregator:
                 "profit_loss_pct": float(
                     (profit_loss / position.cost_basis * 100)
                 ) if profit_loss and position.cost_basis > 0 else None,
+                # Traditional holdings are always EUR - crypto holdings use base_currency
                 "currency": "EUR",
                 "portfolio_id": None,
                 "portfolio_name": "Main Portfolio"
@@ -483,53 +557,69 @@ class PortfolioAggregator:
         return holdings
 
     async def _get_crypto_holdings(self) -> List[Dict[str, Any]]:
-        """Get all crypto holdings from all portfolios formatted for unified response."""
+        """
+        Get all crypto holdings from all portfolios formatted for unified response.
+
+        Wrapped in error handling to ensure crypto calculation failures don't prevent
+        returning partial results (e.g., if one portfolio calculation fails, others
+        are still included).
+        """
         holdings = []
 
         # Get all active crypto portfolios
         portfolio_result = await self.db.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.is_active == True)
+            select(CryptoPortfolio).where(CryptoPortfolio.is_active)
         )
         portfolios = portfolio_result.scalars().all()
 
         for portfolio in portfolios:
-            # Get metrics which include holdings
-            metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
+            try:
+                # Get metrics which include holdings
+                metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
 
-            if metrics and metrics.asset_allocation:
-                # Get detailed holdings for this portfolio
-                holdings_list = await self.crypto_calc.calculate_holdings(portfolio.id)
+                if metrics and metrics.asset_allocation:
+                    # Get detailed holdings for this portfolio
+                    holdings_list = await self.crypto_calc.calculate_holdings(portfolio.id)
 
-                for holding in holdings_list:
-                    profit_loss = (
-                        (holding.current_value - holding.cost_basis)
-                        if holding.current_value
-                        else None
-                    )
+                    for holding in holdings_list:
+                        profit_loss = (
+                            (holding.current_value - holding.cost_basis)
+                            if holding.current_value
+                            else None
+                        )
 
-                    holdings.append({
-                        "id": f"crypto_{portfolio.id}_{holding.symbol}",
-                        "type": "CRYPTO",
-                        "ticker": holding.symbol,
-                        "isin": None,
-                        "quantity": float(holding.quantity),
-                        "current_price": float(holding.current_price) if holding.current_price else None,
-                        "current_value": float(holding.current_value) if holding.current_value else None,
-                        "average_cost": float(holding.average_cost),
-                        "total_cost": float(holding.cost_basis),
-                        "profit_loss": float(profit_loss) if profit_loss else None,
-                        "profit_loss_pct": float(holding.unrealized_gain_loss_pct)
-                        if holding.unrealized_gain_loss_pct is not None
-                        else None,
-                        "currency": portfolio.base_currency.value,
-                        "portfolio_id": str(portfolio.id),
-                        "portfolio_name": portfolio.name
-                    })
+                        holdings.append({
+                            "id": f"crypto_{portfolio.id}_{holding.symbol}",
+                            "type": "CRYPTO",
+                            "ticker": holding.symbol,
+                            "isin": None,
+                            "quantity": float(holding.quantity),
+                            "current_price": float(holding.current_price) if holding.current_price else None,
+                            "current_value": float(holding.current_value) if holding.current_value else None,
+                            "average_cost": float(holding.average_cost),
+                            "total_cost": float(holding.cost_basis),
+                            "profit_loss": float(profit_loss) if profit_loss else None,
+                            "profit_loss_pct": float(holding.unrealized_gain_loss_pct)
+                            if holding.unrealized_gain_loss_pct is not None
+                            else None,
+                            "currency": portfolio.base_currency.value,
+                            "portfolio_id": str(portfolio.id),
+                            "portfolio_name": portfolio.name
+                        })
+            except Exception as e:
+                logger.error(f"Failed to calculate holdings for crypto portfolio {portfolio.id}: {e}")
+                # Skip this portfolio but continue with others
+                continue
 
         return holdings
 
     async def _get_traditional_overview(self) -> Dict[str, Any]:
-        """Get traditional portfolio overview."""
+        """
+        Get traditional portfolio overview.
+
+        Uses batch loading to eliminate N+1 queries - fetches all prices in a single
+        query instead of looping and querying per position.
+        """
         result = await self.db.execute(select(Position))
         positions = result.scalars().all()
 
@@ -541,6 +631,10 @@ class PortfolioAggregator:
                 "today_gain_loss": Decimal("0")
             }
 
+        # Batch load latest 2 prices for all positions (eliminates N+1 queries)
+        tickers = [position.current_ticker for position in positions]
+        prices_by_ticker = await self._get_latest_prices_batch(tickers)
+
         total_cost = Decimal("0")
         current_value = Decimal("0")
         today_gain_loss = Decimal("0")
@@ -548,14 +642,8 @@ class PortfolioAggregator:
         for position in positions:
             total_cost += position.cost_basis
 
-            # Get latest and previous prices
-            price_result = await self.db.execute(
-                select(PriceHistory)
-                .where(PriceHistory.ticker == position.current_ticker)
-                .order_by(PriceHistory.date.desc())
-                .limit(2)
-            )
-            prices = price_result.scalars().all()
+            # Look up pre-loaded prices from dictionary
+            prices = prices_by_ticker.get(position.current_ticker, [])
 
             if prices:
                 latest_price = prices[0]
@@ -576,9 +664,15 @@ class PortfolioAggregator:
         }
 
     async def _get_crypto_overview(self) -> Dict[str, Any]:
-        """Get aggregated crypto overview from all portfolios."""
+        """
+        Get aggregated crypto overview from all portfolios.
+
+        Wrapped in error handling to ensure crypto calculation failures don't prevent
+        returning partial results (e.g., if one portfolio calculation fails, others
+        are still included).
+        """
         portfolio_result = await self.db.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.is_active == True)
+            select(CryptoPortfolio).where(CryptoPortfolio.is_active)
         )
         portfolios = portfolio_result.scalars().all()
 
@@ -587,12 +681,17 @@ class PortfolioAggregator:
         today_change = Decimal("0")
 
         for portfolio in portfolios:
-            metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
-            if metrics:
-                total_value += metrics.total_value or Decimal("0")
-                total_cost_basis += metrics.total_cost_basis
-                # Note: crypto today change would require intraday snapshots
-                # For now, we estimate from EOD snapshots
+            try:
+                metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
+                if metrics:
+                    total_value += metrics.total_value or Decimal("0")
+                    total_cost_basis += metrics.total_cost_basis
+                    # Note: crypto today change would require intraday snapshots
+                    # For now, we estimate from EOD snapshots
+            except Exception as e:
+                logger.error(f"Failed to calculate overview metrics for crypto portfolio {portfolio.id}: {e}")
+                # Skip this portfolio but continue with others
+                continue
 
         total_profit = total_value - total_cost_basis
 
@@ -609,7 +708,7 @@ class PortfolioAggregator:
         losers = []
 
         portfolio_result = await self.db.execute(
-            select(CryptoPortfolio).where(CryptoPortfolio.is_active == True)
+            select(CryptoPortfolio).where(CryptoPortfolio.is_active)
         )
         portfolios = portfolio_result.scalars().all()
 
