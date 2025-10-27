@@ -1069,12 +1069,15 @@ async def get_crypto_portfolio_performance(
         start_date, end_date = parse_time_range(range)
 
         # Adjust end_date to exclude dates that likely don't have market data yet
+        # NOTE: Crypto market data (especially from CoinGecko) typically lags 2 days behind.
+        # This adjustment ensures we don't try to fetch data that isn't available yet,
+        # which would cause inaccurate performance calculations or failed requests.
         if end_date is None:
             end_date = date.today() - timedelta(days=2)
         elif end_date >= date.today():
             original_end_date = end_date
             end_date = date.today() - timedelta(days=2)
-            logger.info(f"API: Adjusted end_date from {original_end_date} to {end_date} for data availability")
+            logger.info(f"API: Adjusted end_date from {original_end_date} to {end_date} for crypto market data availability (2-day lag)")
 
         # For ALL range, set a reasonable start_date
         if start_date is None:

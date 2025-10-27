@@ -1,6 +1,6 @@
 """Benchmark API endpoints."""
 from typing import Optional, List
-from datetime import date, timedelta
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -57,10 +57,11 @@ async def set_benchmark(
 
     if earliest_date:
         start_date = earliest_date
-        end_date = date.today()
     else:
         # Default to 1 year ago if no transactions
-        start_date, end_date = get_last_n_days(365)
+        start_date, _ = get_last_n_days(365)
+
+    end_date = date.today()
 
     # Trigger async task to fetch benchmark prices
     logger.info(f"Triggering price fetch for benchmark {benchmark.ticker} from {start_date} to {end_date}")
