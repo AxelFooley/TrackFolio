@@ -368,8 +368,8 @@ def test_unified_summary_response_schema_complete():
     # Validate summary structure
     assert summary.overview is not None
     assert summary.overview.total_value == Decimal("100000.00")
-    assert len(summary.holdings) == 1
-    assert summary.holdings_total == 1
+    assert len(summary.holdings.items) == 1
+    assert summary.holdings.total == 1
     assert summary.movers is not None
     assert summary.performance_summary is not None
     assert summary.performance_summary.period_days == 365
