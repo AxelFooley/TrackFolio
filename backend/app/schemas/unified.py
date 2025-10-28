@@ -157,23 +157,33 @@ class UnifiedPerformance(BaseModel):
             "example": {
                 "data": [
                     {
-                        "date": "2025-01-01",
+                        "date_point": "2025-01-01",
                         "value": "45000.00",
                         "crypto_value": "20000.00",
+                        "traditional_value": "25000.00"
+                    },
+                    {
+                        "date_point": "2025-01-02",
+                        "value": "46000.00",
+                        "crypto_value": "21000.00",
                         "traditional_value": "25000.00"
                     }
                 ],
                 "benchmark_data": [
                     {
                         "date": "2025-01-01",
-                        "value": "5000.00"
+                        "value": "4500.00"
+                    },
+                    {
+                        "date": "2025-01-02",
+                        "value": "4600.00"
                     }
                 ],
                 "benchmark_metrics": {
                     "start_price": "4500.00",
-                    "end_price": "5000.00",
-                    "change_amount": "500.00",
-                    "change_pct": 11.11
+                    "end_price": "4600.00",
+                    "change_amount": "100.00",
+                    "change_pct": 2.22
                 }
             }
         }
@@ -248,9 +258,26 @@ class PerformanceSummary(BaseModel):
             "example": {
                 "period_days": 365,
                 "data_points": 250,
-                "data": [],
-                "benchmark_data": [],
-                "benchmark_metrics": None
+                "data": [
+                    {
+                        "date_point": "2025-01-01",
+                        "value": "45000.00",
+                        "crypto_value": "20000.00",
+                        "traditional_value": "25000.00"
+                    }
+                ],
+                "benchmark_data": [
+                    {
+                        "date": "2025-01-01",
+                        "value": "4500.00"
+                    }
+                ],
+                "benchmark_metrics": {
+                    "start_price": "4500.00",
+                    "end_price": "4600.00",
+                    "change_amount": "100.00",
+                    "change_pct": 2.22
+                }
             }
         }
 
@@ -283,16 +310,64 @@ class UnifiedSummary(BaseModel):
                     "today_change_pct": 0.50,
                     "currency": "EUR"
                 },
-                "holdings": [],
+                "holdings": [
+                    {
+                        "id": "trad_1",
+                        "type": "STOCK",
+                        "ticker": "AAPL",
+                        "isin": "US0378691033",
+                        "quantity": 10.5,
+                        "current_price": "150.25",
+                        "current_value": "1577.625",
+                        "average_cost": "140.00",
+                        "total_cost": "1470.00",
+                        "profit_loss": "107.625",
+                        "profit_loss_pct": 7.32,
+                        "currency": "EUR",
+                        "portfolio_id": None,
+                        "portfolio_name": "Main Portfolio"
+                    }
+                ],
                 "holdings_total": 15,
                 "movers": {
-                    "gainers": [],
+                    "gainers": [
+                        {
+                            "ticker": "BTC",
+                            "type": "CRYPTO",
+                            "price": 45000.0,
+                            "current_value": "45000.00",
+                            "change_pct": 5.5,
+                            "today_change": "2500.00",
+                            "today_change_percent": 5.5,
+                            "portfolio_name": "Crypto Portfolio 1",
+                            "currency": "USD"
+                        }
+                    ],
                     "losers": []
                 },
                 "performance_summary": {
                     "period_days": 365,
                     "data_points": 250,
-                    "data": []
+                    "data": [
+                        {
+                            "date_point": "2025-01-01",
+                            "value": "45000.00",
+                            "crypto_value": "20000.00",
+                            "traditional_value": "25000.00"
+                        }
+                    ],
+                    "benchmark_data": [
+                        {
+                            "date": "2025-01-01",
+                            "value": "4500.00"
+                        }
+                    ],
+                    "benchmark_metrics": {
+                        "start_price": "4500.00",
+                        "end_price": "4600.00",
+                        "change_amount": "100.00",
+                        "change_pct": 2.22
+                    }
                 }
             }
         }

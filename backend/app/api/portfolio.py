@@ -668,25 +668,7 @@ async def get_unified_performance(
         # Get benchmark data using aggregator service
         aggregator = PortfolioAggregator(db)
         snapshot_dates = [p["date"] for p in sorted_snapshots]
-        benchmark_data_list, bench_start, bench_end, bench_change_amt, bench_change_pct = (
-            await aggregator._get_benchmark_data(snapshot_dates)
-        )
-
-        # Transform benchmark data to proper schema
-        benchmark_data = [
-            BenchmarkDataPoint(date=date.fromisoformat(b["date"]), value=Decimal(b["value"]))
-            for b in benchmark_data_list
-        ]
-
-        # Create benchmark metrics if we have benchmark data
-        benchmark_metrics = None
-        if benchmark_data_list:
-            benchmark_metrics = BenchmarkMetrics(
-                start_price=bench_start,
-                end_price=bench_end,
-                change_amount=bench_change_amt,
-                change_pct=bench_change_pct
-            )
+        benchmark_data, benchmark_metrics = await aggregator._get_benchmark_data(snapshot_dates)
 
         return UnifiedPerformance(
             data=portfolio_data,
@@ -764,25 +746,7 @@ async def get_unified_summary(
 
         # Get benchmark data aligned with performance snapshot dates
         snapshot_dates = [p["date"] for p in summary["performance_summary"]["data"]]
-        benchmark_data_list, bench_start, bench_end, bench_change_amt, bench_change_pct = (
-            await aggregator._get_benchmark_data(snapshot_dates)
-        )
-
-        # Transform benchmark data to proper schema
-        benchmark_data = [
-            BenchmarkDataPoint(date=date.fromisoformat(b["date"]), value=Decimal(b["value"]))
-            for b in benchmark_data_list
-        ]
-
-        # Create benchmark metrics if we have benchmark data
-        benchmark_metrics = None
-        if benchmark_data_list:
-            benchmark_metrics = BenchmarkMetrics(
-                start_price=bench_start,
-                end_price=bench_end,
-                change_amount=bench_change_amt,
-                change_pct=bench_change_pct
-            )
+        benchmark_data, benchmark_metrics = await aggregator._get_benchmark_data(snapshot_dates)
 
         return UnifiedSummary(
             overview=summary["overview"],

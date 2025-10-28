@@ -14,7 +14,7 @@ Key responsibilities:
 """
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 import logging
 import json
 
@@ -31,6 +31,7 @@ from app.models import (
     Position, PortfolioSnapshot, PriceHistory, CryptoPortfolio,
     CryptoPortfolioSnapshot, Benchmark
 )
+from app.schemas.unified import BenchmarkDataPoint, BenchmarkMetrics
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
 from app.config import settings
@@ -758,7 +759,7 @@ class PortfolioAggregator:
     async def _get_benchmark_data(
         self,
         snapshot_dates: List[date]
-    ) -> tuple[List[Dict[str, Any]], Optional[Decimal], Optional[Decimal], Optional[Decimal], Optional[float]]:
+    ) -> Tuple[List[BenchmarkDataPoint], Optional[BenchmarkMetrics]]:
         """
         Get benchmark data aligned with portfolio snapshot dates.
 
@@ -769,13 +770,10 @@ class PortfolioAggregator:
             snapshot_dates: List of dates that have portfolio snapshots
 
         Returns:
-            Tuple of (benchmark_data, start_price, end_price, change_amount, change_pct)
-            - benchmark_data: List of dicts with 'date' and 'value' keys
-            - start_price: First benchmark value
-            - end_price: Last benchmark value
-            - change_amount: End - Start
-            - change_pct: Change percentage
-            Returns empty data and None metrics if no benchmark configured or no data available
+            Tuple of (benchmark_data, benchmark_metrics)
+            - benchmark_data: List of BenchmarkDataPoint objects with date and value
+            - benchmark_metrics: BenchmarkMetrics object with start/end prices and change
+            Returns ([], None) if no benchmark configured or no data available
         """
         # Get active benchmark
         benchmark_result = await self.db.execute(
@@ -784,7 +782,7 @@ class PortfolioAggregator:
         benchmark = benchmark_result.scalar_one_or_none()
 
         if not benchmark or not snapshot_dates:
-            return [], None, None, None, None
+            return [], None
 
         # Get benchmark prices for dates that have portfolio snapshots
         benchmark_query = select(PriceHistory).where(
@@ -796,14 +794,11 @@ class PortfolioAggregator:
         benchmark_prices = benchmark_result.scalars().all()
 
         if not benchmark_prices:
-            return [], None, None, None, None
+            return [], None
 
-        # Transform to performance data points
+        # Transform to BenchmarkDataPoint objects
         benchmark_data = [
-            {
-                "date": str(p.date),
-                "value": str(p.close)
-            }
+            BenchmarkDataPoint(date=p.date, value=p.close)
             for p in benchmark_prices
         ]
 
@@ -821,7 +816,14 @@ class PortfolioAggregator:
             change_amount = end_price - start_price
             change_pct = self._safe_percentage(change_amount, start_price)
 
-        return benchmark_data, start_price, end_price, change_amount, change_pct
+        benchmark_metrics = BenchmarkMetrics(
+            start_price=start_price,
+            end_price=end_price,
+            change_amount=change_amount,
+            change_pct=change_pct
+        )
+
+        return benchmark_data, benchmark_metrics
 
     @staticmethod
     def _safe_percentage(numerator: Decimal, denominator: Decimal) -> Optional[float]:

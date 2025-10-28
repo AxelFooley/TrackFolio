@@ -369,3 +369,36 @@ class TestCacheTTLConstant:
         aggregator._set_cache.assert_called_once()
         call_kwargs = aggregator._set_cache.call_args[1]
         assert call_kwargs["ttl_seconds"] == settings.portfolio_aggregator_cache_ttl
+
+
+class TestBenchmarkDataTransformation:
+    """Tests for benchmark data transformation and return type consistency."""
+
+    @pytest.mark.asyncio
+    async def test_get_benchmark_data_empty_snapshot_dates(self):
+        """Test that empty lists and None are returned when no snapshot dates provided."""
+        from datetime import date
+        mock_db = AsyncMock(spec=AsyncSession)
+        aggregator = PortfolioAggregator(mock_db)
+
+        # Mock benchmark exists but no snapshot dates
+        benchmark_data, benchmark_metrics = await aggregator._get_benchmark_data([])
+
+        assert benchmark_data == []
+        assert benchmark_metrics is None
+
+    @pytest.mark.asyncio
+    async def test_get_benchmark_data_return_types(self):
+        """Test that _get_benchmark_data returns correct type tuple structure."""
+        from datetime import date
+        from app.schemas.unified import BenchmarkDataPoint, BenchmarkMetrics
+
+        mock_db = AsyncMock(spec=AsyncSession)
+        aggregator = PortfolioAggregator(mock_db)
+
+        # Test with empty snapshot dates returns tuple of (list, None)
+        result = await aggregator._get_benchmark_data([])
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        assert isinstance(result[0], list)
+        assert result[1] is None
