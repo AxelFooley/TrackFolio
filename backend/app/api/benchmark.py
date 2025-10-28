@@ -1,6 +1,6 @@
 """Benchmark API endpoints."""
 from typing import Optional, List
-from datetime import date, timedelta
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -10,6 +10,7 @@ import yfinance as yf
 from app.database import get_db
 from app.models import Benchmark, Transaction
 from app.schemas.benchmark import BenchmarkCreate, BenchmarkResponse
+from app.utils.time_utils import get_last_n_days
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ async def set_benchmark(
         start_date = earliest_date
     else:
         # Default to 1 year ago if no transactions
-        start_date = date.today() - timedelta(days=365)
+        start_date, _ = get_last_n_days(365)
 
     end_date = date.today()
 

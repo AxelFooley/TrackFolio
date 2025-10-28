@@ -35,6 +35,7 @@ from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
 from app.tasks.blockchain_sync import sync_wallet_manually
 from app.config import settings
+from app.utils.time_utils import parse_time_range
 
 logger = logging.getLogger(__name__)
 
@@ -1065,27 +1066,23 @@ async def get_crypto_portfolio_performance(
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
         # Calculate date range based on range parameter
-        original_end_date = datetime.utcnow().date()
-        end_date = original_end_date
+        start_date, end_date = parse_time_range(range)
 
         # Adjust end_date to exclude dates that likely don't have market data yet
-        if end_date >= date.today():
+        # NOTE: Crypto market data (especially from CoinGecko) typically lags 2 days behind.
+        # This adjustment ensures we don't try to fetch data that isn't available yet,
+        # which would cause inaccurate performance calculations or failed requests.
+        if end_date is None:
             end_date = date.today() - timedelta(days=2)
-            logger.info(f"API: Adjusted end_date from {original_end_date} to {end_date} for data availability")
+        elif end_date >= date.today():
+            original_end_date = end_date
+            end_date = date.today() - timedelta(days=2)
+            logger.info(f"API: Adjusted end_date from {original_end_date} to {end_date} for crypto market data availability (2-day lag)")
 
-        if range == "1D":
-            start_date = end_date - timedelta(days=1)
-        elif range == "1W":
-            start_date = end_date - timedelta(weeks=1)
-        elif range == "1M":
-            start_date = end_date - timedelta(days=30)
-        elif range == "3M":
-            start_date = end_date - timedelta(days=90)
-        elif range == "6M":
-            start_date = end_date - timedelta(days=180)
-        elif range == "1Y":
-            start_date = end_date - timedelta(days=365)
-        else:  # ALL
+        # For ALL range, set a reasonable start_date
+        # NOTE: start_date calculation intentionally uses the adjusted end_date (with 2-day lag)
+        # to ensure consistent date ranges for crypto market data availability
+        if start_date is None:
             start_date = end_date - timedelta(days=365 * 5)  # 5 years max
 
         logger.info(f"API: Using date range {start_date} to {end_date} for performance calculation")
