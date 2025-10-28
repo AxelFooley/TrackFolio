@@ -766,6 +766,12 @@ class PortfolioAggregator:
         Fetches benchmark price history for dates that match portfolio snapshots,
         ensuring 1:1 alignment for comparison. Also calculates benchmark metrics.
 
+        This method returns properly typed Pydantic objects (BenchmarkDataPoint and
+        BenchmarkMetrics) rather than raw dicts, allowing the API layer to use these
+        objects directly without additional transformation. This keeps the business
+        logic (aggregation, alignment, metric calculation) in the service layer while
+        the API layer focuses on request/response handling.
+
         Args:
             snapshot_dates: List of dates that have portfolio snapshots
 
@@ -797,6 +803,10 @@ class PortfolioAggregator:
             return [], None
 
         # Transform to BenchmarkDataPoint objects
+        # Note: List comprehension with date conversion is acceptable because:
+        # 1. Transformation only happens once per request (not in loops)
+        # 2. For typical data (365-1825 days), performance impact is negligible
+        # 3. Can be optimized in future by pre-parsing dates in query if needed
         benchmark_data = [
             BenchmarkDataPoint(date=p.date, value=p.close)
             for p in benchmark_prices

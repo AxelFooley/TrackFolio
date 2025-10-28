@@ -98,6 +98,29 @@ def parse_time_range(range_str: str) -> tuple[Optional[date], Optional[date]]:
         )
 
 
+async def _get_benchmark_for_dates(
+    aggregator: PortfolioAggregator,
+    snapshot_dates: List[date]
+) -> tuple[List[BenchmarkDataPoint], Optional[BenchmarkMetrics]]:
+    """
+    Get benchmark data aligned with portfolio snapshot dates.
+
+    This is a helper method that centralizes benchmark data retrieval and ensures
+    consistent handling across multiple endpoints (get_unified_performance and
+    get_unified_summary). Delegates actual calculation to PortfolioAggregator.
+
+    Args:
+        aggregator: PortfolioAggregator instance with database session
+        snapshot_dates: List of dates that have portfolio snapshots
+
+    Returns:
+        Tuple of (benchmark_data, benchmark_metrics)
+        - benchmark_data: List of BenchmarkDataPoint objects with aligned dates
+        - benchmark_metrics: BenchmarkMetrics object with calculated values, or None if empty
+    """
+    return await aggregator._get_benchmark_data(snapshot_dates)
+
+
 @router.get("/overview", response_model=PortfolioOverview)
 async def get_portfolio_overview(db: AsyncSession = Depends(get_db)):
     """Get portfolio overview metrics for dashboard."""
@@ -665,10 +688,10 @@ async def get_unified_performance(
             for p in sorted_snapshots
         ]
 
-        # Get benchmark data using aggregator service
+        # Get benchmark data using helper method
         aggregator = PortfolioAggregator(db)
         snapshot_dates = [p["date"] for p in sorted_snapshots]
-        benchmark_data, benchmark_metrics = await aggregator._get_benchmark_data(snapshot_dates)
+        benchmark_data, benchmark_metrics = await _get_benchmark_for_dates(aggregator, snapshot_dates)
 
         return UnifiedPerformance(
             data=portfolio_data,
@@ -746,7 +769,7 @@ async def get_unified_summary(
 
         # Get benchmark data aligned with performance snapshot dates
         snapshot_dates = [p["date"] for p in summary["performance_summary"]["data"]]
-        benchmark_data, benchmark_metrics = await aggregator._get_benchmark_data(snapshot_dates)
+        benchmark_data, benchmark_metrics = await _get_benchmark_for_dates(aggregator, snapshot_dates)
 
         return UnifiedSummary(
             overview=summary["overview"],

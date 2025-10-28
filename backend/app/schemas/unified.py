@@ -145,7 +145,12 @@ class BenchmarkMetrics(BaseModel):
 
 
 class UnifiedPerformance(BaseModel):
-    """Schema for unified performance data."""
+    """Schema for unified performance data.
+
+    Combines portfolio performance data with benchmark comparison data when available.
+    When no benchmark is configured, benchmark_data will be an empty list and
+    benchmark_metrics will be None.
+    """
 
     data: List[UnifiedPerformanceDataPoint]
     benchmark_data: List[BenchmarkDataPoint] = []
@@ -244,7 +249,12 @@ class UnifiedMovers(BaseModel):
 
 
 class PerformanceSummary(BaseModel):
-    """Summary of performance data."""
+    """Summary of performance data.
+
+    Includes portfolio performance metrics with optional benchmark comparison data.
+    The benchmark_data list will be empty if no benchmark is configured or no
+    benchmark prices are available for the performance period.
+    """
 
     period_days: int
     data_points: int
