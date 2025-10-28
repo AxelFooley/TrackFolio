@@ -20,7 +20,6 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from sqlalchemy.sql import text as sql_text
 
 try:
     import redis
@@ -30,7 +29,7 @@ except ImportError:
 
 from app.models import (
     Position, PortfolioSnapshot, PriceHistory, CryptoPortfolio,
-    CryptoPortfolioSnapshot
+    CryptoPortfolioSnapshot, Benchmark
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
@@ -129,8 +128,6 @@ class PortfolioAggregator:
         # Use window function at database level for efficiency
         # ROW_NUMBER() assigns a number to each price within its ticker group
         # We filter to keep only rows 1-2 (latest 2 prices per ticker)
-        from sqlalchemy.orm import aliased
-        from sqlalchemy import CTE
 
         # Create a CTE with row numbers
         rn_cte = select(
@@ -757,6 +754,74 @@ class PortfolioAggregator:
                         losers.append(mover)
 
         return {"gainers": gainers, "losers": losers}
+
+    async def _get_benchmark_data(
+        self,
+        snapshot_dates: List[date]
+    ) -> tuple[List[Dict[str, Any]], Optional[Decimal], Optional[Decimal], Optional[Decimal], Optional[float]]:
+        """
+        Get benchmark data aligned with portfolio snapshot dates.
+
+        Fetches benchmark price history for dates that match portfolio snapshots,
+        ensuring 1:1 alignment for comparison. Also calculates benchmark metrics.
+
+        Args:
+            snapshot_dates: List of dates that have portfolio snapshots
+
+        Returns:
+            Tuple of (benchmark_data, start_price, end_price, change_amount, change_pct)
+            - benchmark_data: List of dicts with 'date' and 'value' keys
+            - start_price: First benchmark value
+            - end_price: Last benchmark value
+            - change_amount: End - Start
+            - change_pct: Change percentage
+            Returns empty data and None metrics if no benchmark configured or no data available
+        """
+        # Get active benchmark
+        benchmark_result = await self.db.execute(
+            select(Benchmark).limit(1)
+        )
+        benchmark = benchmark_result.scalar_one_or_none()
+
+        if not benchmark or not snapshot_dates:
+            return [], None, None, None, None
+
+        # Get benchmark prices for dates that have portfolio snapshots
+        benchmark_query = select(PriceHistory).where(
+            PriceHistory.ticker == benchmark.ticker,
+            PriceHistory.date.in_(snapshot_dates)
+        ).order_by(PriceHistory.date)
+
+        benchmark_result = await self.db.execute(benchmark_query)
+        benchmark_prices = benchmark_result.scalars().all()
+
+        if not benchmark_prices:
+            return [], None, None, None, None
+
+        # Transform to performance data points
+        benchmark_data = [
+            {
+                "date": str(p.date),
+                "value": str(p.close)
+            }
+            for p in benchmark_prices
+        ]
+
+        # Calculate benchmark metrics
+        if len(benchmark_prices) == 1:
+            # Single data point: no change
+            start_price = benchmark_prices[0].close
+            end_price = benchmark_prices[0].close
+            change_amount = Decimal("0")
+            change_pct = 0.0
+        else:
+            # Multiple data points: calculate change
+            start_price = benchmark_prices[0].close
+            end_price = benchmark_prices[-1].close
+            change_amount = end_price - start_price
+            change_pct = self._safe_percentage(change_amount, start_price)
+
+        return benchmark_data, start_price, end_price, change_amount, change_pct
 
     @staticmethod
     def _safe_percentage(numerator: Decimal, denominator: Decimal) -> Optional[float]:
