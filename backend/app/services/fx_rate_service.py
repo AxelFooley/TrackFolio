@@ -29,11 +29,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Last updated: 2025-10-27
+# WARNING: These are static fallback rates used when the FX API is unavailable.
+# In prolonged outages, these rates become stale and portfolio valuations may be inaccurate.
+# Monitor API health and update these rates if market conditions change significantly.
 # Default fallback rates (approximate current market rates)
-# IMPORTANT: Fallback rates last updated 2025-10-27
-# WARNING: These rates will become stale if price fetching APIs are unavailable for extended periods.
-# In production, external APIs (Yahoo Finance) should be the primary source and fallback should
-# only be used for short outages. Monitor rate freshness in logs when fallback is activated.
 DEFAULT_FALLBACK_RATES = {
     ("USD", "EUR"): Decimal("0.92"),
     ("EUR", "USD"): Decimal("1.09"),
@@ -60,19 +60,19 @@ class FXRateService:
         """Initialize the FX rate service."""
         self._redis_client = None
         self._redis_initialized = False
+        # Note: The ThreadPoolExecutor and _last_fetch_time dictionary have been removed
+        # as they were unused. Redis handles all caching and rate limiting is managed
+        # through asyncio.sleep() in _fetch_with_retries().
 
     @property
     def redis_client(self):
-        """
-        Lazy initialize Redis client for caching.
+        """Lazy initialize Redis client for caching.
 
-        NOTE: This property is thread-safe in practice because:
-        (1) FXRateService is instantiated as a single global instance
-        (2) Initialization happens once at startup (not concurrent with application initialization)
-        (3) AsyncIO ensures single-threaded execution within event loop
-
-        This avoids the overhead of asyncio.Lock() for an initialization pattern that occurs
-        only once per application lifetime.
+        Note: Multiple concurrent accesses to this property could theoretically
+        cause race conditions in initialization. However, this is not critical since:
+        1. The global instance is created once at application startup
+        2. Concurrent initialization is idempotent (tries to connect to same Redis)
+        3. AsyncIO serializes access in most cases
         """
         if redis_available and not self._redis_initialized:
             try:
@@ -147,15 +147,13 @@ class FXRateService:
         to_currency: str,
         target_date: date
     ) -> Optional[Decimal]:
-        """
-        Get the historical exchange rate for a specific date.
+        """Get the historical exchange rate for a specific date.
 
         FIXME: Historical FX rates not fully implemented
-        Currently returns current rate for all historical dates, which causes inaccuracy
-        in portfolio performance calculations when currency values fluctuate significantly.
-        This is a known limitation - historical FX rates from Yahoo Finance or ECB APIs
-        should be integrated in a future enhancement to provide accurate point-in-time
-        currency conversion.
+        Current implementation uses current rates for all historical dates
+        This causes inaccurate performance calculations for multi-year periods
+        TODO: Implement ECB historical API or alternative data source
+        See: https://github.com/AxelFooley/TrackFolio/issues/XXX
 
         Args:
             from_currency: Source currency code
@@ -293,13 +291,13 @@ class FXRateService:
         """Fetch FX rate from Yahoo Finance."""
         try:
             # Validate currency codes (must be 3-letter uppercase ISO 4217 codes)
-            if not (isinstance(from_currency, str) and len(from_currency) == 3 and from_currency.isupper()):
+            if not (isinstance(from_currency, str) and len(from_currency) == 3 and from_currency.isupper() and from_currency.isalpha()):
                 raise ValueError(
-                    f"Invalid 'from' currency code: {from_currency} (must be 3-letter uppercase code)"
+                    f"Invalid 'from' currency code: {from_currency} (must be 3-letter uppercase ISO code)"
                 )
-            if not (isinstance(to_currency, str) and len(to_currency) == 3 and to_currency.isupper()):
+            if not (isinstance(to_currency, str) and len(to_currency) == 3 and to_currency.isupper() and to_currency.isalpha()):
                 raise ValueError(
-                    f"Invalid 'to' currency code: {to_currency} (must be 3-letter uppercase code)"
+                    f"Invalid 'to' currency code: {to_currency} (must be 3-letter uppercase ISO code)"
                 )
 
             # Use Yahoo Finance FX ticker format: XXXYYYZZZ where

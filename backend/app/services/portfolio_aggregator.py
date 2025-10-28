@@ -78,6 +78,7 @@ class PortfolioAggregator:
         self.fx_service = get_fx_service()
         self._redis_client = None
         self._redis_initialized = False
+        # Note: _fx_rates_cache has been removed - Redis caching is handled by FXRateService
 
     @property
     def redis_client(self):
