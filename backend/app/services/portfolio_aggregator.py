@@ -518,6 +518,13 @@ class PortfolioAggregator:
         )
         today_change_pct = self._safe_percentage(today_change, yesterday_value)
 
+        # Compile FX rates from both traditional and crypto sources
+        fx_rates = {}
+        if trad_overview.get("fx_rates"):
+            fx_rates.update(trad_overview["fx_rates"])
+        if crypto_overview.get("fx_rates"):
+            fx_rates.update(crypto_overview["fx_rates"])
+
         return {
             "total_value": total_value,
             "traditional_value": trad_overview["current_value"],
@@ -532,7 +539,9 @@ class PortfolioAggregator:
             "today_change": today_change,
             "today_change_pct": today_change_pct,
             # Currency is always EUR for unified overview - crypto values use base_currency per portfolio
-            "currency": "EUR"
+            "currency": "EUR",
+            # Include FX rates used for transparency and debugging
+            "fx_rates": fx_rates if fx_rates else None
         }
 
     async def _get_traditional_holdings(self) -> List[Dict[str, Any]]:
@@ -733,6 +742,8 @@ class PortfolioAggregator:
         Wrapped in error handling to ensure crypto calculation failures don't prevent
         returning partial results (e.g., if one portfolio calculation fails, others
         are still included).
+
+        Returns dict including fx_rates used for transparency and debugging.
         """
         portfolio_result = await self.db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.is_active)
@@ -742,6 +753,7 @@ class PortfolioAggregator:
         total_value = Decimal("0")
         total_cost_basis = Decimal("0")
         today_change = Decimal("0")
+        fx_rates_used = {}  # Track FX rates for transparency
 
         for portfolio in portfolios:
             try:
@@ -752,9 +764,15 @@ class PortfolioAggregator:
                     portfolio_value = metrics.total_value or Decimal("0")
                     portfolio_cost = metrics.total_cost_basis
 
-                    # Convert to EUR if needed
-                    value_eur = await self._convert_to_eur(portfolio_value, portfolio_currency)
-                    cost_eur = await self._convert_to_eur(portfolio_cost, portfolio_currency)
+                    # Convert to EUR if needed and track rate
+                    if portfolio_currency != "EUR":
+                        rate = await self.fx_service.get_current_rate(portfolio_currency, "EUR", use_fallback=True)
+                        fx_rates_used[f"{portfolio_currency}/EUR"] = float(rate)
+                        value_eur = portfolio_value * rate
+                        cost_eur = portfolio_cost * rate
+                    else:
+                        value_eur = portfolio_value
+                        cost_eur = portfolio_cost
 
                     total_value += value_eur
                     total_cost_basis += cost_eur
@@ -771,7 +789,8 @@ class PortfolioAggregator:
             "total_value": total_value,
             "total_cost_basis": total_cost_basis,
             "total_profit": total_profit,
-            "today_change": today_change
+            "today_change": today_change,
+            "fx_rates": fx_rates_used if fx_rates_used else None
         }
 
     async def _get_crypto_movers(self) -> Dict[str, List[Dict[str, Any]]]:

@@ -29,11 +29,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Last updated: 2025-10-27
 # WARNING: These are static fallback rates used when the FX API is unavailable.
 # In prolonged outages, these rates become stale and portfolio valuations may be inaccurate.
+# Last updated: 2024-10-28 (when FX rate service was implemented)
 # Monitor API health and update these rates if market conditions change significantly.
-# Default fallback rates (approximate current market rates)
+# Default fallback rates (approximate market rates)
 DEFAULT_FALLBACK_RATES = {
     ("USD", "EUR"): Decimal("0.92"),
     ("EUR", "USD"): Decimal("1.09"),
@@ -149,11 +149,12 @@ class FXRateService:
     ) -> Optional[Decimal]:
         """Get the historical exchange rate for a specific date.
 
-        FIXME: Historical FX rates not fully implemented
+        NOTE: Historical FX rates not fully implemented
         Current implementation uses current rates for all historical dates
         This causes inaccurate performance calculations for multi-year periods
-        TODO: Implement ECB historical API or alternative data source
-        See: https://github.com/AxelFooley/TrackFolio/issues/XXX
+
+        Issue: https://github.com/AxelFooley/TrackFolio/issues/76
+        Solution: Implement ECB historical API or Yahoo Finance historical FX data
 
         Args:
             from_currency: Source currency code
@@ -161,13 +162,14 @@ class FXRateService:
             target_date: The date to fetch the rate for
 
         Returns:
-            Exchange rate as Decimal (currently always current rate, not truly historical)
+            Exchange rate as Decimal (currently returns current rate as approximation)
         """
-        # FIXME: Replace with true historical data source (ECB, Yahoo historical, etc)
-        # This approximation causes portfolio calculations to be inaccurate
-        logger.warning(
-            f"Historical FX rates not implemented. Using current rate (not {target_date}'s actual rate). "
-            f"This causes inaccuracy in portfolio performance when currency values fluctuate significantly."
+        # TODO: Replace with true historical data source (ECB, Yahoo historical, etc)
+        # See issue #76 for implementation options and acceptance criteria
+        # This approximation causes portfolio calculations to be inaccurate for historical periods
+        logger.debug(
+            f"Using current rate as approximation for {from_currency}/{to_currency} on {target_date}. "
+            f"Historical rates not yet implemented (see issue #76)."
         )
         try:
             return await self.get_current_rate(from_currency, to_currency)
@@ -300,16 +302,11 @@ class FXRateService:
                     f"Invalid 'to' currency code: {to_currency} (must be 3-letter uppercase ISO code)"
                 )
 
-            # Use Yahoo Finance FX ticker format: XXXYYYZZZ where
-            # XXX = from_currency, YYY = to_currency, ZZZ = exchange
-            # For EUR/USD, the Yahoo Finance ticker is EURUSD=X
-            fx_ticker = f"{from_currency}{to_currency}=X"
-
             rate = await PriceFetcher.fetch_fx_rate(base=from_currency, quote=to_currency)
 
             # Validate rate is positive and non-zero
             if rate is None:
-                logger.warning(f"No rate returned from Yahoo Finance: {fx_ticker}")
+                logger.warning(f"No rate returned from Yahoo Finance for {from_currency}/{to_currency}")
                 return None
 
             if not isinstance(rate, (Decimal, int, float)):
@@ -319,7 +316,7 @@ class FXRateService:
             rate_decimal = Decimal(str(rate)) if not isinstance(rate, Decimal) else rate
 
             if rate_decimal <= 0:
-                logger.warning(f"Invalid rate value from Yahoo Finance: {fx_ticker} = {rate_decimal}")
+                logger.warning(f"Invalid rate value from Yahoo Finance: {from_currency}/{to_currency} = {rate_decimal}")
                 return None
 
             return rate_decimal
@@ -328,7 +325,7 @@ class FXRateService:
             logger.error(f"Currency code validation error: {ve}")
             return None
         except Exception as e:
-            logger.error(f"Error fetching rate from Yahoo Finance: {e}")
+            logger.error(f"Error fetching rate from Yahoo Finance for {from_currency}/{to_currency}: {e}")
             return None
 
     def _get_fallback_rate(self, from_currency: str, to_currency: str) -> Decimal:
@@ -345,7 +342,7 @@ class FXRateService:
             rate = DEFAULT_FALLBACK_RATES[key]
             logger.warning(
                 f"Using fallback rate for {from_currency}/{to_currency}: {rate} "
-                f"(fallback rates may be stale - last updated 2025-10-27)"
+                f"(fallback rates may be stale - last updated 2024-10-28)"
             )
             return rate
 
@@ -357,7 +354,7 @@ class FXRateService:
                 rate = Decimal(1) / inverse_rate
                 logger.warning(
                     f"Using inverse fallback rate for {from_currency}/{to_currency}: {rate} "
-                    f"(fallback rates may be stale - last updated 2025-10-27)"
+                    f"(fallback rates may be stale - last updated 2024-10-28)"
                 )
                 return rate
 

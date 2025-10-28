@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     fx_rate_source: str = Field(
         "yahoo",
         env="FX_RATE_SOURCE",
-        description="Primary source for FX rates (currently only yahoo supported)"
+        description="Primary source for FX rates. Currently only Yahoo Finance via PriceFetcher. Reserved for future multi-source support (see issue #76 for ECB/historical rate options)"
     )
 
 
