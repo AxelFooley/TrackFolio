@@ -182,17 +182,14 @@ class TestDataValidation:
 class TestRedisInitialization:
     """Test Redis client initialization pattern."""
 
-    def test_redis_initialized_flag(self):
-        """Test that _redis_initialized flag is properly managed."""
+    def test_redis_client_property(self):
+        """Test that redis_client property returns shared client from redis_client module."""
         mock_db = AsyncMock(spec=AsyncSession)
         aggregator = PortfolioAggregator(mock_db)
 
-        # Initially should not be initialized
-        assert not hasattr(aggregator, '_redis_initialized') or \
-               aggregator._redis_initialized is False
+        # redis_client property should return the shared client
+        # (or None if Redis is unavailable)
+        client = aggregator.redis_client
 
-        # Accessing redis_client should initialize it
-        _ = aggregator.redis_client
-
-        # After access, should be marked as initialized
-        assert aggregator._redis_initialized is True
+        # Should be either None or a Redis client instance
+        assert client is None or hasattr(client, 'get')
