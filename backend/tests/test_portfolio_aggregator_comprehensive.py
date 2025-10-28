@@ -256,9 +256,10 @@ class TestEmptyPortfolioScenarios:
         aggregator._get_traditional_holdings = AsyncMock(return_value=[])
         aggregator._get_crypto_holdings = AsyncMock(return_value=[])
 
-        result = await aggregator.get_unified_holdings()
+        paginated_holdings, total_count = await aggregator.get_unified_holdings()
 
-        assert result == []
+        assert paginated_holdings == []
+        assert total_count == 0
 
     @pytest.mark.asyncio
     async def test_get_unified_overview_empty_portfolios(self):

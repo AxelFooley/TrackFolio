@@ -12,8 +12,8 @@ from app.models import Position, PortfolioSnapshot, PriceHistory, CachedMetrics,
 from app.schemas.portfolio import PortfolioOverview, PortfolioPerformance, PerformanceDataPoint
 from app.schemas.position import PositionResponse
 from app.schemas.unified import (
-    UnifiedHolding, UnifiedOverview, UnifiedMovers,
-    UnifiedSummary, UnifiedPerformanceDataPoint
+    UnifiedOverview, UnifiedMovers,
+    UnifiedSummary, UnifiedPerformanceDataPoint, PaginatedUnifiedHolding
 )
 from app.services.portfolio_aggregator import PortfolioAggregator
 from app.utils.time_utils import parse_time_range
@@ -465,14 +465,14 @@ async def get_position(
 
 # Unified Portfolio Endpoints (combining traditional and crypto)
 
-@router.get("/unified-holdings", response_model=List[UnifiedHolding])
+@router.get("/unified-holdings", response_model=PaginatedUnifiedHolding)
 async def get_unified_holdings(
     skip: int = Query(0, ge=0, description="Number of holdings to skip"),
     limit: int = Query(100, ge=1, le=1000, description="Max holdings to return"),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get unified list of all holdings (traditional and crypto).
+    Get unified list of all holdings (traditional and crypto) with pagination.
 
     Returns combined positions from traditional portfolio (Position model)
     and all crypto portfolios (CryptoPortfolio/CryptoTransaction).
@@ -484,16 +484,22 @@ async def get_unified_holdings(
         limit: Maximum number of holdings to return (1-1000)
 
     Returns:
-        List of unified holdings with standardized schema
+        PaginatedUnifiedHolding with items, total count, and pagination info
     """
     try:
         aggregator = PortfolioAggregator(db)
-        all_holdings = await aggregator.get_unified_holdings()
+        paginated_holdings, total_count = await aggregator.get_unified_holdings(skip=skip, limit=limit)
 
-        # Apply pagination
-        paginated_holdings = all_holdings[skip : skip + limit]
+        # Calculate has_more flag
+        has_more = (skip + limit) < total_count
 
-        return paginated_holdings
+        return PaginatedUnifiedHolding(
+            items=paginated_holdings,
+            total=total_count,
+            skip=skip,
+            limit=limit,
+            has_more=has_more
+        )
     except Exception as e:
         logger.error(f"Error getting unified holdings: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve unified holdings")

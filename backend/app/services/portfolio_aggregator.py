@@ -163,23 +163,32 @@ class PortfolioAggregator:
 
         return prices_by_ticker
 
-    async def get_unified_holdings(self) -> List[Dict[str, Any]]:
+    async def get_unified_holdings(self, skip: int = 0, limit: int = 100) -> tuple[List[Dict[str, Any]], int]:
         """
-        Get unified list of all holdings (traditional and crypto).
+        Get unified list of all holdings (traditional and crypto) with pagination.
 
         Returns traditional positions augmented with current price data,
         plus all crypto holdings from all active crypto portfolios,
         each formatted with consistent schema.
 
+        The method collects all holdings, calculates the total count, applies pagination,
+        and returns both the paginated results and total count for API responses.
+
+        Args:
+            skip: Number of holdings to skip (pagination offset, default 0)
+            limit: Maximum number of holdings to return (default 100, max 1000)
+
         Returns:
-            List of holdings with standardized fields:
-            - id: unique identifier
-            - type: "STOCK", "ETF", or "CRYPTO"
-            - ticker: symbol
-            - isin: (only for traditional)
-            - quantity, current_price, current_value, etc.
-            - portfolio_id: null for traditional, uuid for crypto
-            - portfolio_name: "Main Portfolio" or crypto portfolio name
+            Tuple of (paginated_holdings, total_count) where:
+            - paginated_holdings: List of holdings with standardized fields:
+              - id: unique identifier
+              - type: "STOCK", "ETF", or "CRYPTO"
+              - ticker: symbol
+              - isin: (only for traditional)
+              - quantity, current_price, current_value, etc.
+              - portfolio_id: null for traditional, uuid for crypto
+              - portfolio_name: "Main Portfolio" or crypto portfolio name
+            - total_count: Total number of holdings across all portfolios
         """
         holdings = []
 
@@ -191,7 +200,13 @@ class PortfolioAggregator:
         crypto_holdings = await self._get_crypto_holdings()
         holdings.extend(crypto_holdings)
 
-        return holdings
+        # Calculate total count before pagination
+        total_count = len(holdings)
+
+        # Apply pagination
+        paginated_holdings = holdings[skip:skip + limit]
+
+        return paginated_holdings, total_count
 
     async def get_unified_overview(self) -> Dict[str, Any]:
         """
@@ -420,14 +435,11 @@ class PortfolioAggregator:
 
         # Get all components in parallel where possible
         overview = await self.get_unified_overview()
-        all_holdings = await self.get_unified_holdings()
+        paginated_holdings, total_holdings = await self.get_unified_holdings(skip=0, limit=holdings_limit)
         movers = await self.get_unified_movers(
             top_n=settings.portfolio_aggregator_top_movers
         )
         performance = await self.get_unified_performance(days=performance_days)
-
-        # Paginate holdings
-        paginated_holdings = all_holdings[:holdings_limit]
 
         # Build performance summary
         perf_summary = {
@@ -439,7 +451,7 @@ class PortfolioAggregator:
         return {
             "overview": overview,
             "holdings": paginated_holdings,
-            "holdings_total": len(all_holdings),
+            "holdings_total": total_holdings,
             "movers": movers,
             "performance_summary": perf_summary
         }

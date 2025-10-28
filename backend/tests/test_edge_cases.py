@@ -33,11 +33,12 @@ class TestEmptyPortfolioEdgeCases:
         mock_db.execute.return_value = mock_result
 
         # Call should not raise exception
-        holdings = await aggregator.get_unified_holdings()
+        paginated_holdings, total_count = await aggregator.get_unified_holdings()
 
-        # Should return empty list
-        assert holdings == []
-        assert isinstance(holdings, list)
+        # Should return empty list and zero count
+        assert paginated_holdings == []
+        assert total_count == 0
+        assert isinstance(paginated_holdings, list)
 
     @pytest.mark.asyncio
     async def test_get_unified_overview_empty(self):
