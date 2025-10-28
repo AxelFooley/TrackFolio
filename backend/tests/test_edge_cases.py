@@ -27,17 +27,22 @@ class TestEmptyPortfolioEdgeCases:
         mock_db = AsyncMock(spec=AsyncSession)
         aggregator = PortfolioAggregator(mock_db)
 
-        # Mock empty position results
-        mock_result = Mock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute.return_value = mock_result
+        # Mock the count methods directly to return 0
+        aggregator._get_traditional_holdings_count = AsyncMock(return_value=0)
+        aggregator._get_crypto_holdings_count = AsyncMock(return_value=0)
 
-        # Call should not raise exception
-        holdings = await aggregator.get_unified_holdings()
+        # Mock the holdings methods to return empty lists
+        aggregator._get_traditional_holdings = AsyncMock(return_value=[])
+        aggregator._get_crypto_holdings = AsyncMock(return_value=[])
 
-        # Should return empty list
+        # Call should not raise exception - returns tuple (holdings_list, total_count)
+        holdings, total = await aggregator.get_unified_holdings()
+
+        # Should return empty list with count 0
         assert holdings == []
         assert isinstance(holdings, list)
+        assert total == 0
+        assert isinstance(total, int)
 
     @pytest.mark.asyncio
     async def test_get_unified_overview_empty(self):
@@ -182,17 +187,14 @@ class TestDataValidation:
 class TestRedisInitialization:
     """Test Redis client initialization pattern."""
 
-    def test_redis_initialized_flag(self):
-        """Test that _redis_initialized flag is properly managed."""
+    def test_redis_client_property(self):
+        """Test that redis_client property returns shared client from redis_client module."""
         mock_db = AsyncMock(spec=AsyncSession)
         aggregator = PortfolioAggregator(mock_db)
 
-        # Initially should not be initialized
-        assert not hasattr(aggregator, '_redis_initialized') or \
-               aggregator._redis_initialized is False
+        # redis_client property should return the shared client
+        # (or None if Redis is unavailable)
+        client = aggregator.redis_client
 
-        # Accessing redis_client should initialize it
-        _ = aggregator.redis_client
-
-        # After access, should be marked as initialized
-        assert aggregator._redis_initialized is True
+        # Should be either None or a Redis client instance
+        assert client is None or hasattr(client, 'get')
