@@ -158,6 +158,13 @@ class Settings(BaseSettings):
     )
 
     # Rate limiting for unified endpoints
+    # These endpoints aggregate data from traditional and crypto portfolios.
+    # Limits are based on computational cost:
+    # - unified-overview: Simple aggregation with minimal computation (100/min)
+    # - unified-movers: Straightforward sorting, no complex queries (100/min)
+    # - unified-holdings: Complex queries with multiple joins and sorting (50/min)
+    # - unified-performance: Complex historical calculations (50/min)
+    # - unified-summary: Complex aggregation with multiple calculations (50/min)
     rate_limit_unified_overview: PositiveInt = Field(
         100,
         env="RATE_LIMIT_UNIFIED_OVERVIEW",

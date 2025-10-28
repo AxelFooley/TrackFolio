@@ -190,6 +190,12 @@ async def startup_event():
 async def shutdown_event():
     """Run on application shutdown."""
     logger.info("Shutting down Portfolio Tracker API")
+    # Clean up Redis connection
+    try:
+        from app.services.redis_client import close_redis_client
+        close_redis_client()
+    except Exception as e:
+        logger.warning(f"Error during Redis cleanup: {e}")
 
 
 if __name__ == "__main__":

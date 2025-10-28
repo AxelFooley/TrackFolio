@@ -60,3 +60,20 @@ def reset_redis_client() -> None:
     """
     global _redis_client
     _redis_client = None
+
+
+def close_redis_client() -> None:
+    """Close the global Redis client connection.
+
+    Properly closes the Redis connection to avoid connection leaks.
+    Should be called during application shutdown.
+    """
+    global _redis_client
+    if _redis_client:
+        try:
+            _redis_client.close()
+            logger.debug("Redis client closed successfully")
+        except Exception as e:
+            logger.warning(f"Error closing Redis client: {e}")
+        finally:
+            _redis_client = None

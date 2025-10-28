@@ -9,7 +9,7 @@ Rate limit info is stored per request in state for use by middleware or inline h
 import functools
 import logging
 import time
-from typing import Callable, Optional, Any, Awaitable
+from typing import Callable, Optional, Any, Awaitable, Tuple
 from fastapi import HTTPException, Request
 
 from app.config import settings
@@ -70,7 +70,7 @@ async def check_rate_limit(
     endpoint: str,
     requests_limit: int,
     window_seconds: int
-) -> tuple[int, int, int]:
+) -> Tuple[int, int, int]:
     """
     Check if a request is within the rate limit.
 
@@ -91,8 +91,10 @@ async def check_rate_limit(
         reset_time = int(time.time()) + window_seconds
         return (requests_limit, requests_limit, reset_time)
 
-    # Get user ID from request (using client IP as fallback)
-    user_id = request.client.host if request.client else "anonymous"
+    # Prefer authenticated user ID, fallback to IP address
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        user_id = request.client.host if request.client else "anonymous"
 
     redis_client = get_redis_client()
 
@@ -120,12 +122,15 @@ async def check_rate_limit(
         # Initialize or check reset
         if current_count is None or reset_time is None:
             # First request in window or window expired
-            # Use atomic INCR to avoid race condition where multiple requests
-            # both see None and both initialize to 1
+            # Use atomic pipeline to prevent race condition where multiple requests
+            # both see None and both initialize to 1 (INCR + EXPIRE + SETEX must be atomic)
             reset_time_unix = current_time + window_seconds
-            redis_client.incr(rate_limit_key)
-            redis_client.expire(rate_limit_key, window_seconds)
-            redis_client.setex(reset_time_key, window_seconds, str(reset_time_unix))
+            pipe = redis_client.pipeline()
+            pipe.incr(rate_limit_key)
+            pipe.expire(rate_limit_key, window_seconds)
+            pipe.setex(reset_time_key, window_seconds, str(reset_time_unix))
+            pipe.execute()
+            logger.debug(f"Rate limit window reset for {endpoint} user {user_id}")
             remaining = requests_limit - 1
             limit = requests_limit
             return (remaining, limit, reset_time_unix)
@@ -134,11 +139,14 @@ async def check_rate_limit(
 
         # Check if window has expired
         if current_time >= reset_time_unix:
-            # Window expired, reset counter using atomic INCR
+            # Window expired, reset counter using atomic pipeline
             reset_time_unix = current_time + window_seconds
-            redis_client.incr(rate_limit_key)
-            redis_client.expire(rate_limit_key, window_seconds)
-            redis_client.setex(reset_time_key, window_seconds, str(reset_time_unix))
+            pipe = redis_client.pipeline()
+            pipe.incr(rate_limit_key)
+            pipe.expire(rate_limit_key, window_seconds)
+            pipe.setex(reset_time_key, window_seconds, str(reset_time_unix))
+            pipe.execute()
+            logger.debug(f"Rate limit window reset for {endpoint} user {user_id}")
             remaining = requests_limit - 1
             limit = requests_limit
             return (remaining, limit, reset_time_unix)
@@ -159,6 +167,11 @@ async def check_rate_limit(
         redis_client.incr(rate_limit_key)
         remaining = requests_limit - (count + 1)
         limit = requests_limit
+
+        logger.debug(
+            f"Rate limit check passed for {endpoint} (user: {user_id}, "
+            f"remaining: {remaining}, limit: {limit})"
+        )
 
         return (remaining, limit, reset_time_unix)
 
