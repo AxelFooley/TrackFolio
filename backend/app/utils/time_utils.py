@@ -107,6 +107,10 @@ def get_last_n_days(n: int) -> Tuple[date, date]:
     """
     Get date range for last n days.
 
+    This function uses ValueError instead of HTTPException because it may be called
+    in non-API contexts (e.g., background tasks, service layer code). API endpoints
+    should catch and convert ValueError to HTTPException if needed.
+
     Args:
         n: Number of days (must be positive)
 
@@ -114,7 +118,7 @@ def get_last_n_days(n: int) -> Tuple[date, date]:
         Tuple of (start_date, end_date) representing last n days
 
     Raises:
-        ValueError: If n is not positive
+        ValueError: If n is not positive (internal error for non-API contexts)
 
     Examples:
         >>> start, end = get_last_n_days(7)

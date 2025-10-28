@@ -1080,6 +1080,8 @@ async def get_crypto_portfolio_performance(
             logger.info(f"API: Adjusted end_date from {original_end_date} to {end_date} for crypto market data availability (2-day lag)")
 
         # For ALL range, set a reasonable start_date
+        # NOTE: start_date calculation intentionally uses the adjusted end_date (with 2-day lag)
+        # to ensure consistent date ranges for crypto market data availability
         if start_date is None:
             start_date = end_date - timedelta(days=365 * 5)  # 5 years max
 
