@@ -375,3 +375,313 @@ class TestEdgeCases:
         date_str = future.strftime("%Y-%m-%d")
         result = parse_date_string(date_str)
         assert result == future
+
+
+class TestGetLastNDaysBoundary:
+    """Comprehensive boundary tests for get_last_n_days function."""
+
+    def test_last_1_day_semantics(self):
+        """Test that get_last_n_days(1) returns yesterday (1 day of past data)."""
+        start, end = get_last_n_days(1)
+        today = date.today()
+        # Semantics: "last 1 day" = yesterday to today [yesterday, today)
+        assert start == today - timedelta(days=1)
+        assert end == today
+        assert (end - start).days == 1
+
+    def test_last_1_day_date_difference(self):
+        """Test that get_last_n_days(1) spans 1 day (yesterday to today)."""
+        start, end = get_last_n_days(1)
+        # Yesterday to today is a 1-day span
+        assert (end - start).days == 1
+
+    def test_last_2_days_semantics(self):
+        """Test that get_last_n_days(2) returns 2 days of historical data."""
+        start, end = get_last_n_days(2)
+        today = date.today()
+        # Semantics: "last 2 days" = 2 days ago to today [2d ago, today)
+        assert end == today
+        assert start == today - timedelta(days=2)
+        # Verify the date difference
+        assert (end - start).days == 2
+
+    def test_last_n_days_always_ends_on_today(self):
+        """Test that end_date is always today."""
+        for n in [1, 7, 30, 90, 365]:
+            start, end = get_last_n_days(n)
+            assert end == date.today()
+
+    def test_last_n_days_start_before_end(self):
+        """Test that start_date is always before end_date."""
+        for n in [1, 2, 7, 30, 365]:
+            start, end = get_last_n_days(n)
+            assert start < end
+
+    def test_last_n_days_correct_calculation(self):
+        """Test that start_date = today - timedelta(days=n)."""
+        for n in [1, 7, 30, 90, 180, 365]:
+            start, end = get_last_n_days(n)
+            expected_start = date.today() - timedelta(days=n)
+            assert start == expected_start
+
+    def test_last_n_days_spans_correct_interval(self):
+        """Test that the interval spans exactly n days."""
+        for n in [1, 7, 30, 90, 365]:
+            start, end = get_last_n_days(n)
+            # The difference should be exactly n days
+            assert (end - start).days == n
+
+    def test_last_n_days_spans_month_boundary(self):
+        """Test that last N days correctly spans month boundaries."""
+        # 31-day range should definitely cross month boundary
+        start, end = get_last_n_days(31)
+        # Verify month difference (may span 1 or 2 months)
+        assert (end.month != start.month) or (end.year != start.year)
+
+    def test_last_n_days_spans_year_boundary(self):
+        """Test that last N days can span year boundary."""
+        # 365-day range from today can span year boundary if run near year-end
+        start, end = get_last_n_days(365)
+        assert end == date.today()
+        assert (end - start).days == 365
+
+    def test_last_n_days_large_number(self):
+        """Test get_last_n_days with large number of days."""
+        start, end = get_last_n_days(3650)  # ~10 years
+        assert end == date.today()
+        assert (end - start).days == 3650
+        assert start < end
+
+
+class TestParseTimeRangeBoundary:
+    """Comprehensive boundary tests for parse_time_range function."""
+
+    def test_parse_1d_returns_1_day_data(self):
+        """Test that '1D' returns 1 day of historical data."""
+        start, end = parse_time_range("1D")
+        today = date.today()
+        # "1D" = yesterday to today [yesterday, today) = 1 day of data
+        assert end == today
+        assert start == today - timedelta(days=1)
+        assert (end - start).days == 1
+
+    def test_parse_1w_is_7_day_range(self):
+        """Test that '1W' returns a 7-day range."""
+        start, end = parse_time_range("1W")
+        # Verify it's exactly 7 days
+        assert (end - start).days == 7
+
+    def test_all_ranges_end_on_today(self):
+        """Test that all range types end on today's date."""
+        today = date.today()
+        ranges = ["1D", "1W", "1M", "3M", "6M", "1Y", "YTD"]
+        for range_str in ranges:
+            start, end = parse_time_range(range_str)
+            assert end == today, f"Range {range_str} should end on today"
+
+    def test_all_ranges_start_before_or_equal_end(self):
+        """Test that start_date is always <= end_date."""
+        ranges = ["1D", "1W", "1M", "3M", "6M", "1Y", "YTD"]
+        for range_str in ranges:
+            start, end = parse_time_range(range_str)
+            assert start <= end, f"Range {range_str} has start > end"
+
+    def test_ytd_when_jan_1(self):
+        """Test YTD edge case: when today is January 1."""
+        # This test uses current data, but verifies the logic
+        start, end = parse_time_range("YTD")
+        # YTD should always span from Jan 1 to today
+        assert start.month == 1
+        assert start.day == 1
+        assert end == date.today()
+        # On Jan 1, start should equal end
+        if date.today().month == 1 and date.today().day == 1:
+            assert start == end
+
+    def test_all_ranges_produce_valid_tuples(self):
+        """Test that all range types produce valid (start, end) tuples."""
+        ranges = ["1D", "1W", "1M", "3M", "6M", "1Y", "YTD"]
+        for range_str in ranges:
+            start, end = parse_time_range(range_str)
+            assert isinstance(start, date), f"Range {range_str} start is not a date"
+            assert isinstance(end, date), f"Range {range_str} end is not a date"
+            assert start <= end, f"Range {range_str} start > end"
+
+    def test_parse_all_returns_none_tuple(self):
+        """Test that 'ALL' range returns (None, None)."""
+        start, end = parse_time_range("ALL")
+        assert start is None
+        assert end is None
+
+    def test_range_accuracy_1m(self):
+        """Test that '1M' is exactly 30 days."""
+        start, end = parse_time_range("1M")
+        assert (end - start).days == 30
+
+    def test_range_accuracy_3m(self):
+        """Test that '3M' is exactly 90 days."""
+        start, end = parse_time_range("3M")
+        assert (end - start).days == 90
+
+    def test_range_accuracy_6m(self):
+        """Test that '6M' is exactly 180 days."""
+        start, end = parse_time_range("6M")
+        assert (end - start).days == 180
+
+    def test_range_accuracy_1y(self):
+        """Test that '1Y' is exactly 365 days."""
+        start, end = parse_time_range("1Y")
+        assert (end - start).days == 365
+
+
+class TestParseDateStringBoundary:
+    """Comprehensive boundary tests for parse_date_string function."""
+
+    def test_century_boundary_1999(self):
+        """Test parsing century boundary date (Dec 31, 1999)."""
+        result = parse_date_string("1999-12-31")
+        assert result == date(1999, 12, 31)
+
+    def test_century_boundary_2000(self):
+        """Test parsing century boundary date (Jan 1, 2000)."""
+        result = parse_date_string("2000-01-01")
+        assert result == date(2000, 1, 1)
+
+    def test_month_boundary_january(self):
+        """Test parsing first day of January."""
+        result = parse_date_string("2024-01-01")
+        assert result == date(2024, 1, 1)
+
+    def test_month_boundary_january_31(self):
+        """Test parsing last day of January."""
+        result = parse_date_string("2024-01-31")
+        assert result == date(2024, 1, 31)
+
+    def test_month_boundary_february_leap_year(self):
+        """Test parsing last day of February in leap year."""
+        result = parse_date_string("2024-02-29")
+        assert result == date(2024, 2, 29)
+
+    def test_month_boundary_february_non_leap(self):
+        """Test parsing Feb 28 in non-leap year."""
+        result = parse_date_string("2023-02-28")
+        assert result == date(2023, 2, 28)
+
+    def test_month_boundary_december_31(self):
+        """Test parsing last day of year (Dec 31)."""
+        result = parse_date_string("2024-12-31")
+        assert result == date(2024, 12, 31)
+
+    def test_minimum_valid_date(self):
+        """Test parsing minimum valid date (0001-01-01)."""
+        result = parse_date_string("0001-01-01")
+        assert result == date(1, 1, 1)
+
+    def test_maximum_valid_date(self):
+        """Test parsing maximum valid date (9999-12-31)."""
+        result = parse_date_string("9999-12-31")
+        assert result == date(9999, 12, 31)
+
+    def test_single_digit_months_with_leading_zeros(self):
+        """Test parsing single-digit months with leading zeros."""
+        test_cases = [
+            ("2024-01-15", date(2024, 1, 15)),
+            ("2024-02-15", date(2024, 2, 15)),
+            ("2024-09-15", date(2024, 9, 15)),
+        ]
+        for date_str, expected in test_cases:
+            result = parse_date_string(date_str)
+            assert result == expected
+
+    def test_single_digit_days_with_leading_zeros(self):
+        """Test parsing single-digit days with leading zeros."""
+        test_cases = [
+            ("2024-01-01", date(2024, 1, 1)),
+            ("2024-01-05", date(2024, 1, 5)),
+            ("2024-01-09", date(2024, 1, 9)),
+        ]
+        for date_str, expected in test_cases:
+            result = parse_date_string(date_str)
+            assert result == expected
+
+    def test_invalid_month_13(self):
+        """Test that month 13 is rejected."""
+        with pytest.raises(HTTPException):
+            parse_date_string("2024-13-01")
+
+    def test_invalid_month_0(self):
+        """Test that month 0 is rejected."""
+        with pytest.raises(HTTPException):
+            parse_date_string("2024-00-01")
+
+    def test_invalid_day_32(self):
+        """Test that day 32 is rejected."""
+        with pytest.raises(HTTPException):
+            parse_date_string("2024-01-32")
+
+    def test_invalid_day_0(self):
+        """Test that day 0 is rejected."""
+        with pytest.raises(HTTPException):
+            parse_date_string("2024-01-00")
+
+    def test_invalid_february_30(self):
+        """Test that Feb 30 is rejected."""
+        with pytest.raises(HTTPException):
+            parse_date_string("2024-02-30")
+
+    def test_leap_year_2024(self):
+        """Test Feb 29 in leap year 2024."""
+        result = parse_date_string("2024-02-29")
+        assert result == date(2024, 2, 29)
+
+    def test_leap_year_2000(self):
+        """Test Feb 29 in leap year 2000."""
+        result = parse_date_string("2000-02-29")
+        assert result == date(2000, 2, 29)
+
+    def test_non_leap_year_2023(self):
+        """Test that Feb 29 is rejected in non-leap year 2023."""
+        with pytest.raises(HTTPException):
+            parse_date_string("2023-02-29")
+
+    def test_non_leap_year_2100(self):
+        """Test that Feb 29 is rejected in non-leap year 2100."""
+        # 2100 is not a leap year (divisible by 100 but not by 400)
+        with pytest.raises(HTTPException):
+            parse_date_string("2100-02-29")
+
+    def test_leap_year_2400(self):
+        """Test Feb 29 in leap year 2400."""
+        result = parse_date_string("2400-02-29")
+        assert result == date(2400, 2, 29)
+
+    def test_all_30_day_months(self):
+        """Test parsing last day of 30-day months."""
+        months_30 = [4, 6, 9, 11]  # April, June, Sept, Nov
+        for month in months_30:
+            date_str = f"2024-{month:02d}-30"
+            result = parse_date_string(date_str)
+            assert result.month == month
+            assert result.day == 30
+
+    def test_all_31_day_months(self):
+        """Test parsing last day of 31-day months."""
+        months_31 = [1, 3, 5, 7, 8, 10, 12]
+        for month in months_31:
+            date_str = f"2024-{month:02d}-31"
+            result = parse_date_string(date_str)
+            assert result.month == month
+            assert result.day == 31
+
+    def test_various_formats(self):
+        """Test parsing various valid date formats."""
+        test_cases = [
+            # (date_str, format, expected)
+            ("2024-01-15", "%Y-%m-%d", date(2024, 1, 15)),
+            ("01/15/2024", "%m/%d/%Y", date(2024, 1, 15)),
+            ("15-01-2024", "%d-%m-%Y", date(2024, 1, 15)),
+            ("15.01.2024", "%d.%m.%Y", date(2024, 1, 15)),
+        ]
+        for date_str, fmt, expected in test_cases:
+            result = parse_date_string(date_str, fmt)
+            assert result == expected
