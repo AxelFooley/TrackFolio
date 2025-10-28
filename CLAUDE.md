@@ -221,9 +221,13 @@ Location: `/backend/app/`
 - Time-Weighted Return (TWR) calculation
 - Internal Rate of Return (IRR) calculation
 
-**currency_converter.py**
-- Foreign exchange rate management
-- EUR/USD conversion
+**fx_rate_service.py** - Foreign exchange rate management
+- Methods: `get_current_rate()`, `get_historical_rate()`, `convert_amount()`
+- Redis-backed caching with 1-hour TTL (configurable via FX_CACHE_TTL_HOURS)
+- 5-tier fallback strategy: Yahoo Finance → Redis → Inverse rate → Hardcoded → 1.0
+- Currency code validation (3-letter uppercase ISO 4217)
+- Known limitation: Historical rates not fully implemented (uses current rate for all dates)
+- Used by portfolio_aggregator.py for multi-currency portfolio aggregation
 
 **ticker_mapper.py**
 - Symbol-to-ISIN mapping

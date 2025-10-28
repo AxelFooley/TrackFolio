@@ -14,7 +14,7 @@ Key responsibilities:
 """
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any
 import logging
 import json
 
@@ -78,7 +78,6 @@ class PortfolioAggregator:
         self.fx_service = get_fx_service()
         self._redis_client = None
         self._redis_initialized = False
-        self._fx_rates_cache: Dict[str, Tuple[Decimal, datetime]] = {}
 
     @property
     def redis_client(self):

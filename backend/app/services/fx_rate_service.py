@@ -14,10 +14,9 @@ Features:
 """
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict
 import logging
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 try:
     import redis
@@ -31,6 +30,10 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # Default fallback rates (approximate current market rates)
+# IMPORTANT: Fallback rates last updated 2025-10-27
+# WARNING: These rates will become stale if price fetching APIs are unavailable for extended periods.
+# In production, external APIs (Yahoo Finance) should be the primary source and fallback should
+# only be used for short outages. Monitor rate freshness in logs when fallback is activated.
 DEFAULT_FALLBACK_RATES = {
     ("USD", "EUR"): Decimal("0.92"),
     ("EUR", "USD"): Decimal("1.09"),
@@ -57,12 +60,20 @@ class FXRateService:
         """Initialize the FX rate service."""
         self._redis_client = None
         self._redis_initialized = False
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="fx_rate")
-        self._last_fetch_time: Dict[str, datetime] = {}
 
     @property
     def redis_client(self):
-        """Lazy initialize Redis client for caching."""
+        """
+        Lazy initialize Redis client for caching.
+
+        NOTE: This property is thread-safe in practice because:
+        (1) FXRateService is instantiated as a single global instance
+        (2) Initialization happens once at startup (not concurrent with application initialization)
+        (3) AsyncIO ensures single-threaded execution within event loop
+
+        This avoids the overhead of asyncio.Lock() for an initialization pattern that occurs
+        only once per application lifetime.
+        """
         if redis_available and not self._redis_initialized:
             try:
                 self._redis_client = redis.from_url(settings.redis_url, decode_responses=True)
@@ -139,9 +150,12 @@ class FXRateService:
         """
         Get the historical exchange rate for a specific date.
 
-        Note: Yahoo Finance does not provide historical FX data directly.
-        This implementation attempts to fetch the rate but falls back to
-        current rate with a warning.
+        FIXME: Historical FX rates not fully implemented
+        Currently returns current rate for all historical dates, which causes inaccuracy
+        in portfolio performance calculations when currency values fluctuate significantly.
+        This is a known limitation - historical FX rates from Yahoo Finance or ECB APIs
+        should be integrated in a future enhancement to provide accurate point-in-time
+        currency conversion.
 
         Args:
             from_currency: Source currency code
@@ -149,17 +163,18 @@ class FXRateService:
             target_date: The date to fetch the rate for
 
         Returns:
-            Exchange rate as Decimal, or None if not available
+            Exchange rate as Decimal (currently always current rate, not truly historical)
         """
-        # Yahoo Finance doesn't have reliable historical FX data
-        # For now, use current rate as approximation
+        # FIXME: Replace with true historical data source (ECB, Yahoo historical, etc)
+        # This approximation causes portfolio calculations to be inaccurate
         logger.warning(
-            f"Historical FX rates not fully implemented. Using current rate for {target_date}"
+            f"Historical FX rates not implemented. Using current rate (not {target_date}'s actual rate). "
+            f"This causes inaccuracy in portfolio performance when currency values fluctuate significantly."
         )
         try:
             return await self.get_current_rate(from_currency, to_currency)
         except Exception as e:
-            logger.error(f"Failed to get historical rate for {target_date}: {e}")
+            logger.error(f"Failed to get rate for {target_date}: {e}")
             return None
 
     async def convert_amount(
@@ -277,6 +292,16 @@ class FXRateService:
     ) -> Optional[Decimal]:
         """Fetch FX rate from Yahoo Finance."""
         try:
+            # Validate currency codes (must be 3-letter uppercase ISO 4217 codes)
+            if not (isinstance(from_currency, str) and len(from_currency) == 3 and from_currency.isupper()):
+                raise ValueError(
+                    f"Invalid 'from' currency code: {from_currency} (must be 3-letter uppercase code)"
+                )
+            if not (isinstance(to_currency, str) and len(to_currency) == 3 and to_currency.isupper()):
+                raise ValueError(
+                    f"Invalid 'to' currency code: {to_currency} (must be 3-letter uppercase code)"
+                )
+
             # Use Yahoo Finance FX ticker format: XXXYYYZZZ where
             # XXX = from_currency, YYY = to_currency, ZZZ = exchange
             # For EUR/USD, the Yahoo Finance ticker is EURUSD=X
@@ -301,27 +326,47 @@ class FXRateService:
 
             return rate_decimal
 
+        except ValueError as ve:
+            logger.error(f"Currency code validation error: {ve}")
+            return None
         except Exception as e:
             logger.error(f"Error fetching rate from Yahoo Finance: {e}")
             return None
 
     def _get_fallback_rate(self, from_currency: str, to_currency: str) -> Decimal:
-        """Get fallback rate from default rates or inverse."""
+        """
+        Get fallback rate from default rates or inverse.
+
+        WARNING: Using fallback rates indicates API failure. Fallback rates are static
+        and may become stale during extended API outages. Check logs for the timestamp
+        when this fallback was activated.
+        """
         # Check direct mapping
         key = (from_currency, to_currency)
         if key in DEFAULT_FALLBACK_RATES:
-            return DEFAULT_FALLBACK_RATES[key]
+            rate = DEFAULT_FALLBACK_RATES[key]
+            logger.warning(
+                f"Using fallback rate for {from_currency}/{to_currency}: {rate} "
+                f"(fallback rates may be stale - last updated 2025-10-27)"
+            )
+            return rate
 
         # Check inverse mapping
         inverse_key = (to_currency, from_currency)
         if inverse_key in DEFAULT_FALLBACK_RATES:
             inverse_rate = DEFAULT_FALLBACK_RATES[inverse_key]
             if inverse_rate > 0:
-                return Decimal(1) / inverse_rate
+                rate = Decimal(1) / inverse_rate
+                logger.warning(
+                    f"Using inverse fallback rate for {from_currency}/{to_currency}: {rate} "
+                    f"(fallback rates may be stale - last updated 2025-10-27)"
+                )
+                return rate
 
         # Default to 1.0 if no fallback available
         logger.warning(
-            f"No fallback rate available for {from_currency}/{to_currency}, using 1.0"
+            f"No fallback rate available for {from_currency}/{to_currency}, using 1.0 "
+            f"(this may cause inaccurate conversions)"
         )
         return Decimal("1.0")
 

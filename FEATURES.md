@@ -557,14 +557,25 @@ TrackFolio stores: avg_cost = $100 (current)
 ### Exchange Rates
 
 **Automatic Conversion:**
-- EUR ↔ USD: Updated daily from Yahoo Finance
-- Other pairs: Supported when needed
-- Historical rates: Stored for accurate cost basis
+- Primary source: Yahoo Finance (real-time updates)
+- Multi-currency pair support (USD, EUR, GBP, CHF, JPY, CAD, AUD, etc.)
+- Automatic fallback strategies for API outages
+- Base currency for unified portfolio: EUR (all values normalized)
+
+**Caching & Performance:**
+- Redis-backed caching with 1-hour TTL
+- 5-tier fallback strategy: Yahoo Finance → Redis → Inverse rate → Hardcoded → 1.0
+- Graceful degradation if all sources unavailable (uses 1.0 rate)
+
+**Known Limitations:**
+- Historical FX rates: Currently uses current rate for all historical dates (future enhancement planned)
+  - This may cause slight inaccuracy in portfolio performance calculations when currency values fluctuate significantly
+  - Recommended: Use current rates for recent portfolios until historical rates implemented
 
 **Storage:**
-- Date-based exchange rate history
-- Used for retroactive conversions
-- 24-hour cache on current rate
+- Current rates cached in Redis (expires hourly)
+- Used for real-time conversions
+- Fallback rates updated periodically (currently 2025-10-27)
 
 ### Transaction Handling
 
