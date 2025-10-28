@@ -135,8 +135,6 @@ def test_unified_movers_schema():
 
 def test_unified_summary_schema():
     """Test UnifiedSummary schema creation."""
-    from decimal import Decimal
-
     overview = UnifiedOverview(
         total_value="50000.00",
         traditional_value="30000.00",
