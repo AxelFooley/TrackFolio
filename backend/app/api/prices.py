@@ -12,6 +12,7 @@ from app.schemas.price import RealtimePriceResponse, RealtimePricesResponse
 from app.services.price_fetcher import PriceFetcher
 from app.services.price_history_manager import price_history_manager
 from app.services.system_state_manager import SystemStateManager
+from app.utils.time_utils import parse_date_string
 
 logger = logging.getLogger(__name__)
 
@@ -52,16 +53,10 @@ async def get_price_history(
         parsed_end_date = None
 
         if start_date:
-            try:
-                parsed_start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD")
+            parsed_start_date = parse_date_string(start_date)
 
         if end_date:
-            try:
-                parsed_end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid end_date format. Use YYYY-MM-DD")
+            parsed_end_date = parse_date_string(end_date)
 
         # If days is specified, calculate date range
         if days and not start_date:

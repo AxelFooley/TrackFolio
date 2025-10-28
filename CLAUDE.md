@@ -188,6 +188,32 @@ Location: `/backend/app/`
 - `GET /api/blockchain/wallet/{address}/transactions` - Wallet transactions
 - `GET /api/blockchain/status` - Service status
 
+### Utilities Layer (`utils/`)
+
+**time_utils.py** - Centralized date and time utilities (extracts duplicated logic)
+- `parse_time_range(range_str: str) -> Tuple[Optional[date], Optional[date]]` - Convert time range strings to date tuples
+  - Supported formats: '1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'
+  - Returns tuple of (start_date, end_date) for the requested range
+  - Raises HTTPException for invalid ranges (API-safe)
+  - Used in portfolio.py, crypto.py, and other API endpoints
+
+- `parse_date_string(date_str: str, format_str: str = "%Y-%m-%d") -> date` - Parse date strings with validation
+  - Supports ISO format (YYYY-MM-DD) and custom format strings
+  - Raises HTTPException for invalid dates (API-safe)
+  - Used in price_updates.py and other services
+
+- `get_last_n_days(n: int) -> Tuple[date, date]` - Get date range for last N days
+  - Raises ValueError for invalid input (use in internal, non-API contexts)
+  - Used in tasks and service layer code
+  - ValueError used instead of HTTPException for compatibility with non-API contexts
+
+- `get_year_to_date() -> Tuple[date, date]` - Get YTD date range
+  - Returns (January 1 of current year, today)
+
+- `get_date_range_description(start_date: Optional[date], end_date: Optional[date]) -> str` - Human-readable description
+  - Returns formatted string like "Jan 1, 2024 to Dec 31, 2024"
+  - Handles partial ranges (None values for open-ended ranges)
+
 ### Services Layer (`services/`)
 
 **price_fetcher.py**
