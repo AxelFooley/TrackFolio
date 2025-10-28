@@ -14,6 +14,7 @@ from app.database import SyncSessionLocal
 from app.models import Position, PriceHistory
 from app.services.price_fetcher import PriceFetcher
 from app.services.system_state_manager import SystemStateManager
+from app.utils.time_utils import get_last_n_days, parse_date_string
 
 logger = logging.getLogger(__name__)
 
@@ -332,8 +333,15 @@ def fetch_prices_for_ticker(self, ticker: str, isin: str = None, start_date: str
 
     try:
         # Parse dates
-        start = date.fromisoformat(start_date) if start_date else date.today() - timedelta(days=365)
-        end = date.fromisoformat(end_date) if end_date else date.today()
+        if start_date:
+            start = parse_date_string(start_date)
+        else:
+            start, _ = get_last_n_days(365)
+
+        if end_date:
+            end = parse_date_string(end_date)
+        else:
+            end = date.today()
 
         logger.info(f"Fetching prices for {ticker} from {start} to {end}")
 
