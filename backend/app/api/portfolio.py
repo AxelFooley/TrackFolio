@@ -527,13 +527,7 @@ async def get_unified_holdings(
     """
     try:
         aggregator = PortfolioAggregator(db)
-        all_holdings = await aggregator.get_unified_holdings()
-
-        # Get total count before pagination
-        total_count = len(all_holdings)
-
-        # Apply pagination
-        paginated_holdings = all_holdings[skip : skip + limit]
+        paginated_holdings, total_count = await aggregator.get_unified_holdings(skip=skip, limit=limit)
 
         # Calculate has_more flag
         has_more = (skip + limit) < total_count
