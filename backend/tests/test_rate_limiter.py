@@ -105,23 +105,70 @@ class TestCheckRateLimitRedisUnavailable:
             assert limit == 100
             assert reset_time > int(time.time())
 
-    def test_redis_connection_error_handling_code_review(self):
-        """Code review test: get_redis_client returns None gracefully on connection error."""
-        # redis_client.py lines 43-51 show exception handling that returns None
-        # rate_limiter.py lines 99-104 check for None and allow request with dummy values
-        # This graceful degradation ensures service availability during Redis outages
-        pass
+    @pytest.mark.asyncio
+    async def test_redis_connection_error_handling(self):
+        """Test that Redis connection errors are handled gracefully."""
+        mock_redis = MagicMock()
+        mock_redis.pipeline.side_effect = Exception("Connection refused")
+
+        with patch("app.utils.rate_limiter.get_redis_client", return_value=mock_redis):
+            mock_request = MagicMock(spec=Request)
+            mock_request.client.host = "192.168.1.1"
+
+            # Should not raise exception, but instead allow request
+            remaining, limit, reset_time = await check_rate_limit(
+                request=mock_request,
+                endpoint="test-endpoint",
+                requests_limit=100,
+                window_seconds=60
+            )
+
+            # Should return dummy values on error
+            assert remaining == 100
+            assert limit == 100
+            assert reset_time > int(time.time())
 
 
 class TestCheckRateLimitEnforcement:
     """Test rate limit enforcement."""
 
-    def test_rate_limit_exceeded_raises_exception_code_review(self):
-        """Code review test: Rate limit exceeded raises RateLimitExceeded."""
-        # Lines 149-156 in rate_limiter.py check if count >= requests_limit
-        # and raise RateLimitExceeded with appropriate retry_after header
-        # This prevents brute force attacks by temporarily blocking requests
-        pass
+    @pytest.mark.asyncio
+    async def test_rate_limit_exceeded_raises_exception(self):
+        """Test that rate limit exceeded raises RateLimitExceeded exception."""
+        mock_redis = MagicMock()
+        current_time = int(time.time())
+        reset_time = str(current_time + 60)
+
+        # Simulate count >= requests_limit
+        mock_redis.pipeline.return_value.execute.return_value = [
+            b"100",
+            reset_time.encode()
+        ]
+
+        with patch("app.utils.rate_limiter.get_redis_client", return_value=mock_redis):
+            with patch("app.utils.rate_limiter.int") as mock_int:
+                def int_side_effect(x):
+                    if isinstance(x, bytes):
+                        return int(x.decode())
+                    return int(x)
+
+                mock_int.side_effect = int_side_effect
+
+                mock_request = MagicMock(spec=Request)
+                mock_request.client.host = "192.168.1.1"
+
+                # Should raise RateLimitExceeded
+                with pytest.raises(RateLimitExceeded) as exc_info:
+                    await check_rate_limit(
+                        request=mock_request,
+                        endpoint="test-endpoint",
+                        requests_limit=100,
+                        window_seconds=60
+                    )
+
+                # Verify retry_after is set
+                assert exc_info.value.retry_after > 0
+                assert exc_info.value.status_code == 429
 
     @pytest.mark.asyncio
     async def test_first_request_succeeds(self):
@@ -223,15 +270,32 @@ class TestRateLimitUserIdentification:
             assert "authenticated_user_123" in key
             assert "192.168.1.1" not in key
 
-    def test_user_identification_logic_code_review(self):
-        """Code review test: User identification checks for user_id, then falls back to IP."""
-        # This is a code review test verifying the implementation
-        # Lines 94-97 in rate_limiter.py implement:
-        # 1. getattr(request.state, "user_id", None) - prefer authenticated user
-        # 2. Fallback to request.client.host if no user_id
-        # 3. Fallback to "anonymous" if no client
-        # This ensures users can't bypass rate limits via NAT by rotating IPs
-        pass
+    @pytest.mark.asyncio
+    async def test_anonymous_user_fallback(self):
+        """Test that anonymous user falls back to IP address for rate limiting."""
+        mock_redis = MagicMock()
+        mock_redis.pipeline.return_value.execute.return_value = [None, None]
+
+        with patch("app.utils.rate_limiter.get_redis_client", return_value=mock_redis):
+            # No user_id in state, should use IP
+            class FakeState:
+                pass
+
+            mock_request = MagicMock(spec=Request)
+            mock_request.client.host = "203.0.113.1"
+            mock_request.state = FakeState()
+
+            await check_rate_limit(
+                request=mock_request,
+                endpoint="test-endpoint",
+                requests_limit=100,
+                window_seconds=60
+            )
+
+            # Verify that IP address was used in rate limit key
+            call_args = mock_redis.pipeline.return_value.incr.call_args
+            key = call_args[0][0] if call_args[0] else call_args[1].get("key")
+            assert "203.0.113.1" in key
 
 
 class TestRateLimitAtomicity:
@@ -296,6 +360,44 @@ class TestRateLimitAtomicity:
 
                 # Verify pipeline was used on reset
                 assert mock_redis.pipeline.called
+
+    @pytest.mark.asyncio
+    async def test_active_window_increment_uses_atomic_pipeline(self):
+        """Test that incrementing counter in active window uses atomic pipeline."""
+        mock_redis = MagicMock()
+        current_time = int(time.time())
+        reset_time = str(current_time + 60)
+
+        # Simulate counter < limit in active window
+        mock_redis.pipeline.return_value.execute.return_value = [
+            b"50",
+            reset_time.encode()
+        ]
+
+        with patch("app.utils.rate_limiter.get_redis_client", return_value=mock_redis):
+            with patch("app.utils.rate_limiter.int") as mock_int:
+                def int_side_effect(x):
+                    if isinstance(x, bytes):
+                        return int(x.decode())
+                    return int(x)
+
+                mock_int.side_effect = int_side_effect
+
+                mock_request = MagicMock(spec=Request)
+                mock_request.client.host = "192.168.1.1"
+
+                await check_rate_limit(
+                    request=mock_request,
+                    endpoint="test-endpoint",
+                    requests_limit=100,
+                    window_seconds=60
+                )
+
+                # Verify pipeline was used for atomic increment (prevents race condition)
+                assert mock_redis.pipeline.called
+                pipeline = mock_redis.pipeline.return_value
+                assert pipeline.incr.called
+                assert pipeline.execute.called
 
 
 class TestRateLimitEdgeCases:
@@ -457,12 +559,26 @@ class TestRateLimitMiddleware:
         assert response.headers.get("X-RateLimit-Remaining") == "50"
         assert response.headers.get("X-RateLimit-Reset") == "1234567890"
 
-    def test_middleware_header_logic_code_review(self):
-        """Code review test: Middleware only adds headers when rate limit attributes are set."""
-        # The middleware (lines 264-267) uses hasattr() to check for attributes
-        # before adding headers. This ensures headers are only added when the
-        # decorator has set them, preventing spurious header injection.
-        pass
+    @pytest.mark.asyncio
+    async def test_middleware_skips_headers_when_rate_limit_not_set(self):
+        """Test that middleware skips header injection when rate limit not set."""
+        async def mock_call_next(request):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"status": "ok"})
+
+        mock_request = MagicMock(spec=Request)
+        # Create a state object without rate limit attributes
+        class MockState:
+            pass
+        mock_request.state = MockState()
+
+        response = await rate_limit_middleware(mock_request, mock_call_next)
+
+        # Headers should NOT be added (case-insensitive check)
+        headers_lower = {k.lower(): v for k, v in response.headers.items()}
+        assert "x-ratelimit-limit" not in headers_lower
+        assert "x-ratelimit-remaining" not in headers_lower
+        assert "x-ratelimit-reset" not in headers_lower
 
 
 class TestGetRateLimitInfo:

@@ -9,7 +9,7 @@ Rate limit info is stored per request in state for use by middleware or inline h
 import functools
 import logging
 import time
-from typing import Callable, Optional, Any, Awaitable, Tuple
+from typing import Callable, Optional, Any, Awaitable
 from fastapi import HTTPException, Request
 
 from app.config import settings
@@ -70,7 +70,7 @@ async def check_rate_limit(
     endpoint: str,
     requests_limit: int,
     window_seconds: int
-) -> Tuple[int, int, int]:
+) -> tuple[int, int, int]:
     """
     Check if a request is within the rate limit.
 
@@ -163,8 +163,12 @@ async def check_rate_limit(
             )
             raise RateLimitExceeded(retry_after=retry_after)
 
-        # Increment counter
-        redis_client.incr(rate_limit_key)
+        # Increment counter atomically to prevent race condition where multiple
+        # requests see count < limit and all increment (INCR must be atomic)
+        pipe = redis_client.pipeline()
+        pipe.incr(rate_limit_key)
+        pipe.execute()
+
         remaining = requests_limit - (count + 1)
         limit = requests_limit
 
