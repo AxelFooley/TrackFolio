@@ -19,6 +19,7 @@ from app.api import (
     crypto_router,
     blockchain_router
 )
+from app.utils.rate_limiter import rate_limit_middleware
 
 # Configure logging
 logging.basicConfig(
@@ -75,6 +76,9 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json"
 )
+
+# Rate limiting middleware (before CORS to ensure headers are applied)
+app.middleware("http")(rate_limit_middleware)
 
 # CORS middleware
 app.add_middleware(
@@ -186,6 +190,12 @@ async def startup_event():
 async def shutdown_event():
     """Run on application shutdown."""
     logger.info("Shutting down Portfolio Tracker API")
+    # Clean up Redis connection
+    try:
+        from app.services.redis_client import close_redis_client
+        close_redis_client()
+    except Exception as e:
+        logger.warning(f"Error during Redis cleanup: {e}")
 
 
 if __name__ == "__main__":

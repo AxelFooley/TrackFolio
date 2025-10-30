@@ -30,10 +30,6 @@ class Settings(BaseSettings):
     # Timezone
     timezone: str = "Europe/Rome"
 
-    # Rate limiting
-    rate_limit_requests: int = 100  # requests per minute
-    rate_limit_window: int = 60  # seconds
-
     # Celery
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/0"
@@ -152,6 +148,57 @@ class Settings(BaseSettings):
         5,
         env="PORTFOLIO_AGGREGATOR_TOP_MOVERS",
         description="Number of top gainers and losers to return"
+    )
+
+    # Rate limiting key prefix (prevents collisions in shared Redis)
+    rate_limit_key_prefix: str = Field(
+        "rate_limit",
+        env="RATE_LIMIT_KEY_PREFIX",
+        description="Redis key prefix for rate limiting (prevents key collisions)"
+    )
+
+    # Rate limiting for unified endpoints
+    # These endpoints aggregate data from traditional and crypto portfolios.
+    # Limits are based on computational cost:
+    # - unified-overview: Simple aggregation with minimal computation (100/min)
+    # - unified-movers: Straightforward sorting, no complex queries (100/min)
+    # - unified-holdings: Complex queries with multiple joins and sorting (50/min)
+    # - unified-performance: Complex historical calculations (50/min)
+    # - unified-summary: Complex aggregation with multiple calculations (50/min)
+    rate_limit_unified_overview: PositiveInt = Field(
+        100,
+        env="RATE_LIMIT_UNIFIED_OVERVIEW",
+        description="Rate limit for /unified-overview endpoint (requests per minute)"
+    )
+    rate_limit_unified_holdings: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_HOLDINGS",
+        description="Rate limit for /unified-holdings endpoint (requests per minute)"
+    )
+    rate_limit_unified_performance: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_PERFORMANCE",
+        description="Rate limit for /unified-performance endpoint (requests per minute)"
+    )
+    rate_limit_unified_summary: PositiveInt = Field(
+        50,
+        env="RATE_LIMIT_UNIFIED_SUMMARY",
+        description="Rate limit for /unified-summary endpoint (requests per minute)"
+    )
+    rate_limit_unified_movers: PositiveInt = Field(
+        100,
+        env="RATE_LIMIT_UNIFIED_MOVERS",
+        description="Rate limit for /unified-movers endpoint (requests per minute)"
+    )
+    rate_limit_window_seconds: PositiveInt = Field(
+        60,
+        env="RATE_LIMIT_WINDOW_SECONDS",
+        description="Time window for rate limiting in seconds"
+    )
+    rate_limit_enabled: bool = Field(
+        True,
+        env="RATE_LIMIT_ENABLED",
+        description="Enable or disable rate limiting globally"
     )
 
 
