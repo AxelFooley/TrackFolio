@@ -253,12 +253,19 @@ class TestEmptyPortfolioScenarios:
         mock_db = AsyncMock(spec=AsyncSession)
         aggregator = PortfolioAggregator(mock_db)
 
+        # Mock the count methods to return 0
+        aggregator._get_traditional_holdings_count = AsyncMock(return_value=0)
+        aggregator._get_crypto_holdings_count = AsyncMock(return_value=0)
+
+        # Mock the holdings methods to return empty lists
         aggregator._get_traditional_holdings = AsyncMock(return_value=[])
         aggregator._get_crypto_holdings = AsyncMock(return_value=[])
 
-        result = await aggregator.get_unified_holdings()
+        # get_unified_holdings returns tuple (holdings_list, total_count)
+        holdings, total = await aggregator.get_unified_holdings()
 
-        assert result == []
+        assert holdings == []
+        assert total == 0
 
     @pytest.mark.asyncio
     async def test_get_unified_overview_empty_portfolios(self):
