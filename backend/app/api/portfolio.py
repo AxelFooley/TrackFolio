@@ -18,6 +18,7 @@ from app.schemas.unified import (
 from app.services.portfolio_aggregator import PortfolioAggregator
 from app.config import settings
 from app.utils.rate_limiter import rate_limit
+from app.utils.time_utils import parse_time_range
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -57,46 +58,6 @@ def calculate_today_change(
         today_change_percent = None
 
     return today_change, today_change_percent
-
-
-def parse_time_range(range_str: str) -> tuple[Optional[date], Optional[date]]:
-    """
-    Convert time range string to start_date and end_date.
-
-    Args:
-        range_str: Time range string (1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL)
-
-    Returns:
-        Tuple of (start_date, end_date). Returns (None, None) for ALL.
-
-    Raises:
-        HTTPException: If range_str is invalid
-    """
-    today = date.today()
-    end_date = today
-
-    range_mapping = {
-        "1D": timedelta(days=1),
-        "1W": timedelta(days=7),
-        "1M": timedelta(days=30),
-        "3M": timedelta(days=90),
-        "6M": timedelta(days=180),
-        "1Y": timedelta(days=365),
-    }
-
-    if range_str == "ALL":
-        return None, None
-    elif range_str == "YTD":
-        start_date = date(today.year, 1, 1)
-        return start_date, end_date
-    elif range_str in range_mapping:
-        start_date = today - range_mapping[range_str]
-        return start_date, end_date
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid range parameter. Must be one of: 1D, 1W, 1M, 3M, 6M, 1Y, YTD, ALL. Got: {range_str}"
-        )
 
 
 @router.get("/overview", response_model=PortfolioOverview)
