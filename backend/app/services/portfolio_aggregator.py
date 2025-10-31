@@ -12,7 +12,7 @@ Key responsibilities:
 - Calculate top gainers/losers across all holdings
 - Handle currency conversions (crypto USD to EUR)
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import List, Dict, Optional, Any
 import logging
@@ -34,6 +34,7 @@ from app.models import (
 )
 from app.services.crypto_calculations import CryptoCalculationService
 from app.services.price_fetcher import PriceFetcher
+from app.services.fx_rate_service import get_fx_service
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -74,8 +75,10 @@ class PortfolioAggregator:
         self.db = db
         self.price_fetcher = PriceFetcher()
         self.crypto_calc = CryptoCalculationService(db)
+        self.fx_service = get_fx_service()
         self._redis_client = None
         self._redis_initialized = False
+        # Note: _fx_rates_cache has been removed - Redis caching is handled by FXRateService
 
     @property
     def redis_client(self):
@@ -163,16 +166,25 @@ class PortfolioAggregator:
 
         return prices_by_ticker
 
-    async def get_unified_holdings(self) -> List[Dict[str, Any]]:
+    async def get_unified_holdings(
+        self,
+        skip: int = 0,
+        limit: int = 100
+    ) -> tuple[List[Dict[str, Any]], int]:
         """
-        Get unified list of all holdings (traditional and crypto).
+        Get paginated unified list of all holdings (traditional and crypto).
 
-        Returns traditional positions augmented with current price data,
-        plus all crypto holdings from all active crypto portfolios,
-        each formatted with consistent schema.
+        Implements efficient database-level pagination using OFFSET/LIMIT queries
+        instead of loading all holdings into memory. This prevents memory issues
+        when a user has 10,000+ holdings but only requests 10.
+
+        Args:
+            skip: Number of holdings to skip (pagination offset)
+            limit: Maximum number of holdings to return (1-1000)
 
         Returns:
-            List of holdings with standardized fields:
+            Tuple of (paginated_holdings_list, total_count)
+            where paginated_holdings_list contains standardized fields:
             - id: unique identifier
             - type: "STOCK", "ETF", or "CRYPTO"
             - ticker: symbol
@@ -181,17 +193,39 @@ class PortfolioAggregator:
             - portfolio_id: null for traditional, uuid for crypto
             - portfolio_name: "Main Portfolio" or crypto portfolio name
         """
-        holdings = []
+        # Get counts from both sources
+        trad_count = await self._get_traditional_holdings_count()
+        crypto_count = await self._get_crypto_holdings_count()
+        total_count = trad_count + crypto_count
 
-        # Get traditional holdings
-        traditional_holdings = await self._get_traditional_holdings()
-        holdings.extend(traditional_holdings)
+        # Determine which holdings to fetch based on skip/limit
+        # This avoids loading all holdings into memory
+        traditional_holdings = []
+        crypto_holdings = []
 
-        # Get crypto holdings from all portfolios
-        crypto_holdings = await self._get_crypto_holdings()
-        holdings.extend(crypto_holdings)
+        if skip < trad_count:
+            # User is still within traditional holdings range
+            trad_skip = skip
+            trad_limit = min(limit, trad_count - skip)
+            traditional_holdings = await self._get_traditional_holdings(
+                skip=trad_skip,
+                limit=trad_limit
+            )
 
-        return holdings
+        if skip + limit > trad_count:
+            # User requested holdings that extend into crypto range
+            # Calculate how many crypto holdings we need
+            crypto_skip = max(0, skip - trad_count)
+            crypto_limit = limit - len(traditional_holdings)
+            crypto_holdings = await self._get_crypto_holdings(
+                skip=crypto_skip,
+                limit=crypto_limit
+            )
+
+        # Combine the results
+        holdings = traditional_holdings + crypto_holdings
+
+        return holdings, total_count
 
     async def get_unified_overview(self) -> Dict[str, Any]:
         """
@@ -239,6 +273,7 @@ class PortfolioAggregator:
         - portfolio_snapshots (traditional)
         - crypto_portfolio_snapshots (per crypto portfolio)
 
+        Converts all crypto portfolio values to EUR before aggregation.
         Returns data for the last N days, aggregating across all portfolios.
 
         Args:
@@ -247,9 +282,9 @@ class PortfolioAggregator:
         Returns:
             List of daily performance points with:
             - date
-            - value: combined total
-            - crypto_value: crypto total
-            - traditional_value: traditional total
+            - value: combined total (in EUR)
+            - crypto_value: crypto total (in EUR)
+            - traditional_value: traditional total (in EUR)
         """
         cutoff_date = date.today() - timedelta(days=days)
 
@@ -290,8 +325,13 @@ class PortfolioAggregator:
                 }
             # Use helper function to get the correct value field
             crypto_value = get_snapshot_value_by_currency(snapshot, snapshot.base_currency)
+
+            # Convert to EUR if needed
+            portfolio_currency = snapshot.base_currency
+            crypto_value_eur = await self._convert_to_eur(crypto_value, portfolio_currency)
+
             # Sum crypto values for this date (multiple portfolios)
-            performance_by_date[snapshot.snapshot_date]["crypto_value"] += crypto_value
+            performance_by_date[snapshot.snapshot_date]["crypto_value"] += crypto_value_eur
 
         # Sort by date and build response
         result = []
@@ -420,14 +460,14 @@ class PortfolioAggregator:
 
         # Get all components in parallel where possible
         overview = await self.get_unified_overview()
-        all_holdings = await self.get_unified_holdings()
+        all_holdings, holdings_count = await self.get_unified_holdings(limit=holdings_limit)
         movers = await self.get_unified_movers(
             top_n=settings.portfolio_aggregator_top_movers
         )
         performance = await self.get_unified_performance(days=performance_days)
 
-        # Paginate holdings
-        paginated_holdings = all_holdings[:holdings_limit]
+        # Holdings are already paginated by get_unified_holdings
+        paginated_holdings = all_holdings
 
         # Build performance summary
         perf_summary = {
@@ -439,7 +479,7 @@ class PortfolioAggregator:
         return {
             "overview": overview,
             "holdings": paginated_holdings,
-            "holdings_total": len(all_holdings),
+            "holdings_total": holdings_count,
             "movers": movers,
             "performance_summary": perf_summary
         }
@@ -509,6 +549,13 @@ class PortfolioAggregator:
         )
         today_change_pct = self._safe_percentage(today_change, yesterday_value)
 
+        # Compile FX rates from both traditional and crypto sources
+        fx_rates = {}
+        if trad_overview.get("fx_rates"):
+            fx_rates.update(trad_overview["fx_rates"])
+        if crypto_overview.get("fx_rates"):
+            fx_rates.update(crypto_overview["fx_rates"])
+
         return {
             "total_value": total_value,
             "traditional_value": trad_overview["current_value"],
@@ -523,7 +570,9 @@ class PortfolioAggregator:
             "today_change": today_change,
             "today_change_pct": today_change_pct,
             # Currency is always EUR for unified overview - crypto values use base_currency per portfolio
-            "currency": "EUR"
+            "currency": "EUR",
+            # Include FX rates used for transparency and debugging
+            "fx_rates": fx_rates if fx_rates else None
         }
 
     async def _get_traditional_holdings(self) -> List[Dict[str, Any]]:
@@ -578,6 +627,9 @@ class PortfolioAggregator:
     async def _get_crypto_holdings(self) -> List[Dict[str, Any]]:
         """
         Get all crypto holdings from all portfolios formatted for unified response.
+
+        Note: Holdings are returned in their original portfolio currency for clarity.
+        The aggregated overview values are all normalized to EUR.
 
         Wrapped in error handling to ensure crypto calculation failures don't prevent
         returning partial results (e.g., if one portfolio calculation fails, others
@@ -682,13 +734,47 @@ class PortfolioAggregator:
             "today_gain_loss": today_gain_loss
         }
 
+    async def _convert_to_eur(
+        self,
+        amount: Decimal,
+        from_currency: str
+    ) -> Decimal:
+        """
+        Convert amount from source currency to EUR.
+
+        Args:
+            amount: Amount to convert
+            from_currency: Source currency code
+
+        Returns:
+            Amount converted to EUR
+        """
+        if from_currency == "EUR":
+            return amount
+
+        try:
+            rate = await self.fx_service.get_current_rate(from_currency, "EUR", use_fallback=True)
+            converted = amount * rate
+            logger.debug(f"Converted {amount} {from_currency} to EUR: {converted} (rate: {rate})")
+            return converted
+        except Exception as e:
+            logger.error(f"Currency conversion failed for {from_currency} to EUR: {e}")
+            # Use fallback with safe default
+            logger.warning(f"Using fallback conversion for {from_currency} to EUR")
+            return amount
+
     async def _get_crypto_overview(self) -> Dict[str, Any]:
         """
         Get aggregated crypto overview from all portfolios.
 
+        Converts all crypto portfolio values to EUR before aggregation to ensure
+        proper handling of mixed-currency portfolios.
+
         Wrapped in error handling to ensure crypto calculation failures don't prevent
         returning partial results (e.g., if one portfolio calculation fails, others
         are still included).
+
+        Returns dict including fx_rates used for transparency and debugging.
         """
         portfolio_result = await self.db.execute(
             select(CryptoPortfolio).where(CryptoPortfolio.is_active)
@@ -698,13 +784,29 @@ class PortfolioAggregator:
         total_value = Decimal("0")
         total_cost_basis = Decimal("0")
         today_change = Decimal("0")
+        fx_rates_used = {}  # Track FX rates for transparency
 
         for portfolio in portfolios:
             try:
                 metrics = await self.crypto_calc.calculate_portfolio_metrics(portfolio.id)
                 if metrics:
-                    total_value += metrics.total_value or Decimal("0")
-                    total_cost_basis += metrics.total_cost_basis
+                    # Get values in the portfolio's base currency
+                    portfolio_currency = portfolio.base_currency.value if hasattr(portfolio.base_currency, 'value') else str(portfolio.base_currency)
+                    portfolio_value = metrics.total_value or Decimal("0")
+                    portfolio_cost = metrics.total_cost_basis
+
+                    # Convert to EUR if needed and track rate
+                    if portfolio_currency != "EUR":
+                        rate = await self.fx_service.get_current_rate(portfolio_currency, "EUR", use_fallback=True)
+                        fx_rates_used[f"{portfolio_currency}/EUR"] = float(rate)
+                        value_eur = portfolio_value * rate
+                        cost_eur = portfolio_cost * rate
+                    else:
+                        value_eur = portfolio_value
+                        cost_eur = portfolio_cost
+
+                    total_value += value_eur
+                    total_cost_basis += cost_eur
                     # Note: crypto today change would require intraday snapshots
                     # For now, we estimate from EOD snapshots
             except Exception as e:
@@ -718,7 +820,8 @@ class PortfolioAggregator:
             "total_value": total_value,
             "total_cost_basis": total_cost_basis,
             "total_profit": total_profit,
-            "today_change": today_change
+            "today_change": today_change,
+            "fx_rates": fx_rates_used if fx_rates_used else None
         }
 
     async def _get_crypto_movers(self) -> Dict[str, List[Dict[str, Any]]]:
